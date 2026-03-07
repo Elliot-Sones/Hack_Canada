@@ -81,6 +81,13 @@ export async function getParcelOverlays(parcelId) {
 
 // ─── Assistant ───
 
+export async function parseModel(text, currentParams = null) {
+    return apiFetch(`${API_BASE}/assistant/parse-model`, {
+        method: 'POST',
+        body: JSON.stringify({ text, current_params: currentParams }),
+    });
+}
+
 export async function chatWithAssistant({ messages, parcelContext = null }) {
     const data = await apiFetch(`${API_BASE}/assistant/chat`, {
         method: 'POST',

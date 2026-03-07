@@ -12,7 +12,8 @@ from app.data.ontario_policy import (
     RECENT_LEGISLATION,
     TORONTO_ZONING_KEY_RULES,
 )
-from app.schemas.assistant import AssistantChatRequest, AssistantChatResponse, ProposedAction
+from app.data.toronto_zoning import ZONE_STANDARDS
+from app.schemas.assistant import AssistantChatRequest, AssistantChatResponse, ModelParseRequest, ModelParseResponse, ProposedAction
 
 router = APIRouter()
 
@@ -82,6 +83,50 @@ def _parse_response(raw: str) -> tuple[str, ProposedAction | None]:
         action = None
 
     return message, action
+
+
+@router.post("/assistant/parse-model", response_model=ModelParseResponse, status_code=status.HTTP_200_OK)
+async def parse_model_description(body: ModelParseRequest) -> ModelParseResponse:
+    """Parse a natural-language building description into 3D model parameters."""
+    if not settings.AI_API_KEY:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="AI assistant is not configured on the server",
+        )
+
+    provider = get_ai_provider()
+    current = body.current_params or {}
+
+    prompt = f"""Extract building parameters from this description. Return a JSON object with exactly these fields:
+- storeys (integer): total above-grade floors
+- podium_storeys (integer): ground-level base floors (0 if no podium, midrise, or townhouse)
+- height_m (float): total height in metres; use podium_storeys * 4.5 + (storeys - podium_storeys) * 3.5
+- setback_m (float): tower setback from podium edge in metres (3.0 default for tower_on_podium, 0 otherwise)
+- typology (string): one of tower_on_podium | midrise | townhouse | mixed_use_midrise
+- footprint_coverage (float 0-1): 0.45 for tower, 0.60 for midrise/mixed, 0.55 for townhouse
+
+Current parameters (baseline for unspecified values):
+{json.dumps(current)}
+
+Description: "{body.text}"
+
+Return only valid JSON, no explanation."""
+
+    try:
+        raw = await provider.generate(prompt=prompt, max_tokens=300)
+        content = raw.content.strip()
+        # Strip markdown code fences if present
+        if content.startswith("```"):
+            content = content.split("```")[1]
+            if content.startswith("json"):
+                content = content[4:]
+        data = json.loads(content.strip())
+        return ModelParseResponse(**data)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Model parsing failed: {exc}",
+        ) from exc
 
 
 @router.post("/assistant/chat", response_model=AssistantChatResponse, status_code=status.HTTP_200_OK)

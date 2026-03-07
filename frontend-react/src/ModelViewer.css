@@ -1,0 +1,110 @@
+/* ── 3D Model Viewer (inline — replaces map, panels stay on top) ─────────── */
+
+.model-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 5;          /* above map (0), below all panels (10+) */
+  background: #111;
+}
+
+.model-canvas-area {
+  overflow: hidden;
+}
+
+.model-close-btn {
+  position: absolute;
+  top: 12px;
+  z-index: 20;
+  background: rgba(26, 26, 26, 0.85);
+  border: 1px solid #3a3a3a;
+  color: #aaa;
+  font-size: 16px;
+  cursor: pointer;
+  padding: 4px 9px;
+  line-height: 1;
+  border-radius: 6px;
+  transition: color 0.15s, background 0.15s;
+}
+
+.model-close-btn:hover {
+  color: #fff;
+  background: #2a2a2a;
+}
+
+.model-canvas {
+  flex: 1;
+  width: 100% !important;
+}
+
+.model-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  background: #1a1a1a;
+  border-top: 1px solid #2a2a2a;
+  flex-shrink: 0;
+}
+
+.model-ctrl-btn {
+  background: #2a2a2a;
+  border: 1px solid #3a3a3a;
+  color: #ccc;
+  font-size: 12px;
+  padding: 5px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.model-ctrl-btn:hover {
+  background: #333;
+  color: #fff;
+}
+
+.model-info {
+  font-size: 12px;
+  color: #888;
+  margin-left: auto;
+}
+
+.model-empty-hint {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 6;
+  background: rgba(26, 26, 26, 0.9);
+  color: #c8a55c;
+  font-size: 13px;
+  padding: 10px 20px;
+  border-radius: 8px;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+/* ── Map "Model" button ──────────────────────────────────────────────────── */
+
+.map-model-btn {
+  position: fixed;
+  right: 16px;
+  z-index: 11;
+  background: #1a1a1a;
+  color: #c8a55c;
+  border: 1px solid #c8a55c55;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 7px 14px;
+  border-radius: 8px;
+  cursor: pointer;
+  letter-spacing: 0.04em;
+  transition: background 0.15s, border-color 0.15s;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+}
+
+
+.map-model-btn:hover {
+  background: #c8a55c;
+  color: #111;
+  border-color: #c8a55c;
+}

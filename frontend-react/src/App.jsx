@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useCallback, useEffect, useMemo, lazy, Suspense } from 'react';
 import { useAuth0 } from '@auth0/auth0-react';
 import MapView from './components/MapView.jsx';
 import SearchBar from './components/SearchBar.jsx';
@@ -11,8 +11,10 @@ import { searchParcels } from './api.js';
 import { buildParcelState, isResolvedParcel } from './lib/parcelState.js';
 import './landing.css';
 
+const ModelViewer = lazy(() => import('./components/ModelViewer.jsx'));
+
 export default function App() {
-  const { isLoading, isAuthenticated, loginWithRedirect } = useAuth0();
+  const { isLoading, isAuthenticated, loginWithRedirect, user } = useAuth0();
 
   const [currentPage, setCurrentPage] = useState('landing');
   const [selectedParcel, setSelectedParcel] = useState(null);
@@ -20,6 +22,31 @@ export default function App() {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [activeNav, setActiveNav] = useState('overview');
   const [savedParcels, setSavedParcels] = useState([]);
+  const [showHistory, setShowHistory] = useState(false);
+  const [isChatExpanded, setIsChatExpanded] = useState(false);
+  const [modelParams, setModelParams] = useState(null);
+  const [isModelOpen, setIsModelOpen] = useState(false);
+
+  const historyKey = useMemo(
+    () => (user?.sub ? `arterial_history_${user.sub}` : null),
+    [user?.sub]
+  );
+
+  const [searchHistory, setSearchHistory] = useState(() => {
+    // Will be properly loaded once user is available
+    return [];
+  });
+
+  // Load history from localStorage once user is available
+  useEffect(() => {
+    if (!historyKey) return;
+    try {
+      const stored = localStorage.getItem(historyKey);
+      if (stored) setSearchHistory(JSON.parse(stored));
+    } catch {
+      // ignore corrupt data
+    }
+  }, [historyKey]);
 
   // Store pending address to process after authentication
   const [pendingAddress, setPendingAddress] = useState(null);
@@ -28,7 +55,7 @@ export default function App() {
 
   const handleLocationSelected = useCallback(async (location) => {
     if (mapRef.current) {
-      mapRef.current.flyTo(location.lng, location.lat, 16);
+      mapRef.current.flyTo(location.lng, location.lat, 18);
       mapRef.current.setMarker(location.lng, location.lat);
       mapRef.current.setProposedMassing(null, null);
     }
@@ -38,12 +65,29 @@ export default function App() {
     setSelectedParcel(selected);
     setIsPanelOpen(true);
 
+    // Save to search history
+    if (historyKey) {
+      const entry = {
+        address: location.shortAddress || location.address,
+        fullAddress: location.address,
+        lng: location.lng,
+        lat: location.lat,
+        timestamp: Date.now(),
+      };
+      setSearchHistory((prev) => {
+        const filtered = prev.filter((h) => h.address !== entry.address);
+        const updated = [entry, ...filtered].slice(0, 50);
+        localStorage.setItem(historyKey, JSON.stringify(updated));
+        return updated;
+      });
+    }
+
     if (mapRef.current && isResolvedParcel(selected) && selected.geom) {
       mapRef.current.setParcel(selected.geom);
     } else if (mapRef.current) {
       mapRef.current.setParcel(null);
     }
-  }, []);
+  }, [historyKey]);
 
   const handlePanelClose = useCallback(() => {
     setIsPanelOpen(false);
@@ -65,6 +109,19 @@ export default function App() {
       return [...prev, parcel];
     });
   }, []);
+
+  const handleHistoryItemClick = useCallback(
+    (item) => {
+      setShowHistory(false);
+      handleLocationSelected({
+        lng: item.lng,
+        lat: item.lat,
+        address: item.fullAddress,
+        shortAddress: item.address,
+      });
+    },
+    [handleLocationSelected]
+  );
 
   const handleLandingNavigate = useCallback(
     async (address) => {
@@ -148,11 +205,22 @@ export default function App() {
     );
     document.body.classList.toggle('panel-open', isDashboard && isPanelOpen);
 
+    // Update persistent map padding so "center" = center of visible gap
+    if (isDashboard && mapRef.current?.getMap()) {
+      const left = isSidebarCollapsed ? 52 : 160;
+      const right = isPanelOpen ? 380 : 0;
+      const bottom = isChatExpanded ? 328 : 48;
+      mapRef.current.getMap().easeTo({
+        padding: { left, right, top: 0, bottom },
+        duration: 300,
+      });
+    }
+
     return () => {
       document.body.classList.remove('sidebar-collapsed');
       document.body.classList.remove('panel-open');
     };
-  }, [currentPage, isSidebarCollapsed, isPanelOpen]);
+  }, [currentPage, isSidebarCollapsed, isPanelOpen, isChatExpanded]);
 
   // Landing — no auth gate
   if (currentPage === 'landing') {
@@ -182,13 +250,26 @@ export default function App() {
       {/* ✨ Dynamic Island User Bubble */}
       <UserBubble />
 
-      <MapView ref={mapRef} />
+      <MapView
+        ref={mapRef}
+        isParcelResolved={selectedParcel !== null}
+        onModelOpen={() => setIsModelOpen(true)}
+        isPanelOpen={isPanelOpen}
+        isSidebarCollapsed={isSidebarCollapsed}
+        isChatExpanded={isChatExpanded}
+        isModelOpen={isModelOpen}
+      />
       <SearchBar onLocationSelected={handleLocationSelected} />
       <Sidebar
         isCollapsed={isSidebarCollapsed}
         onToggleCollapse={handleSidebarToggle}
         activeNav={activeNav}
         onNavClick={handleNavClick}
+        showHistory={showHistory}
+        onHistoryClick={() => setShowHistory(true)}
+        onHistoryBack={() => setShowHistory(false)}
+        historyItems={searchHistory}
+        onHistoryItemClick={handleHistoryItemClick}
       />
       <PolicyPanel
         parcel={selectedParcel}
@@ -216,12 +297,34 @@ export default function App() {
       )}
       <ChatPanel
         parcelContext={selectedParcel}
+        onToggleExpand={setIsChatExpanded}
+        modelParams={modelParams}
+        onModelUpdate={(params) => { setModelParams(params); setIsModelOpen(true); }}
         onPlanComplete={(massing) => {
           if (mapRef.current && selectedParcel?.geom) {
             mapRef.current.setProposedMassing(selectedParcel.geom, massing.height_m || (massing.storeys * 3.5));
           }
+          setModelParams({
+            storeys: massing.storeys || 0,
+            podium_storeys: massing.typology === 'tower_on_podium' ? 4 : 0,
+            height_m: massing.height_m || (massing.storeys * 3.5),
+            setback_m: massing.assumptions_used?.stepback_m ?? 3.0,
+            typology: massing.typology || 'midrise',
+            footprint_coverage: massing.lot_coverage_pct ? massing.lot_coverage_pct / 100 : 0.6,
+          });
         }}
       />
+      <Suspense fallback={null}>
+        <ModelViewer
+          isOpen={isModelOpen}
+          onClose={() => setIsModelOpen(false)}
+          parcelGeoJSON={selectedParcel?.geom}
+          modelParams={modelParams}
+          isPanelOpen={isPanelOpen}
+          isSidebarCollapsed={isSidebarCollapsed}
+          isChatExpanded={isChatExpanded}
+        />
+      </Suspense>
     </>
   );
 }

@@ -21,3 +21,22 @@ class ProposedAction(BaseModel):
 class AssistantChatResponse(BaseModel):
     message: str
     proposed_action: ProposedAction | None = None
+
+
+class ModelParseRequest(BaseModel):
+    text: str
+    current_params: dict | None = None
+    zone_code: str | None = None
+    lot_area_m2: float | None = None
+
+
+class ModelParseResponse(BaseModel):
+    storeys: int
+    podium_storeys: int
+    height_m: float
+    setback_m: float
+    typology: str
+    footprint_coverage: float
+    unit_width: float | None = None
+    tower_shape: str | None = None
+    warnings: list[str] | None = None

@@ -8,11 +8,12 @@ import {
     getPlanDocuments,
     uploadDocument,
     getUpload,
+    parseModel,
 } from '../api.js';
 import { parseChatCommand } from '../lib/chatCommands.js';
 import { formatParcelContext } from '../lib/parcelState.js';
 
-export default function ChatPanel({ parcelContext, onPlanComplete }) {
+export default function ChatPanel({ parcelContext, onPlanComplete, onToggleExpand, modelParams, onModelUpdate }) {
     const [isExpanded, setIsExpanded] = useState(false);
     const [messages, setMessages] = useState([
         {
@@ -41,8 +42,12 @@ export default function ChatPanel({ parcelContext, onPlanComplete }) {
     }, [messages, isTyping, scrollToBottom]);
 
     const handleToggle = useCallback(() => {
-        setIsExpanded((prev) => !prev);
-    }, []);
+        setIsExpanded((prev) => {
+            const next = !prev;
+            onToggleExpand?.(next);
+            return next;
+        });
+    }, [onToggleExpand]);
 
     const pollPlan = useCallback(async (planId) => {
         const maxAttempts = 30;
@@ -121,6 +126,25 @@ export default function ChatPanel({ parcelContext, onPlanComplete }) {
 
         // Keep upload-specific commands as direct shortcuts
         const command = parseChatCommand(text);
+
+        if (command.type === 'model') {
+            try {
+                const params = await parseModel(text, modelParams);
+                onModelUpdate?.(params);
+                setMessages((prev) => [...prev, {
+                    role: 'assistant',
+                    text: `Building updated: ${params.storeys} storeys, ${params.height_m}m tall (${(params.typology || '').replace(/_/g, ' ')}).`,
+                }]);
+            } catch (err) {
+                setMessages((prev) => [...prev, {
+                    role: 'assistant',
+                    text: `Couldn't parse building description: ${err.message}`,
+                }]);
+            } finally {
+                setIsTyping(false);
+            }
+            return;
+        }
 
         if (command.type === 'plan_from_upload') {
             if (!latestAnalyzedUpload?.id) {

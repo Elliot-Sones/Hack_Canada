@@ -1,11 +1,12 @@
 import { useEffect, useRef, useImperativeHandle, forwardRef, useState } from 'react';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
+import '../ModelViewer.css';
 
 const DEFAULT_CENTER = [-79.3832, 43.6532];
 const DEFAULT_ZOOM = 13;
 
-const MapView = forwardRef(function MapView(_props, ref) {
+const MapView = forwardRef(function MapView({ isParcelResolved, onModelOpen, isPanelOpen, isSidebarCollapsed, isChatExpanded, isModelOpen }, ref) {
     const containerRef = useRef(null);
     const mapInstanceRef = useRef(null);
     const markerRef = useRef(null);
@@ -16,6 +17,9 @@ const MapView = forwardRef(function MapView(_props, ref) {
     const pendingMassingRef = useRef(null);
 
     useImperativeHandle(ref, () => ({
+        getMap() {
+            return mapInstanceRef.current;
+        },
         flyTo(lng, lat, zoom = 16) {
             if (!mapInstanceRef.current) return;
             mapInstanceRef.current.flyTo({
@@ -80,13 +84,19 @@ const MapView = forwardRef(function MapView(_props, ref) {
                 // We'll calculate a bounding box or just use feature querying if we want to be exact.
                 // For simplicity, we can let them overlap or rely on z-indexing, but we can also just 
                 // hide all background buildings if that is easiest by setting opacity down or using spatial filter elsewhere.
-            } else {
-                map.flyTo({
-                    pitch: 0,
-                    bearing: 0,
-                    duration: 2000,
-                    essential: true
-                });
+            } else if (geojson === null) {
+                // Only reset camera if explicitly clearing massing after it was shown
+                if (map.getSource('proposed-massing')) {
+                    const data = map.getSource('proposed-massing')._data;
+                    if (data?.features?.length > 0) {
+                        map.flyTo({
+                            pitch: 0,
+                            bearing: 0,
+                            duration: 2000,
+                            essential: true
+                        });
+                    }
+                }
             }
         }
     }));
@@ -119,6 +129,45 @@ const MapView = forwardRef(function MapView(_props, ref) {
 
         map.on('style.load', () => {
             setMapLoaded(true);
+
+            // Hide POI / shop name labels, show house numbers instead
+            const style = map.getStyle();
+            if (style?.layers) {
+                for (const layer of style.layers) {
+                    // Hide POI labels (store names, restaurants, etc.)
+                    if (layer.id.includes('poi') || layer.id.includes('shop') || layer.id.includes('amenity')) {
+                        map.setLayoutProperty(layer.id, 'visibility', 'none');
+                    }
+                    // Show housenumber labels prominently
+                    if (layer.id.includes('housenumber') || layer.id.includes('house-number') || layer.id.includes('address')) {
+                        map.setLayoutProperty(layer.id, 'visibility', 'visible');
+                        map.setPaintProperty(layer.id, 'text-color', '#555555');
+                        map.setPaintProperty(layer.id, 'text-opacity', 1);
+                    }
+                }
+            }
+
+            // Add housenumber layer if none exists in the style
+            if (map.getSource('openmaptiles') && !style?.layers?.some(l => l.id.includes('housenumber'))) {
+                map.addLayer({
+                    id: 'housenumber-labels',
+                    type: 'symbol',
+                    source: 'openmaptiles',
+                    'source-layer': 'housenumber',
+                    minzoom: 16,
+                    layout: {
+                        'text-field': '{housenumber}',
+                        'text-size': 11,
+                        'text-anchor': 'center',
+                        'text-allow-overlap': false,
+                    },
+                    paint: {
+                        'text-color': '#444444',
+                        'text-halo-color': '#ffffff',
+                        'text-halo-width': 1.5,
+                    }
+                });
+            }
 
             // Add OSM 3D buildings Layer First (Background Context)
             map.addLayer({
@@ -190,7 +239,25 @@ const MapView = forwardRef(function MapView(_props, ref) {
         };
     }, []);
 
-    return <div id="map" ref={containerRef} style={{ width: '100%', height: '100%', minHeight: '400px' }} />;
+    return (
+        <>
+            <div id="map" ref={containerRef} style={{ width: '100%', height: '100%', minHeight: '400px' }} />
+            {isParcelResolved && !isModelOpen && (
+                <button
+                    className="map-model-btn"
+                    onClick={onModelOpen}
+                    title="Open 3D Model"
+                    style={{
+                        right: `${(isPanelOpen ? 380 : 0) + 16}px`,
+                        bottom: `${(isChatExpanded ? 328 : 48) + 16}px`,
+                        transition: 'right 0.3s ease, bottom 0.3s ease',
+                    }}
+                >
+                    ⬡ Model
+                </button>
+            )}
+        </>
+    );
 });
 
 export default MapView;

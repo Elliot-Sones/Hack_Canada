@@ -1,6 +1,7 @@
 const PLAN_FROM_UPLOAD_RE = /^(generate|create|build)\s+(?:a\s+)?plan\s+from\s+upload\s*$/i;
 const RESPONSE_FROM_UPLOAD_RE = /^(generate|create|build)\s+(?:a\s+)?response\s+from\s+upload\s*$/i;
 const PLAN_RE = /^(generate|create|build)\s+(?:a\s+)?plan\s+(?:for\s+)?(.+)$/i;
+export const MODEL_RE = /^(build|model|show|make|create)\s+(me\s+)?(?:a\s+)?(.+)$/i;
 
 export function parseChatCommand(input) {
   const text = input.trim();
@@ -13,6 +14,14 @@ export function parseChatCommand(input) {
     return {
       type: 'plan',
       query: (planMatch[2] || text).trim(),
+    };
+  }
+
+  const modelMatch = text.match(MODEL_RE);
+  if (modelMatch) {
+    return {
+      type: 'model',
+      query: text,
     };
   }
 
