@@ -103,7 +103,10 @@ def geojson_to_wkt(geometry: dict[str, Any]) -> str:
         rings = ", ".join(f"({_coords_to_wkt(ring)})" for ring in coords)
         return f"POLYGON ({rings})"
     if geom_type == "MultiPolygon":
-        polygons = ", ".join(f"(({', '.join(f'({_coords_to_wkt(ring)})' for ring in polygon)}))" for polygon in coords)
+        polygons = ", ".join(
+            "(" + ", ".join(f"({_coords_to_wkt(ring)})" for ring in polygon) + ")"
+            for polygon in coords
+        )
         return f"MULTIPOLYGON ({polygons})"
     raise ValueError(f"Unsupported geometry type: {geom_type}")
 
@@ -527,99 +530,107 @@ def ingest_zoning_geojson(
             summary.processed += 1
 
         db.flush()
-        parcels = db.execute(
-            select(Parcel).where(
-                Parcel.jurisdiction_id == jurisdiction_id,
-                Parcel.source_snapshot_id == parcel_snapshot_id,
-            )
-        ).scalars().all()
 
-        for parcel in parcels:
-            overlap_area = func.ST_Area(func.ST_Transform(func.ST_Intersection(DatasetFeature.geom, parcel.geom), 3857))
-            overlapping = db.execute(
-                select(DatasetFeature, overlap_area.label("overlap_area"))
-                .join(DatasetLayer, DatasetFeature.dataset_layer_id == DatasetLayer.id)
-                .where(
-                    DatasetLayer.id == layer.id,
-                    func.ST_Intersects(DatasetFeature.geom, parcel.geom),
+        # Bulk spatial join: insert all parcel-zone assignments in one query
+        # Uses DISTINCT ON to pick the largest overlap per parcel
+        from sqlalchemy import text
+
+        layer_id_str = str(layer.id)
+        snapshot_id_str = str(snapshot.id)
+        jurisdiction_id_str = str(jurisdiction_id)
+        parcel_snapshot_id_str = str(parcel_snapshot_id)
+
+        # Step A: Bulk insert all overlapping assignments
+        db.execute(text("""
+            INSERT INTO parcel_zoning_assignments
+                (id, parcel_id, dataset_feature_id, source_snapshot_id,
+                 zone_code, overlap_area_m2, assignment_method, is_primary, created_at)
+            SELECT
+                gen_random_uuid(),
+                p.id,
+                df.id,
+                CAST(:snapshot_id AS uuid),
+                df.attributes_json->>'zone_code',
+                ST_Area(ST_Transform(ST_Intersection(df.geom, p.geom), 3857)),
+                'max_overlap',
+                false,
+                now()
+            FROM parcels p
+            JOIN dataset_features df ON df.dataset_layer_id = CAST(:layer_id AS uuid)
+                AND ST_Intersects(df.geom, p.geom)
+            WHERE p.jurisdiction_id = CAST(:jurisdiction_id AS uuid)
+                AND p.source_snapshot_id = CAST(:parcel_snapshot_id AS uuid)
+        """), {
+            "snapshot_id": snapshot_id_str,
+            "layer_id": layer_id_str,
+            "jurisdiction_id": jurisdiction_id_str,
+            "parcel_snapshot_id": parcel_snapshot_id_str,
+        })
+
+        # Step B: Centroid fallback for parcels with no overlap match
+        db.execute(text("""
+            INSERT INTO parcel_zoning_assignments
+                (id, parcel_id, dataset_feature_id, source_snapshot_id,
+                 zone_code, overlap_area_m2, assignment_method, is_primary, created_at)
+            SELECT
+                gen_random_uuid(),
+                p.id,
+                df.id,
+                CAST(:snapshot_id AS uuid),
+                df.attributes_json->>'zone_code',
+                NULL,
+                'centroid_fallback',
+                false,
+                now()
+            FROM parcels p
+            JOIN dataset_features df ON df.dataset_layer_id = CAST(:layer_id AS uuid)
+                AND ST_Contains(df.geom, ST_Centroid(p.geom))
+            WHERE p.jurisdiction_id = CAST(:jurisdiction_id AS uuid)
+                AND p.source_snapshot_id = CAST(:parcel_snapshot_id AS uuid)
+                AND NOT EXISTS (
+                    SELECT 1 FROM parcel_zoning_assignments pza
+                    WHERE pza.parcel_id = p.id
+                        AND pza.source_snapshot_id = CAST(:snapshot_id AS uuid)
                 )
-                .order_by(
-                    func.ST_Area(
-                        func.ST_Transform(func.ST_Intersection(DatasetFeature.geom, parcel.geom), 3857)
-                    ).desc()
-                )
-            ).all()
+        """), {
+            "snapshot_id": snapshot_id_str,
+            "layer_id": layer_id_str,
+            "jurisdiction_id": jurisdiction_id_str,
+            "parcel_snapshot_id": parcel_snapshot_id_str,
+        })
 
-            candidates: list[ZoningAssignmentCandidate] = []
-            assignments: list[ParcelZoningAssignment] = []
+        # Step C: Mark primary assignment (largest overlap per parcel)
+        db.execute(text("""
+            UPDATE parcel_zoning_assignments pza
+            SET is_primary = true
+            FROM (
+                SELECT DISTINCT ON (parcel_id) id
+                FROM parcel_zoning_assignments
+                WHERE source_snapshot_id = CAST(:snapshot_id AS uuid)
+                ORDER BY parcel_id,
+                    overlap_area_m2 DESC NULLS LAST,
+                    created_at
+            ) best
+            WHERE pza.id = best.id
+        """), {"snapshot_id": snapshot_id_str})
 
-            for dataset_feature, overlap in overlapping:
-                zone_code = str(dataset_feature.attributes_json.get("zone_code"))
-                candidates.append(
-                    ZoningAssignmentCandidate(
-                        dataset_feature_id=dataset_feature.id,
-                        zone_code=zone_code,
-                        assignment_method="max_overlap",
-                        overlap_area_m2=float(overlap) if overlap is not None else None,
-                    )
-                )
-                assignments.append(
-                    ParcelZoningAssignment(
-                        parcel_id=parcel.id,
-                        dataset_feature_id=dataset_feature.id,
-                        source_snapshot_id=snapshot.id,
-                        zone_code=zone_code,
-                        overlap_area_m2=float(overlap) if overlap is not None else None,
-                        assignment_method="max_overlap",
-                        is_primary=False,
-                    )
-                )
+        # Step D: Update parcel.zone_code from primary assignment
+        db.execute(text("""
+            UPDATE parcels p
+            SET zone_code = pza.zone_code
+            FROM parcel_zoning_assignments pza
+            WHERE pza.parcel_id = p.id
+                AND pza.source_snapshot_id = CAST(:snapshot_id AS uuid)
+                AND pza.is_primary = true
+        """), {"snapshot_id": snapshot_id_str})
 
-            if not candidates:
-                centroid = func.ST_Centroid(parcel.geom)
-                fallback_rows = db.execute(
-                    select(DatasetFeature)
-                    .join(DatasetLayer, DatasetFeature.dataset_layer_id == DatasetLayer.id)
-                    .where(
-                        DatasetLayer.id == layer.id,
-                        func.ST_Contains(DatasetFeature.geom, centroid),
-                    )
-                ).scalars().all()
-                for dataset_feature in fallback_rows:
-                    zone_code = str(dataset_feature.attributes_json.get("zone_code"))
-                    candidates.append(
-                        ZoningAssignmentCandidate(
-                            dataset_feature_id=dataset_feature.id,
-                            zone_code=zone_code,
-                            assignment_method="centroid_fallback",
-                            overlap_area_m2=None,
-                        )
-                    )
-                    assignments.append(
-                        ParcelZoningAssignment(
-                            parcel_id=parcel.id,
-                            dataset_feature_id=dataset_feature.id,
-                            source_snapshot_id=snapshot.id,
-                            zone_code=zone_code,
-                            overlap_area_m2=None,
-                            assignment_method="centroid_fallback",
-                            is_primary=False,
-                        )
-                    )
-
-            primary = choose_primary_zoning_assignment(candidates)
-            if primary is None:
-                summary.failed += 1
-                summary.issues.append({"parcel_id": str(parcel.id), "reason": "zoning_assignment_ambiguous_or_missing"})
-                for assignment in assignments:
-                    db.add(assignment)
-                continue
-
-            for assignment in assignments:
-                if assignment.dataset_feature_id == primary.dataset_feature_id:
-                    assignment.is_primary = True
-                    parcel.zone_code = assignment.zone_code
-                db.add(assignment)
+        # Count results for summary
+        result = db.execute(text("""
+            SELECT
+                (SELECT count(*) FROM parcel_zoning_assignments WHERE source_snapshot_id = CAST(:snapshot_id AS uuid)) as total,
+                (SELECT count(DISTINCT parcel_id) FROM parcel_zoning_assignments WHERE source_snapshot_id = CAST(:snapshot_id AS uuid) AND is_primary = true) as assigned
+        """), {"snapshot_id": snapshot_id_str}).one()
+        summary.processed += result.assigned
 
         layer.published_at = _now()
         publish_snapshot(db, snapshot, validation_summary=summary.as_json())
@@ -809,13 +820,42 @@ def ingest_development_applications(
                 if matched:
                     parcel_id = matched.id
 
+            # Parse decision from STATUS or explicit DECISION field
+            decision = record.get("DECISION")
+            if not decision:
+                status_val = record.get("STATUS") or ""
+                status_lower = status_val.lower()
+                if "approved" in status_lower:
+                    decision = "Approved"
+                elif "refused" in status_lower or "denied" in status_lower:
+                    decision = "Refused"
+                elif "withdrawn" in status_lower:
+                    decision = "Withdrawn"
+
+            # Parse dates
+            submitted_at = None
+            decision_date = None
+            date_submitted_raw = record.get("DATE_SUBMITTED") or record.get("SUBMITTED_DATE")
+            decision_date_raw = record.get("DECISION_DATE")
+            if date_submitted_raw:
+                try:
+                    submitted_at = datetime.strptime(str(date_submitted_raw).strip()[:10], "%Y-%m-%d")
+                except (ValueError, TypeError):
+                    pass
+            if decision_date_raw:
+                try:
+                    decision_date = datetime.strptime(str(decision_date_raw).strip()[:10], "%Y-%m-%d")
+                except (ValueError, TypeError):
+                    pass
+
             metadata = {
                 k: v
                 for k, v in record.items()
                 if k not in {
                     "APPLICATION#", "STREET_NUM", "STREET_NAME", "STREET_TYPE",
                     "STREET_DIRECTION", "X", "Y", "STATUS", "APPLICATION_TYPE",
-                    "WARD_NUMBER", "WARD_NAME", "DESCRIPTION",
+                    "WARD_NUMBER", "WARD_NAME", "DESCRIPTION", "DECISION",
+                    "DATE_SUBMITTED", "SUBMITTED_DATE", "DECISION_DATE",
                 }
             }
 
@@ -829,6 +869,9 @@ def ingest_development_applications(
                 geom=point_geom,
                 app_type=record.get("APPLICATION_TYPE") or "unknown",
                 status=record.get("STATUS") or "unknown",
+                decision=decision,
+                submitted_at=submitted_at,
+                decision_date=decision_date,
                 ward=ward,
                 proposed_units=proposed_units,
                 proposed_height_m=float(proposed_storeys * 3) if proposed_storeys else None,

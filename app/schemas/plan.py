@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -57,6 +58,31 @@ class ReviewSubmitRequest(BaseModel):
 class ReviewActionRequest(BaseModel):
     """Request to approve or reject a document."""
     notes: str | None = None
+
+
+class PlanReadinessIssueResponse(BaseModel):
+    code: str
+    severity: Literal["blocking", "review", "warning"]
+    message: str
+    action: str
+
+
+class PlanReadinessDocumentResponse(BaseModel):
+    doc_type: str
+    title: str
+    status: str
+    review_status: str
+    ready: bool
+    has_placeholders: bool
+
+
+class PlanSubmissionReadinessResponse(BaseModel):
+    ready_for_submission: bool
+    blocking_issues: list[PlanReadinessIssueResponse] = Field(default_factory=list)
+    review_issues: list[PlanReadinessIssueResponse] = Field(default_factory=list)
+    warnings: list[PlanReadinessIssueResponse] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
+    documents: list[PlanReadinessDocumentResponse] = Field(default_factory=list)
 
 
 class PlanResponse(BaseModel):

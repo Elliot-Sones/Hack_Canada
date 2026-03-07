@@ -17,82 +17,182 @@ from app.models.tenant import ScenarioRun
 
 
 class GeometryDefaults(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="allow")
 
-    residential_floor_to_floor_m: float = Field(gt=0)
-    retail_floor_to_floor_m: float = Field(gt=0)
-    efficiency_pct: float = Field(gt=0, le=1)
-    max_lot_coverage_pct: float = Field(gt=0, le=1)
-    parking_spaces_per_unit: float = Field(ge=0)
-    amenity_area_per_unit_m2: float = Field(ge=0)
-    accessible_unit_pct: float = Field(ge=0, le=1)
+    # Support both naming conventions
+    storeys: int | None = None
+    height_m: float | None = None
+    lot_coverage_pct: float | None = None
+    fsi_target: float | None = None
+    efficiency_factor: float | None = None
+    efficiency_pct: float | None = None
+    floor_to_floor_heights_m: dict[str, float] | None = None
+    residential_floor_to_floor_m: float | None = None
+    retail_floor_to_floor_m: float | None = None
+    max_lot_coverage_pct: float | None = None
+    parking_spaces_per_unit: float | None = None
+    amenity_area_per_unit_m2: float | None = None
+    accessible_unit_pct: float | None = None
+
+    def get_efficiency(self) -> float:
+        return self.efficiency_pct or self.efficiency_factor or 0.82
+
+    def get_lot_coverage(self) -> float:
+        if self.max_lot_coverage_pct is not None:
+            return self.max_lot_coverage_pct if self.max_lot_coverage_pct <= 1.0 else self.max_lot_coverage_pct / 100.0
+        if self.lot_coverage_pct is not None:
+            return self.lot_coverage_pct if self.lot_coverage_pct <= 1.0 else self.lot_coverage_pct / 100.0
+        return 0.45
+
+    def get_residential_ftf(self) -> float:
+        if self.residential_floor_to_floor_m:
+            return self.residential_floor_to_floor_m
+        if self.floor_to_floor_heights_m:
+            return self.floor_to_floor_heights_m.get("residential", 3.0)
+        return 3.0
+
+    def get_retail_ftf(self) -> float:
+        if self.retail_floor_to_floor_m:
+            return self.retail_floor_to_floor_m
+        if self.floor_to_floor_heights_m:
+            return self.floor_to_floor_heights_m.get("retail", 4.5)
+        return 4.5
+
+    def get_parking_per_unit(self) -> float:
+        return self.parking_spaces_per_unit or 0.35
+
+    def get_amenity_per_unit(self) -> float:
+        return self.amenity_area_per_unit_m2 or 2.0
+
+    def get_accessible_pct(self) -> float:
+        return self.accessible_unit_pct or 0.15
 
 
 class LayoutDefaults(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="allow")
 
     unit_mix_targets: dict[str, float]
     objective: str = "max_revenue"
 
 
 class PolicyGeometryDefaults(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="allow")
 
-    max_fsi: float = Field(gt=0)
-    angular_plane_ratio: float = Field(gt=0)
-    stepback_m: float = Field(ge=0)
+    max_fsi: float | None = None
+    fsi_target: float | None = None
+    angular_plane_ratio: float = Field(gt=0, default=1.0)
+    stepback_m: float = Field(ge=0, default=0.0)
+    front_setback_m: float | None = None
+    side_setback_m: float | None = None
+    rear_setback_m: float | None = None
+
+    def get_max_fsi(self) -> float:
+        return self.max_fsi or self.fsi_target or 8.0
 
 
 class MassingTemplateParameters(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="allow")
 
     typology: str
-    target_height_m: float = Field(gt=0)
-    target_storeys: int = Field(gt=0)
+    target_height_m: float | None = None
+    target_storeys: int | None = None
     geometry_defaults: GeometryDefaults
     layout_defaults: LayoutDefaults
     policy_geometry_defaults: PolicyGeometryDefaults
 
+    def get_target_height(self) -> float:
+        return self.target_height_m or self.geometry_defaults.height_m or 84.0
+
+    def get_target_storeys(self) -> int:
+        return self.target_storeys or self.geometry_defaults.storeys or 28
+
 
 class RevenueAssumptions(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="allow")
 
-    rate_per_m2_by_unit_type: dict[str, float]
+    rate_per_m2_by_unit_type: dict[str, float] | None = None
+    rent_psf_monthly_by_unit_type: dict[str, float] | None = None
     annualization_factor: float = Field(gt=0, default=1.0)
+    other_income_pct: float | None = None
+
+    def get_rate_per_m2(self) -> dict[str, float]:
+        if self.rate_per_m2_by_unit_type:
+            return self.rate_per_m2_by_unit_type
+        if self.rent_psf_monthly_by_unit_type:
+            # Convert PSF monthly to per-m2 annual: psf * 12 * 10.764
+            return {k: v * 12 * 10.764 for k, v in self.rent_psf_monthly_by_unit_type.items()}
+        return {"studio": 500.0, "one_bed": 480.0, "two_bed": 450.0, "three_bed": 420.0}
 
 
 class CostAssumptions(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="allow")
 
     hard_cost_per_m2: float = Field(gt=0)
     soft_cost_pct: float = Field(ge=0, le=1)
-    opex_pct_of_revenue: float = Field(ge=0, le=1)
-    contingency_pct: float = Field(ge=0, le=1)
+    opex_pct_of_revenue: float | None = None
+    contingency_pct: float | None = None
+    parking_cost_per_space: float | None = None
+
+    def get_opex_pct(self) -> float:
+        return self.opex_pct_of_revenue or 0.28
+
+    def get_contingency_pct(self) -> float:
+        return self.contingency_pct or 0.05
 
 
 class ValuationAssumptions(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="allow")
 
     cap_rate: float | None = Field(default=None, gt=0, lt=1)
 
 
 class FinancingAssumptions(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="allow")
 
     loan_to_cost_pct: float = Field(ge=0, le=1)
     interest_rate: float = Field(ge=0, lt=1)
 
 
 class FinancialAssumptionPayload(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="allow")
 
     tenure: str
     revenue_assumptions: RevenueAssumptions
     cost_assumptions: CostAssumptions
-    vacancy_rate: float = Field(ge=0, le=1)
-    absorption_months: int = Field(ge=0)
+    vacancy_rate: float | None = None
+    absorption_months: int | None = None
+    vacancy_and_absorption: dict | None = None
+    contingency: dict | None = None
     valuation: ValuationAssumptions
     financing: FinancingAssumptions
+
+    def get_vacancy_rate(self) -> float:
+        if self.vacancy_rate is not None:
+            return self.vacancy_rate
+        if self.vacancy_and_absorption:
+            return self.vacancy_and_absorption.get("vacancy_rate", 0.035)
+        return 0.035
+
+    def get_absorption_months(self) -> int:
+        if self.absorption_months is not None:
+            return self.absorption_months
+        if self.vacancy_and_absorption:
+            return self.vacancy_and_absorption.get("absorption_months", 12)
+        return 12
+
+    def get_opex_ratio(self) -> float:
+        if self.cost_assumptions.opex_pct_of_revenue is not None:
+            return self.cost_assumptions.opex_pct_of_revenue
+        if self.vacancy_and_absorption:
+            return self.vacancy_and_absorption.get("opex_ratio", 0.28)
+        return 0.28
+
+    def get_contingency_pct(self) -> float:
+        if self.cost_assumptions.contingency_pct is not None:
+            return self.cost_assumptions.contingency_pct
+        if self.contingency:
+            return self.contingency.get("construction_contingency_pct", 0.05)
+        return 0.05
 
 
 @dataclass(slots=True)
@@ -495,16 +595,16 @@ def compute_massing_summary(
     if not lot_area or lot_area <= 0:
         raise ValueError("Parcel must have a positive lot area")
 
-    buildable_area = lot_area * payload.geometry_defaults.max_lot_coverage_pct
-    floor_height = payload.geometry_defaults.residential_floor_to_floor_m
+    buildable_area = lot_area * payload.geometry_defaults.get_lot_coverage()
+    floor_height = payload.geometry_defaults.get_residential_ftf()
     height_m = overrides.get("height_m") if overrides else None
     storeys = overrides.get("storeys") if overrides else None
-    resolved_storeys = int(storeys or payload.target_storeys)
+    resolved_storeys = int(storeys or payload.get_target_storeys())
     resolved_height = float(height_m or resolved_storeys * floor_height)
     raw_gfa = buildable_area * resolved_storeys
-    max_policy_gfa = lot_area * payload.policy_geometry_defaults.max_fsi
+    max_policy_gfa = lot_area * payload.policy_geometry_defaults.get_max_fsi()
     total_gfa = min(raw_gfa, max_policy_gfa)
-    total_gla = total_gfa * payload.geometry_defaults.efficiency_pct
+    total_gla = total_gfa * payload.geometry_defaults.get_efficiency()
 
     summary = {
         "typology": payload.typology,
@@ -515,7 +615,7 @@ def compute_massing_summary(
         "estimated_gfa_m2": round(total_gfa, 2),
         "estimated_gla_m2": round(total_gla, 2),
         "estimated_fsi": round(total_gfa / lot_area, 3),
-        "lot_coverage_pct": round(payload.geometry_defaults.max_lot_coverage_pct, 3),
+        "lot_coverage_pct": round(payload.geometry_defaults.get_lot_coverage(), 3),
         "assumptions_used": payload.model_dump(),
     }
     compliance = {
@@ -523,7 +623,7 @@ def compute_massing_summary(
         "warnings": [
             "Policy resolution is not fully implemented; policy geometry defaults were used for this thin slice."
         ],
-        "max_fsi_applied": payload.policy_geometry_defaults.max_fsi,
+        "max_fsi_applied": payload.policy_geometry_defaults.get_max_fsi(),
         "stepback_m": payload.policy_geometry_defaults.stepback_m,
         "angular_plane_ratio": payload.policy_geometry_defaults.angular_plane_ratio,
     }
@@ -577,10 +677,10 @@ def compute_layout_result(
             }
         )
 
-    accessible_required = math.ceil(total_units * template_payload.geometry_defaults.accessible_unit_pct)
+    accessible_required = math.ceil(total_units * template_payload.geometry_defaults.get_accessible_pct())
     accessible_supplied = sum(a["count"] for a in allocations if a["is_accessible"])
-    parking_required = round(total_units * template_payload.geometry_defaults.parking_spaces_per_unit, 2)
-    amenity_required = round(total_units * template_payload.geometry_defaults.amenity_area_per_unit_m2, 2)
+    parking_required = round(total_units * template_payload.geometry_defaults.get_parking_per_unit(), 2)
+    amenity_required = round(total_units * template_payload.geometry_defaults.get_amenity_per_unit(), 2)
 
     return {
         "objective": layout_defaults.objective,
@@ -607,14 +707,13 @@ def compute_financial_output(
     assumptions: FinancialAssumptionPayload,
 ) -> dict[str, Any]:
     unit_types_by_name = {unit_type.name: unit_type for unit_type in unit_types}
+    rates = assumptions.revenue_assumptions.get_rate_per_m2()
     total_revenue = 0.0
     for allocation in layout_result["allocations"]:
         unit_type = unit_types_by_name[allocation["name"]]
-        rate = assumptions.revenue_assumptions.rate_per_m2_by_unit_type.get(allocation["name"])
+        rate = rates.get(allocation["name"])
         if rate is None:
-            rate = sum(assumptions.revenue_assumptions.rate_per_m2_by_unit_type.values()) / max(
-                len(assumptions.revenue_assumptions.rate_per_m2_by_unit_type), 1
-            )
+            rate = sum(rates.values()) / max(len(rates), 1)
         total_revenue += (
             allocation["count"]
             * unit_type.typical_area_m2
@@ -622,13 +721,13 @@ def compute_financial_output(
             * assumptions.revenue_assumptions.annualization_factor
         )
 
-    total_revenue *= (1 - assumptions.vacancy_rate)
+    total_revenue *= (1 - assumptions.get_vacancy_rate())
     estimated_gfa = float(massing_summary.get("estimated_gfa_m2") or 0.0)
     hard_cost = estimated_gfa * assumptions.cost_assumptions.hard_cost_per_m2
     soft_cost = hard_cost * assumptions.cost_assumptions.soft_cost_pct
-    contingency = (hard_cost + soft_cost) * assumptions.cost_assumptions.contingency_pct
+    contingency = (hard_cost + soft_cost) * assumptions.get_contingency_pct()
     total_cost = hard_cost + soft_cost + contingency
-    opex = total_revenue * assumptions.cost_assumptions.opex_pct_of_revenue
+    opex = total_revenue * assumptions.get_opex_ratio()
     noi = total_revenue - opex
     if assumptions.tenure == "rental" and assumptions.valuation.cap_rate:
         valuation = noi / assumptions.valuation.cap_rate

@@ -14,10 +14,11 @@ from app.schemas.plan import (
     PlanGenerateRequest,
     PlanListResponse,
     PlanResponse,
+    PlanSubmissionReadinessResponse,
     ReviewActionRequest,
-    ReviewSubmitRequest,
     SubmissionDocumentResponse,
 )
+from app.services.submission.readiness import evaluate_submission_readiness
 from app.services.submission.review import (
     approve_document,
     reject_document,
@@ -55,6 +56,7 @@ async def generate_plan(
     db.add(plan)
     await db.flush()
     await db.refresh(plan)
+    await db.commit()
 
     run_plan_generation.delay(str(plan.id), body.query, body.auto_run)
 
@@ -98,6 +100,26 @@ async def get_plan(
     return plan
 
 
+@router.get("/plans/{plan_id}/readiness", response_model=PlanSubmissionReadinessResponse)
+async def get_plan_readiness(
+    plan_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db_session),
+    user: dict = Depends(get_current_user),
+):
+    result = await db.execute(
+        select(DevelopmentPlan)
+        .options(selectinload(DevelopmentPlan.documents))
+        .where(
+            DevelopmentPlan.id == plan_id,
+            DevelopmentPlan.organization_id == user["organization_id"],
+        )
+    )
+    plan = result.scalar_one_or_none()
+    if not plan:
+        raise HTTPException(status_code=404, detail="Plan not found")
+    return evaluate_submission_readiness(plan, plan.documents)
+
+
 @router.post("/plans/{plan_id}/clarify", response_model=PlanResponse)
 async def clarify_plan(
     plan_id: uuid.UUID,
@@ -127,6 +149,7 @@ async def clarify_plan(
     plan.status = "parsed"
     await db.flush()
     await db.refresh(plan)
+    await db.commit()
 
     # Resume pipeline
     run_plan_generation.delay(str(plan.id), plan.original_query, True)

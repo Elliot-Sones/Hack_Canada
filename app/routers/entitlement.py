@@ -1,14 +1,11 @@
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from app.config import settings
 from app.dependencies import get_current_user, get_db_session, get_optional_idempotency_key
-from app.models.entitlement import EntitlementResult, PrecedentMatch, PrecedentSearch
-from app.models.tenant import ScenarioRun
+from app.models.entitlement import EntitlementResult, PrecedentSearch
 from app.schemas.common import JobAccepted
 from app.schemas.entitlement import (
     EntitlementRunRequest,
@@ -16,6 +13,12 @@ from app.schemas.entitlement import (
     PrecedentSearchRequest,
     PrecedentSearchResponse,
 )
+from app.services.access_control import (
+    get_entitlement_result_for_org,
+    get_precedent_search_for_org,
+    get_scenario_for_org,
+)
+from app.services.idempotency import cache_response, get_cached_response
 from app.tasks.entitlement import run_entitlement_check, run_precedent_search
 
 router = APIRouter()
@@ -31,7 +34,11 @@ async def create_entitlement_run(
     user: dict = Depends(get_current_user),
     idempotency_key: str | None = Depends(get_optional_idempotency_key),
 ):
-    scenario = await db.get(ScenarioRun, scenario_id)
+    cached_response = await get_cached_response(idempotency_key, JobAccepted)
+    if cached_response is not None:
+        return cached_response
+
+    scenario = await get_scenario_for_org(db, scenario_id, user["organization_id"])
     result = EntitlementResult(
         scenario_run_id=scenario_id,
         snapshot_manifest_id=scenario.snapshot_manifest_id if scenario else None,
@@ -41,26 +48,26 @@ async def create_entitlement_run(
     db.add(result)
     await db.flush()
     await db.refresh(result)
+    await db.commit()
 
     run_entitlement_check.delay(str(result.id), str(scenario_id), body.parameters)
 
-    return JobAccepted(
+    response = JobAccepted(
         job_id=result.id,
         status="accepted",
         location=f"{settings.API_V1_PREFIX}/entitlement-runs/{result.id}",
     )
+    await cache_response(idempotency_key, response)
+    return response
 
 
 @router.get("/entitlement-runs/{run_id}", response_model=EntitlementRunResponse)
 async def get_entitlement_run(
     run_id: uuid.UUID,
     db: AsyncSession = Depends(get_db_session),
+    user: dict = Depends(get_current_user),
 ):
-    result = await db.execute(select(EntitlementResult).where(EntitlementResult.id == run_id))
-    run = result.scalar_one_or_none()
-    if not run:
-        raise HTTPException(status_code=404, detail="Entitlement run not found")
-    return run
+    return await get_entitlement_result_for_org(db, run_id, user["organization_id"])
 
 
 @router.post(
@@ -73,7 +80,11 @@ async def create_precedent_search(
     user: dict = Depends(get_current_user),
     idempotency_key: str | None = Depends(get_optional_idempotency_key),
 ):
-    scenario = await db.get(ScenarioRun, scenario_id)
+    cached_response = await get_cached_response(idempotency_key, JobAccepted)
+    if cached_response is not None:
+        return cached_response
+
+    scenario = await get_scenario_for_org(db, scenario_id, user["organization_id"])
     search = PrecedentSearch(
         scenario_run_id=scenario_id,
         snapshot_manifest_id=scenario.snapshot_manifest_id if scenario else None,
@@ -83,27 +94,23 @@ async def create_precedent_search(
     db.add(search)
     await db.flush()
     await db.refresh(search)
+    await db.commit()
 
     run_precedent_search.delay(str(search.id), str(scenario_id), body.model_dump())
 
-    return JobAccepted(
+    response = JobAccepted(
         job_id=search.id,
         status="accepted",
         location=f"{settings.API_V1_PREFIX}/precedent-searches/{search.id}",
     )
+    await cache_response(idempotency_key, response)
+    return response
 
 
 @router.get("/precedent-searches/{search_id}", response_model=PrecedentSearchResponse)
 async def get_precedent_search(
     search_id: uuid.UUID,
     db: AsyncSession = Depends(get_db_session),
+    user: dict = Depends(get_current_user),
 ):
-    result = await db.execute(
-        select(PrecedentSearch)
-        .options(selectinload(PrecedentSearch.matches).selectinload(PrecedentMatch.application))
-        .where(PrecedentSearch.id == search_id)
-    )
-    search = result.scalar_one_or_none()
-    if not search:
-        raise HTTPException(status_code=404, detail="Precedent search not found")
-    return search
+    return await get_precedent_search_for_org(db, search_id, user["organization_id"], load_matches=True)

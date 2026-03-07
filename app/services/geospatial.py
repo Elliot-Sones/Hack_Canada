@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import inspect
+import re
 import uuid
 from dataclasses import dataclass
 from typing import Sequence
 
 from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
 from app.models.geospatial import Parcel
 from app.models.ingestion import SourceSnapshot
@@ -23,6 +25,13 @@ ZONING_ASSIGNMENT_PRIORITY = {
     "centroid_fallback": 1,
     "manual_review": 0,
 }
+
+LOOKUP_LOCATION_SUFFIX_RE = re.compile(r",\s*(Toronto|ON|Ontario|Canada|CA).*$", re.IGNORECASE)
+LOOKUP_DIRECTIONAL_SUFFIX_RE = re.compile(r"\s+[NSEW]$", re.IGNORECASE)
+LOOKUP_STREET_BASE_RE = re.compile(
+    r"^(\d+[\w-]*)\s+(.+?)(?:\s+(?:St|Ave|Rd|Dr|Blvd|Cres|Ct|Pl|Way|Lane|Terr?)\.?)?(?:\s+[NSEW])?$",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -43,6 +52,13 @@ class ZoningAssignmentCandidate:
 
 def normalize_address_text(value: str) -> str:
     return " ".join(value.split()).strip()
+
+
+def clean_parcel_lookup_address(value: str) -> str:
+    normalized = normalize_address_text(value)
+    if not normalized:
+        return ""
+    return LOOKUP_LOCATION_SUFFIX_RE.sub("", normalized).strip()
 
 
 def choose_canonical_address(candidates: Sequence[AddressCandidate]) -> AddressCandidate | None:
@@ -145,6 +161,85 @@ def build_parcel_search_statement(
     return query.offset((params.page - 1) * params.page_size).limit(params.page_size)
 
 
+def build_active_snapshot_id_statement(
+    snapshot_type: str,
+    jurisdiction_id: uuid.UUID | None = None,
+) -> Select:
+    query = select(SourceSnapshot.id).where(
+        SourceSnapshot.snapshot_type == snapshot_type,
+        SourceSnapshot.is_active.is_(True),
+    )
+    if jurisdiction_id is not None:
+        query = query.where(SourceSnapshot.jurisdiction_id == jurisdiction_id)
+    return query.order_by(SourceSnapshot.created_at.desc())
+
+
+def list_active_snapshot_ids_sync(
+    db: Session,
+    snapshot_type: str,
+    jurisdiction_id: uuid.UUID | None = None,
+) -> list[uuid.UUID]:
+    if not hasattr(db, "execute"):
+        return []
+
+    result = db.execute(build_active_snapshot_id_statement(snapshot_type, jurisdiction_id))
+    return list(result.scalars().all())
+
+
+def _build_active_parcel_resolution_statement(
+    active_snapshot_ids: Sequence[uuid.UUID],
+    jurisdiction_id: uuid.UUID | None = None,
+) -> Select:
+    query = select(Parcel).where(Parcel.source_snapshot_id.in_(list(active_snapshot_ids)))
+    if jurisdiction_id is not None:
+        query = query.where(Parcel.jurisdiction_id == jurisdiction_id)
+    return query.limit(1)
+
+
+def resolve_active_parcel_by_address_sync(
+    db: Session,
+    address: str,
+    *,
+    jurisdiction_id: uuid.UUID | None = None,
+    active_snapshot_ids: Sequence[uuid.UUID] | None = None,
+) -> Parcel | None:
+    clean_address = clean_parcel_lookup_address(address)
+    if not clean_address:
+        return None
+
+    snapshot_ids = list(active_snapshot_ids) if active_snapshot_ids is not None else list_active_snapshot_ids_sync(
+        db,
+        "parcel_base",
+        jurisdiction_id=jurisdiction_id,
+    )
+    if not snapshot_ids:
+        return None
+
+    base_query = _build_active_parcel_resolution_statement(snapshot_ids, jurisdiction_id=jurisdiction_id)
+    statements = [
+        base_query.where(func.lower(Parcel.address) == clean_address.lower()),
+        base_query.where(Parcel.address.ilike(f"{clean_address}%")),
+        base_query.where(Parcel.address.ilike(f"%{clean_address}%")),
+    ]
+
+    normalized = LOOKUP_DIRECTIONAL_SUFFIX_RE.sub("", clean_address).strip()
+    if normalized and normalized != clean_address:
+        statements.append(base_query.where(Parcel.address.ilike(f"%{normalized}%")))
+
+    street_match = LOOKUP_STREET_BASE_RE.match(clean_address)
+    if street_match:
+        number, street_base = street_match.groups()
+        statements.append(base_query.where(Parcel.address.ilike(f"{number} {street_base}%")))
+
+    for statement in statements:
+        result = db.execute(statement)
+        parcel = result.scalar_one_or_none()
+        if parcel is not None:
+            return parcel
+
+    return None
+
+
 async def list_active_snapshot_ids(
     db: AsyncSession,
     snapshot_type: str,
@@ -153,14 +248,7 @@ async def list_active_snapshot_ids(
     if not hasattr(db, "execute"):
         return []
 
-    query = select(SourceSnapshot.id).where(
-        SourceSnapshot.snapshot_type == snapshot_type,
-        SourceSnapshot.is_active.is_(True),
-    )
-    if jurisdiction_id is not None:
-        query = query.where(SourceSnapshot.jurisdiction_id == jurisdiction_id)
-
-    result = await db.execute(query.order_by(SourceSnapshot.created_at.desc()))
+    result = await db.execute(build_active_snapshot_id_statement(snapshot_type, jurisdiction_id))
     return list(result.scalars().all())
 
 

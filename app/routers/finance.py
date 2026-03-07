@@ -4,7 +4,6 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from app.config import settings
 from app.dependencies import get_current_user, get_db_session, get_optional_idempotency_key
@@ -15,6 +14,8 @@ from app.schemas.finance import (
     FinancialRunRequest,
     FinancialRunResponse,
 )
+from app.services.access_control import get_financial_run_for_org, get_scenario_for_org
+from app.services.idempotency import cache_response, get_cached_response
 from app.services.thin_slice_runtime import ensure_reference_data, validate_financial_assumptions
 from app.tasks.finance import run_financial_analysis
 
@@ -67,6 +68,11 @@ async def create_financial_run(
     user: dict = Depends(get_current_user),
     idempotency_key: str | None = Depends(get_optional_idempotency_key),
 ):
+    cached_response = await get_cached_response(idempotency_key, JobAccepted)
+    if cached_response is not None:
+        return cached_response
+
+    await get_scenario_for_org(db, scenario_id, user["organization_id"])
     if body.assumption_set_id is not None:
         result = await db.execute(
             select(FinancialAssumptionSet).where(FinancialAssumptionSet.id == body.assumption_set_id)
@@ -89,27 +95,26 @@ async def create_financial_run(
     db.add(run)
     await db.flush()
     await db.refresh(run)
+    await db.commit()
 
     run_financial_analysis.delay(str(run.id), str(scenario_id), body.parameters)
 
-    return JobAccepted(
+    response = JobAccepted(
         job_id=run.id,
         status="accepted",
         location=f"{settings.API_V1_PREFIX}/financial-runs/{run.id}",
     )
+    await cache_response(idempotency_key, response)
+    return response
 
 
 @router.get("/financial-runs/{run_id}", response_model=FinancialRunResponse)
 async def get_financial_run(
     run_id: uuid.UUID,
     db: AsyncSession = Depends(get_db_session),
+    user: dict = Depends(get_current_user),
 ):
-    result = await db.execute(
-        select(FinancialRun).options(selectinload(FinancialRun.assumption_set)).where(FinancialRun.id == run_id)
-    )
-    run = result.scalar_one_or_none()
-    if not run:
-        raise HTTPException(status_code=404, detail="Financial run not found")
+    run = await get_financial_run_for_org(db, run_id, user["organization_id"], load_assumption_set=True)
     return _serialize_financial_run(run)
 
 

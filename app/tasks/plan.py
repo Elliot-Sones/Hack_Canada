@@ -6,6 +6,7 @@ import structlog
 
 from app.database import get_sync_db
 from app.models.plan import DevelopmentPlan, SubmissionDocument
+from app.services.submission.readiness import evaluate_submission_readiness
 from app.worker import celery_app
 
 logger = structlog.get_logger()
@@ -104,6 +105,18 @@ def _update_plan_status(db, plan, status, step=None, progress_update=None, error
     db.refresh(plan)
 
 
+def _fail_plan(db, plan, step, error):
+    _update_plan_status(
+        db,
+        plan,
+        "failed",
+        step=step,
+        progress_update={step: "failed"},
+        error=error,
+    )
+    return {"plan_id": str(plan.id), "status": "failed", "error": error}
+
+
 def _run_query_parsing(query: str) -> dict:
     """Run the async AI query parser from a sync Celery context."""
     from app.ai.factory import get_ai_provider
@@ -115,7 +128,9 @@ def _run_query_parsing(query: str) -> dict:
 
 def _run_parcel_lookup(db, parsed: dict) -> object | None:
     """Look up a parcel by address from parsed parameters."""
-    from sqlalchemy import select
+    import re
+
+    from sqlalchemy import func, select
 
     from app.models.geospatial import Parcel
 
@@ -124,22 +139,46 @@ def _run_parcel_lookup(db, parsed: dict) -> object | None:
         logger.warning("plan.parcel_lookup.no_address")
         return None
 
-    # Try exact ilike match first
+    # Strip city/province/country suffixes (e.g., ", Toronto", ", ON", ", Canada")
+    clean_address = re.sub(r',\s*(Toronto|ON|Ontario|Canada|CA).*$', '', address.strip(), flags=re.IGNORECASE).strip()
+
+    # Try exact match first, then progressively looser
     parcel = db.execute(
-        select(Parcel).where(Parcel.address.ilike(f"%{address}%")).limit(1)
+        select(Parcel).where(func.lower(Parcel.address) == clean_address.lower()).limit(1)
     ).scalar_one_or_none()
+    if parcel is None:
+        # Try with ILIKE but anchor to start of string to avoid "4900" matching "900"
+        parcel = db.execute(
+            select(Parcel).where(Parcel.address.ilike(f"{clean_address}%")).limit(1)
+        ).scalar_one_or_none()
+    if parcel is None:
+        parcel = db.execute(
+            select(Parcel).where(Parcel.address.ilike(f"%{clean_address}%")).limit(1)
+        ).scalar_one_or_none()
 
     if parcel is None:
-        # Try normalized search: strip common suffixes
-        normalized = address.strip().lower()
-        for suffix in [" street", " st", " avenue", " ave", " road", " rd", " drive", " dr", " boulevard", " blvd"]:
-            if normalized.endswith(suffix):
-                base = normalized[: -len(suffix)]
-                parcel = db.execute(
-                    select(Parcel).where(Parcel.address.ilike(f"%{base}%")).limit(1)
-                ).scalar_one_or_none()
-                if parcel:
-                    break
+        # Strip directional suffixes (N, S, E, W) and street type variations
+        normalized = re.sub(r'\s+[NSEW]$', '', clean_address, flags=re.IGNORECASE)
+        if normalized != clean_address:
+            parcel = db.execute(
+                select(Parcel).where(Parcel.address.ilike(f"%{normalized}%")).limit(1)
+            ).scalar_one_or_none()
+
+    if parcel is None:
+        # Extract just number + street name base (e.g., "100 King")
+        match = re.match(
+            r'^(\d+[\w-]*)\s+(.+?)(?:\s+(?:St|Ave|Rd|Dr|Blvd|Cres|Ct|Pl|Way|Lane|Terr?)\.?)?(?:\s+[NSEW])?$',
+            clean_address,
+            re.IGNORECASE,
+        )
+        if match:
+            number = match.group(1)
+            street_base = match.group(2)
+            parcel = db.execute(
+                select(Parcel).where(
+                    Parcel.address.ilike(f"{number} {street_base}%")
+                ).limit(1)
+            ).scalar_one_or_none()
 
     return parcel
 
@@ -180,61 +219,85 @@ def _run_compliance(zoning, massing, layout, overlays=None):
 
 
 def _run_precedent_search(db, parcel, massing_summary):
-    """Search for precedent applications near the parcel."""
+    """Search for real development applications near the parcel."""
     from sqlalchemy import func, select
 
+    from app.models.entitlement import BuildingPermit, DevelopmentApplication
     from app.models.geospatial import Parcel
 
-    # Search for nearby development applications in parcels table
-    # that have different IDs (i.e., other parcels in the area)
+    parcel_geom_subq = (
+        select(func.ST_Transform(Parcel.geom, 2952))
+        .where(Parcel.id == parcel.id)
+        .scalar_subquery()
+    )
+
+    # Subquery: count of building permits per application
+    permit_count_subq = (
+        select(
+            BuildingPermit.development_application_id,
+            func.count().label("permit_count"),
+        )
+        .group_by(BuildingPermit.development_application_id)
+        .subquery()
+    )
+
     try:
-        nearby_parcels = db.execute(
-            select(Parcel)
-            .where(Parcel.id != parcel.id)
-            .where(Parcel.jurisdiction_id == parcel.jurisdiction_id)
+        rows = db.execute(
+            select(
+                DevelopmentApplication,
+                func.ST_Distance(
+                    func.ST_Transform(DevelopmentApplication.geom, 2952),
+                    parcel_geom_subq,
+                ).label("distance_m"),
+                func.coalesce(permit_count_subq.c.permit_count, 0).label("permit_count"),
+            )
+            .outerjoin(
+                permit_count_subq,
+                permit_count_subq.c.development_application_id == DevelopmentApplication.id,
+            )
+            .where(DevelopmentApplication.jurisdiction_id == parcel.jurisdiction_id)
+            .where(DevelopmentApplication.geom.isnot(None))
             .where(
                 func.ST_DWithin(
-                    func.ST_Transform(Parcel.geom, 2952),
-                    func.ST_Transform(
-                        select(Parcel.geom).where(Parcel.id == parcel.id).scalar_subquery(),
-                        2952,
-                    ),
+                    func.ST_Transform(DevelopmentApplication.geom, 2952),
+                    parcel_geom_subq,
                     2000,  # 2km radius
                 )
             )
-            .limit(10)
-        ).scalars().all()
+            .order_by("distance_m")
+            .limit(50)
+        ).all()
     except Exception:
         logger.warning("plan.precedent_search.spatial_query_failed", parcel_id=str(parcel.id))
-        nearby_parcels = []
+        rows = []
 
-    if not nearby_parcels:
+    if not rows:
         return []
 
     from app.services.thin_slice_runtime import build_precedent_match_summary
 
     precedents = []
-    for nearby in nearby_parcels:
+    for app, distance_m, permit_count in rows:
         try:
-            distance = 500.0  # Default estimate if spatial calc fails
             summary = build_precedent_match_summary(
-                app_id=nearby.id,
-                app_number=nearby.pin or "N/A",
-                address=nearby.address,
-                app_type="development",
-                decision=None,
-                proposed_height_m=massing_summary.get("height_m"),
-                proposed_units=None,
-                proposed_fsi=massing_summary.get("estimated_fsi"),
-                distance_m=distance,
+                app_id=app.id,
+                app_number=app.app_number,
+                address=app.address,
+                app_type=app.app_type,
+                decision=app.decision,
+                proposed_height_m=app.proposed_height_m,
+                proposed_units=app.proposed_units,
+                proposed_fsi=app.proposed_fsi,
+                distance_m=distance_m or 2000.0,
+                permit_count=permit_count or 0,
             )
             precedents.append(summary)
         except Exception:
             continue
 
-    # Sort by score descending
+    # Sort by score descending, return top 10
     precedents.sort(key=lambda p: p.get("score", 0), reverse=True)
-    return precedents[:5]
+    return precedents[:10]
 
 
 def _build_context_and_generate_docs(
@@ -248,7 +311,7 @@ def _build_context_and_generate_docs(
     compliance_result,
     precedents,
     parsed,
-):
+) -> list[SubmissionDocument]:
     """Build document context and generate all submission documents."""
     from app.services.compliance_engine import render_compliance_matrix_markdown
     from app.services.submission.context_builder import build_document_context
@@ -282,6 +345,8 @@ def _build_context_and_generate_docs(
         parsed_parameters=parsed,
     )
 
+    generated_documents: list[SubmissionDocument] = []
+
     # Generate documents — try AI generation, fall back to grounded template content
     for doc_spec in SUBMISSION_DOCUMENTS:
         doc_type = doc_spec["doc_type"]
@@ -314,8 +379,10 @@ def _build_context_and_generate_docs(
             content_text=content,
         )
         db.add(doc)
+        generated_documents.append(doc)
 
     db.flush()
+    return generated_documents
 
 
 def _build_grounded_content(doc_spec: dict, context: dict, preamble: str) -> str:
@@ -330,7 +397,7 @@ def _build_grounded_content(doc_spec: dict, context: dict, preamble: str) -> str
     sections = [f"> {preamble}\n\n---\n\n# {title}\n"]
 
     if doc_type == "cover_letter":
-        sections.append(f"**To**: City of Toronto Planning Department\n")
+        sections.append("**To**: City of Toronto Planning Department\n")
         sections.append(f"**Re**: Development Application — {context.get('address', 'N/A')}\n")
         sections.append(f"**Project**: {context.get('project_name', 'N/A')}\n\n")
         sections.append(f"This letter introduces a {context.get('development_type', 'development')} ")
@@ -341,10 +408,10 @@ def _build_grounded_content(doc_spec: dict, context: dict, preamble: str) -> str
         sections.append(f"with a total GFA of {context.get('gross_floor_area_sqm', 'N/A')}.\n")
 
     elif doc_type == "planning_rationale":
-        sections.append(f"## 1. Site Description\n\n")
+        sections.append("## 1. Site Description\n\n")
         sections.append(f"The subject site is located at {context.get('address', 'N/A')}, ")
         sections.append(f"currently zoned {context.get('zoning_code', 'N/A')}.\n\n")
-        sections.append(f"## 2. Policy Framework\n\n")
+        sections.append("## 2. Policy Framework\n\n")
         sections.append(
             "The applicable policy hierarchy is:\n"
             "1. Provincial Planning Statement, 2024 (PPS 2024)\n"
@@ -360,7 +427,7 @@ def _build_grounded_content(doc_spec: dict, context: dict, preamble: str) -> str
 
     elif doc_type == "site_plan_data":
         sections.append(f"**Address**: {context.get('address', 'N/A')}\n\n")
-        sections.append(f"## Site Dimensions\n\n")
+        sections.append("## Site Dimensions\n\n")
         sections.append(f"- Lot Area: {context.get('lot_area_sqm', 'N/A')}\n")
         sections.append(f"- Lot Frontage: {context.get('lot_frontage_m', 'N/A')}\n")
         sections.append(f"- Lot Depth: {context.get('lot_depth_m', 'N/A')}\n\n")
@@ -494,6 +561,7 @@ def run_plan_generation(self, plan_id: str, query: str, auto_run: bool = True):
         else:
             logger.warning("plan.parcel_lookup.not_found", plan_id=plan_id,
                           address=parsed.get("address"))
+            return _fail_plan(db, plan, "parcel_lookup", "Parcel lookup failed: no parcel matched the parsed address")
 
         _update_plan_status(db, plan, "running_pipeline", step="policy_resolution",
                            progress_update={"parcel_lookup": "completed", "policy_resolution": "running"})
@@ -507,6 +575,7 @@ def run_plan_generation(self, plan_id: str, query: str, auto_run: bool = True):
                            zone=zoning.zone_string, category=zoning.standards.category if zoning.standards else None)
             except Exception as e:
                 logger.warning("plan.policy_resolution.failed", plan_id=plan_id, error=str(e))
+                return _fail_plan(db, plan, "policy_resolution", f"Policy resolution failed: {e}")
 
         _update_plan_status(db, plan, "running_pipeline", step="massing_generation",
                            progress_update={"policy_resolution": "completed", "massing_generation": "running"})
@@ -516,11 +585,9 @@ def run_plan_generation(self, plan_id: str, query: str, auto_run: bool = True):
         massing_compliance = None
         if parcel:
             try:
-                from app.services.reference_data import resolve_massing_template_sync
-                from app.services.thin_slice_runtime import MassingTemplateParameters
+                from app.services.thin_slice_runtime import resolve_template
 
-                template = resolve_massing_template_sync(db)
-                template_payload = MassingTemplateParameters.model_validate(template.parameters_json)
+                _template, template_payload = resolve_template(db)
 
                 # Apply user overrides from parsed parameters
                 overrides = {}
@@ -535,6 +602,7 @@ def run_plan_generation(self, plan_id: str, query: str, auto_run: bool = True):
                            storeys=massing_summary.get("storeys"))
             except Exception as e:
                 logger.warning("plan.massing.failed", plan_id=plan_id, error=str(e))
+                return _fail_plan(db, plan, "massing_generation", f"Massing generation failed: {e}")
 
         _update_plan_status(db, plan, "running_pipeline", step="layout_optimization",
                            progress_update={"massing_generation": "completed", "layout_optimization": "running"})
@@ -543,18 +611,17 @@ def run_plan_generation(self, plan_id: str, query: str, auto_run: bool = True):
         layout_result = None
         if massing_summary:
             try:
-                from app.services.reference_data import resolve_massing_template_sync, resolve_unit_types_sync
-                from app.services.thin_slice_runtime import MassingTemplateParameters
+                from app.services.thin_slice_runtime import resolve_template, resolve_unit_types
 
-                template = resolve_massing_template_sync(db)
-                template_payload = MassingTemplateParameters.model_validate(template.parameters_json)
-                unit_types = resolve_unit_types_sync(db, parcel.jurisdiction_id if parcel else None)
+                _template, template_payload = resolve_template(db)
+                unit_types = resolve_unit_types(db, jurisdiction_id=parcel.jurisdiction_id if parcel else None)
 
                 layout_result = _run_layout(massing_summary, template_payload, unit_types)
                 logger.info("plan.layout.completed", plan_id=plan_id,
                            total_units=layout_result.get("total_units"))
             except Exception as e:
                 logger.warning("plan.layout.failed", plan_id=plan_id, error=str(e))
+                return _fail_plan(db, plan, "layout_optimization", f"Layout optimization failed: {e}")
 
         _update_plan_status(db, plan, "running_pipeline", step="financial_analysis",
                            progress_update={"layout_optimization": "completed", "financial_analysis": "running"})
@@ -563,18 +630,13 @@ def run_plan_generation(self, plan_id: str, query: str, auto_run: bool = True):
         financial_output = None
         if layout_result and massing_summary:
             try:
-                from app.services.reference_data import (
-                    resolve_financial_assumption_set_sync,
-                    resolve_unit_types_sync,
-                )
                 from app.services.thin_slice_runtime import (
-                    FinancialAssumptionPayload,
-                    validate_financial_assumptions,
+                    resolve_assumption_set,
+                    resolve_unit_types,
                 )
 
-                unit_types = resolve_unit_types_sync(db, parcel.jurisdiction_id if parcel else None)
-                assumption_set = resolve_financial_assumption_set_sync(db)
-                assumptions = validate_financial_assumptions(assumption_set)
+                unit_types = resolve_unit_types(db, jurisdiction_id=parcel.jurisdiction_id if parcel else None)
+                _assumption_set, assumptions = resolve_assumption_set(db)
 
                 financial_output = _run_financial(layout_result, massing_summary, unit_types, assumptions)
                 logger.info("plan.financial.completed", plan_id=plan_id,
@@ -582,6 +644,7 @@ def run_plan_generation(self, plan_id: str, query: str, auto_run: bool = True):
                            total_cost=financial_output.get("total_cost"))
             except Exception as e:
                 logger.warning("plan.financial.failed", plan_id=plan_id, error=str(e))
+                return _fail_plan(db, plan, "financial_analysis", f"Financial analysis failed: {e}")
 
         _update_plan_status(db, plan, "running_pipeline", step="entitlement_check",
                            progress_update={"financial_analysis": "completed", "entitlement_check": "running"})
@@ -596,6 +659,7 @@ def run_plan_generation(self, plan_id: str, query: str, auto_run: bool = True):
                            variances=len(compliance_result.variances_needed))
             except Exception as e:
                 logger.warning("plan.compliance.failed", plan_id=plan_id, error=str(e))
+                return _fail_plan(db, plan, "entitlement_check", f"Entitlement check failed: {e}")
 
         _update_plan_status(db, plan, "running_pipeline", step="precedent_search",
                            progress_update={"entitlement_check": "completed", "precedent_search": "running"})
@@ -609,12 +673,13 @@ def run_plan_generation(self, plan_id: str, query: str, auto_run: bool = True):
                            count=len(precedents))
             except Exception as e:
                 logger.warning("plan.precedents.failed", plan_id=plan_id, error=str(e))
+                return _fail_plan(db, plan, "precedent_search", f"Precedent search failed: {e}")
 
         _update_plan_status(db, plan, "running_pipeline", step="document_generation",
                            progress_update={"precedent_search": "completed", "document_generation": "running"})
 
         # --- Step 9: Generate Submission Documents ---
-        _build_context_and_generate_docs(
+        generated_documents = _build_context_and_generate_docs(
             db, plan, parcel, zoning,
             massing_summary, layout_result, financial_output,
             compliance_result, precedents, parsed,
@@ -639,6 +704,7 @@ def run_plan_generation(self, plan_id: str, query: str, auto_run: bool = True):
             } if compliance_result else None,
             "precedents_found": len(precedents),
         }
+        plan.summary["submission_readiness"] = evaluate_submission_readiness(plan, generated_documents)
         _update_plan_status(db, plan, "completed")
 
         logger.info("plan.generation.completed", plan_id=plan_id)

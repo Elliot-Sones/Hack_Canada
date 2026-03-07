@@ -1,55 +1,36 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-
-const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
-
-const SYSTEM_PROMPT = `You are an expert land-development due-diligence assistant for the City of Toronto. You help development analysts, planners, and architects understand zoning regulations, building policies, setback requirements, height limits, floor space index (FSI), permitted uses, and development potential.
-
-Your knowledge covers:
-- Toronto Zoning Bylaw 569-2013
-- Ontario Building Code
-- Toronto Official Plan policies
-- Development application processes
-- Entitlements and variance procedures
-- Building envelope constraints (setbacks, angular planes, stepbacks)
-- Unit mix and density requirements
-- Parking and loading requirements
-
-When answering:
-- Be precise and cite bylaw sections when possible
-- Provide specific numeric values (heights in metres, setbacks in metres, FSI ratios)
-- Distinguish between as-of-right permissions and what requires a variance
-- Note when information may have changed due to amendments
-- Keep responses concise but thorough
-
-If a parcel address is provided in the conversation context, tailor your answers to that specific location and its zoning.`;
-
-function formatMessageHtml(text) {
-    return text
-        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-        .replace(/`([^`]+)`/g, '<code style="background:rgba(255,255,255,0.06);padding:1px 4px;border-radius:3px;font-size:0.85em;">$1</code>')
-        .replace(/\n/g, '<br>');
-}
+import {
+    chatWithAssistant,
+    generatePlan,
+    generatePlanFromUpload,
+    generateResponseFromUpload,
+    getPlan,
+    getPlanDocuments,
+    uploadDocument,
+    getUpload,
+} from '../api.js';
+import { parseChatCommand } from '../lib/chatCommands.js';
+import { formatParcelContext } from '../lib/parcelState.js';
 
 export default function ChatPanel({ parcelContext }) {
     const [isExpanded, setIsExpanded] = useState(false);
     const [messages, setMessages] = useState([
         {
             role: 'assistant',
-            text: "Hello! I'm your development due-diligence assistant. Search for a property above or ask me anything about zoning, policies, or development potential.",
+            text: "Hello! I'm your development due-diligence assistant. Search for a property above or ask me anything about zoning, policies, or development potential.\n\nYou can also say \"generate a plan for ...\" to trigger document generation.",
         },
     ]);
     const [inputValue, setInputValue] = useState('');
     const [isTyping, setIsTyping] = useState(false);
-    const [apiKey, setApiKey] = useState(() => localStorage.getItem('gemini_api_key') || '');
+    const [isDragOver, setIsDragOver] = useState(false);
+    const [uploadProgress, setUploadProgress] = useState(null); // { filename, status }
+    const [latestAnalyzedUpload, setLatestAnalyzedUpload] = useState(null);
 
     const conversationHistoryRef = useRef([]);
     const messagesEndRef = useRef(null);
-    const hasPromptedRef = useRef(false);
+    const fileInputRef = useRef(null);
 
-    // Build parcel context string
-    const parcelContextStr = parcelContext
-        ? `Current parcel: ${parcelContext.address}, Zoning: ${parcelContext.zoning}, Lot Area: ${parcelContext.lotArea}m²`
-        : '';
+    const parcelContextStr = formatParcelContext(parcelContext);
 
     const scrollToBottom = useCallback(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -59,109 +40,254 @@ export default function ChatPanel({ parcelContext }) {
         scrollToBottom();
     }, [messages, isTyping, scrollToBottom]);
 
-    const promptForApiKey = useCallback(() => {
-        if (hasPromptedRef.current) return;
-        hasPromptedRef.current = true;
-        const key = prompt('Enter your Gemini API key for AI responses.\nGet one free at: https://aistudio.google.com/apikey');
-        if (key && key.trim()) {
-            const trimmed = key.trim();
-            setApiKey(trimmed);
-            localStorage.setItem('gemini_api_key', trimmed);
-            setMessages((prev) => [
-                ...prev,
-                { role: 'assistant', text: "API key saved! I'm ready to answer your questions about zoning, development potential, and land-use policies." },
-            ]);
-        }
+    const handleToggle = useCallback(() => {
+        setIsExpanded((prev) => !prev);
     }, []);
 
-    const handleToggle = useCallback(() => {
-        setIsExpanded((prev) => {
-            const next = !prev;
-            if (next && !apiKey && !hasPromptedRef.current) {
-                setTimeout(() => promptForApiKey(), 300);
+    const pollPlan = useCallback(async (planId) => {
+        const maxAttempts = 30;
+        for (let i = 0; i < maxAttempts; i++) {
+            await new Promise((r) => setTimeout(r, 3000));
+            try {
+                const plan = await getPlan(planId);
+                if (plan.status === 'completed' || plan.status === 'done') {
+                    const docs = await getPlanDocuments(planId);
+                    const docList = docs.length > 0
+                        ? docs.map((d) => `- ${d.title || d.document_type}`).join('\n')
+                        : 'No documents generated yet.';
+                    setMessages((prev) => [...prev, {
+                        role: 'assistant',
+                        text: `Plan generation complete! Generated documents:\n\n${docList}`,
+                    }]);
+                    return;
+                }
+                if (plan.status === 'failed' || plan.status === 'error') {
+                    setMessages((prev) => [...prev, {
+                        role: 'assistant',
+                        text: `Plan generation failed. ${plan.error_message || 'Please try again.'}`,
+                    }]);
+                    return;
+                }
+                if (plan.status === 'needs_clarification') {
+                    const questions = plan.clarification_questions || [];
+                    setMessages((prev) => [...prev, {
+                        role: 'assistant',
+                        text: `I need some clarification before proceeding:\n\n${questions.map((q, i) => `${i + 1}. ${q}`).join('\n')}`,
+                    }]);
+                    return;
+                }
+            } catch {
+                // Keep polling
             }
-            return next;
-        });
-    }, [apiKey, promptForApiKey]);
-
-    const callGemini = useCallback(async (userMessage) => {
-        const contextMessage = parcelContextStr
-            ? `[Context: ${parcelContextStr}]\n\n${userMessage}`
-            : userMessage;
-
-        const history = conversationHistoryRef.current.slice(-10).map((msg) => ({
-            role: msg.role,
-            parts: msg.parts,
-        }));
-
-        // Override last user message with context
-        if (history.length > 0) {
-            history[history.length - 1] = {
-                role: 'user',
-                parts: [{ text: contextMessage }],
-            };
         }
-
-        const body = {
-            system_instruction: {
-                parts: [{ text: SYSTEM_PROMPT }],
-            },
-            contents: history,
-            generationConfig: {
-                temperature: 0.7,
-                maxOutputTokens: 1024,
-                topP: 0.9,
-            },
-        };
-
-        const res = await fetch(`${GEMINI_API_URL}?key=${apiKey}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body),
-        });
-
-        if (!res.ok) {
-            const errData = await res.json().catch(() => ({}));
-            throw new Error(errData.error?.message || `API returned ${res.status}`);
-        }
-
-        const data = await res.json();
-        return data.candidates?.[0]?.content?.parts?.[0]?.text || 'No response generated.';
-    }, [apiKey, parcelContextStr]);
+        setMessages((prev) => [...prev, {
+            role: 'assistant',
+            text: 'Plan generation is still in progress. Check back shortly.',
+        }]);
+    }, []);
 
     const sendMessage = useCallback(async () => {
         const text = inputValue.trim();
         if (!text) return;
 
+        const nextHistory = [...conversationHistoryRef.current, { role: 'user', text }];
         setInputValue('');
         setMessages((prev) => [...prev, { role: 'user', text }]);
-        conversationHistoryRef.current.push({ role: 'user', parts: [{ text }] });
+        conversationHistoryRef.current = nextHistory;
+        setIsTyping(true);
 
-        if (!apiKey) {
-            setMessages((prev) => [
-                ...prev,
-                { role: 'assistant', text: 'Please provide a Gemini API key to enable AI responses. Click the chat header to set it up.' },
-            ]);
-            promptForApiKey();
+        const command = parseChatCommand(text);
+
+        if (command.type === 'plan_from_upload') {
+            if (!latestAnalyzedUpload?.id) {
+                setMessages((prev) => [...prev, {
+                    role: 'assistant',
+                    text: 'There is no analyzed upload ready yet. Upload a document and wait for analysis to finish before generating a plan from it.',
+                }]);
+                setIsTyping(false);
+                return;
+            }
+
+            try {
+                const result = await generatePlanFromUpload(latestAnalyzedUpload.id);
+                setMessages((prev) => [...prev, {
+                    role: 'assistant',
+                    text: `Plan generation started from ${latestAnalyzedUpload.filename}. I'll let you know when it's ready...`,
+                }]);
+                setIsTyping(false);
+                pollPlan(result.job_id);
+                return;
+            } catch (err) {
+                setMessages((prev) => [...prev, {
+                    role: 'assistant',
+                    text: `Failed to start plan generation from ${latestAnalyzedUpload.filename}: ${err.message}`,
+                }]);
+                setIsTyping(false);
+                return;
+            }
+        }
+
+        if (command.type === 'response_from_upload') {
+            if (!latestAnalyzedUpload?.id) {
+                setMessages((prev) => [...prev, {
+                    role: 'assistant',
+                    text: 'There is no analyzed upload ready yet. Upload a document and wait for analysis to finish before generating a response from it.',
+                }]);
+                setIsTyping(false);
+                return;
+            }
+
+            try {
+                const result = await generateResponseFromUpload(latestAnalyzedUpload.id);
+                const responseLabel = (result.response_type || 'response').replace(/_/g, ' ');
+                setMessages((prev) => [...prev, {
+                    role: 'assistant',
+                    text: `Generated ${responseLabel} from ${latestAnalyzedUpload.filename}:\n\n${result.content}`,
+                }]);
+            } catch (err) {
+                setMessages((prev) => [...prev, {
+                    role: 'assistant',
+                    text: `Failed to generate a response from ${latestAnalyzedUpload.filename}: ${err.message}`,
+                }]);
+            } finally {
+                setIsTyping(false);
+            }
             return;
         }
 
-        setIsTyping(true);
+        if (command.type === 'plan') {
+            try {
+                const result = await generatePlan(command.query);
+                setMessages((prev) => [...prev, {
+                    role: 'assistant',
+                    text: `Plan generation started! I'll let you know when it's ready...`,
+                }]);
+                setIsTyping(false);
+                pollPlan(result.job_id);
+                return;
+            } catch (err) {
+                setMessages((prev) => [...prev, {
+                    role: 'assistant',
+                    text: `Failed to start plan generation: ${err.message}`,
+                }]);
+                setIsTyping(false);
+                return;
+            }
+        }
 
         try {
-            const response = await callGemini(text);
-            setIsTyping(false);
-            setMessages((prev) => [...prev, { role: 'assistant', text: response }]);
-            conversationHistoryRef.current.push({ role: 'model', parts: [{ text: response }] });
+            const response = await chatWithAssistant({
+                messages: nextHistory.slice(-20),
+                parcelContext: parcelContextStr,
+            });
+            const assistantMessage = { role: 'assistant', text: response };
+            setMessages((prev) => [...prev, assistantMessage]);
+            conversationHistoryRef.current = [...nextHistory, assistantMessage];
         } catch (err) {
-            setIsTyping(false);
-            console.error('Gemini API error:', err);
+            console.error('Assistant chat error:', err);
             setMessages((prev) => [
                 ...prev,
-                { role: 'assistant', text: `I encountered an error: ${err.message}. Please check your API key and try again.` },
+                {
+                    role: 'assistant',
+                    text: `Sorry, I couldn't get a response right now. ${err.message}`,
+                },
             ]);
+        } finally {
+            setIsTyping(false);
         }
-    }, [inputValue, apiKey, callGemini, promptForApiKey]);
+    }, [inputValue, latestAnalyzedUpload, parcelContextStr, pollPlan]);
+
+    const pollUpload = useCallback(async (uploadId, filename) => {
+        const maxAttempts = 40;
+        for (let i = 0; i < maxAttempts; i++) {
+            await new Promise((r) => setTimeout(r, 3000));
+            try {
+                const upload = await getUpload(uploadId);
+                if (upload.status === 'analyzed') {
+                    setUploadProgress(null);
+                    const parts = [`Document analyzed: **${filename}**`];
+                    if (upload.doc_category) parts.push(`Category: ${upload.doc_category.replace(/_/g, ' ')}`);
+                    if (upload.page_count) parts.push(`Pages: ${upload.page_count}`);
+                    if (upload.extracted_data && !upload.extracted_data.error && !upload.extracted_data.note) {
+                        const b = upload.extracted_data.building || {};
+                        const items = [];
+                        if (b.storeys) items.push(`${b.storeys} storeys`);
+                        if (b.unit_count) items.push(`${b.unit_count} units`);
+                        if (b.height_m) items.push(`${b.height_m}m height`);
+                        if (items.length) parts.push(`Extracted: ${items.join(', ')}`);
+                    }
+                    if (upload.compliance_findings?.issues?.length) {
+                        parts.push(`Compliance issues found: ${upload.compliance_findings.issues.length}`);
+                    }
+                    parts.push(`\nYou can say "generate plan from upload" or "generate response from upload" to proceed.`);
+                    setMessages((prev) => [...prev, { role: 'assistant', text: parts.join('\n') }]);
+                    setLatestAnalyzedUpload({
+                        id: uploadId,
+                        filename,
+                    });
+                    return;
+                }
+                if (upload.status === 'failed') {
+                    setUploadProgress(null);
+                    setMessages((prev) => [...prev, {
+                        role: 'assistant',
+                        text: `Document analysis failed for ${filename}. ${upload.error_message || 'Please try again.'}`,
+                    }]);
+                    return;
+                }
+                setUploadProgress({ filename, status: upload.status });
+            } catch {
+                // Keep polling
+            }
+        }
+        setUploadProgress(null);
+        setMessages((prev) => [...prev, {
+            role: 'assistant',
+            text: `Document analysis is still in progress for ${filename}. Check back shortly.`,
+        }]);
+    }, []);
+
+    const handleFileUpload = useCallback(async (file) => {
+        if (!file) return;
+        const maxSize = 50 * 1024 * 1024;
+        if (file.size > maxSize) {
+            setMessages((prev) => [...prev, { role: 'assistant', text: 'File exceeds 50 MB limit.' }]);
+            return;
+        }
+        setMessages((prev) => [...prev, { role: 'user', text: `Uploading: ${file.name}` }]);
+        setUploadProgress({ filename: file.name, status: 'uploading' });
+        try {
+            const result = await uploadDocument(file);
+            setUploadProgress({ filename: file.name, status: 'processing' });
+            setMessages((prev) => [...prev, {
+                role: 'assistant',
+                text: `Uploaded ${file.name} — analyzing document...`,
+            }]);
+            pollUpload(result.id, file.name);
+        } catch (err) {
+            setUploadProgress(null);
+            setMessages((prev) => [...prev, {
+                role: 'assistant',
+                text: `Upload failed: ${err.message}`,
+            }]);
+        }
+    }, [pollUpload]);
+
+    const handleDrop = useCallback((e) => {
+        e.preventDefault();
+        setIsDragOver(false);
+        const file = e.dataTransfer?.files?.[0];
+        if (file) handleFileUpload(file);
+    }, [handleFileUpload]);
+
+    const handleDragOver = useCallback((e) => {
+        e.preventDefault();
+        setIsDragOver(true);
+    }, []);
+
+    const handleDragLeave = useCallback(() => {
+        setIsDragOver(false);
+    }, []);
 
     const handleKeyDown = useCallback((e) => {
         if (e.key === 'Enter' && !e.shiftKey) {
@@ -183,17 +309,39 @@ export default function ChatPanel({ parcelContext }) {
                     <polyline points="18 15 12 9 6 15" />
                 </svg>
             </div>
-            <div id="chat-body">
+            <div id="chat-body" onDrop={handleDrop} onDragOver={handleDragOver} onDragLeave={handleDragLeave}>
+                {isDragOver && (
+                    <div className="chat-drop-overlay">
+                        <div className="chat-drop-content">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" width="32" height="32">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                                <polyline points="17 8 12 3 7 8" />
+                                <line x1="12" y1="3" x2="12" y2="15" />
+                            </svg>
+                            <span>Drop file to upload</span>
+                        </div>
+                    </div>
+                )}
                 <div id="chat-messages">
                     {messages.map((msg, idx) => (
                         <div key={idx} className={`chat-message ${msg.role}`}>
                             <div className="message-avatar">{msg.role === 'assistant' ? 'AI' : 'You'}</div>
-                            <div
-                                className="message-content"
-                                dangerouslySetInnerHTML={{ __html: `<p>${formatMessageHtml(msg.text)}</p>` }}
-                            />
+                            <div className="message-content">
+                                <p style={{ whiteSpace: 'pre-wrap', margin: 0 }}>{msg.text}</p>
+                            </div>
                         </div>
                     ))}
+                    {uploadProgress && (
+                        <div className="chat-message assistant">
+                            <div className="message-avatar">AI</div>
+                            <div className="message-content">
+                                <div className="upload-status">
+                                    <div className="upload-spinner"></div>
+                                    <span>{uploadProgress.status === 'uploading' ? 'Uploading' : 'Analyzing'} {uploadProgress.filename}...</span>
+                                </div>
+                            </div>
+                        </div>
+                    )}
                     {isTyping && (
                         <div className="chat-message assistant">
                             <div className="message-avatar">AI</div>
@@ -207,10 +355,20 @@ export default function ChatPanel({ parcelContext }) {
                     <div ref={messagesEndRef} />
                 </div>
                 <div id="chat-input-container">
+                    <input type="file" ref={fileInputRef} style={{ display: 'none' }}
+                        accept=".pdf,.png,.jpg,.jpeg,.xlsx,.xls,.csv"
+                        onChange={(e) => { handleFileUpload(e.target.files?.[0]); e.target.value = ''; }}
+                    />
+                    <button className="chat-upload-btn" aria-label="Upload file" title="Upload a document for AI analysis"
+                        onClick={() => fileInputRef.current?.click()}>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="18" height="18">
+                            <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+                        </svg>
+                    </button>
                     <input
                         type="text"
                         id="chat-input"
-                        placeholder="Ask about zoning, setbacks, height limits, development potential..."
+                        placeholder="Ask about zoning, or drop a file to analyze..."
                         autoComplete="off"
                         value={inputValue}
                         onChange={(e) => setInputValue(e.target.value)}

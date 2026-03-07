@@ -48,11 +48,17 @@ function useTypewriter(strings, typingSpeed = 45, pauseTime = 2200, erasingSpeed
     return displayText;
 }
 
-export default function LandingPage({ onNavigate }) {
+export default function LandingPage({ onNavigate, onSignIn, onLogout }) {
     const mapPreviewRef = useRef(null);
     const mapInstanceRef = useRef(null);
     const [address, setAddress] = useState('');
     const typedText = useTypewriter(QUERIES);
+
+    // Enable scrolling on body when landing page is active
+    useEffect(() => {
+        document.body.classList.add('lp-active');
+        return () => document.body.classList.remove('lp-active');
+    }, []);
 
     // Initialize bright map preview
     useEffect(() => {
@@ -86,7 +92,7 @@ export default function LandingPage({ onNavigate }) {
             },
             center: [-79.3832, 43.6532],
             zoom: 13,
-            interactive: false,
+            interactive: true,
             attributionControl: false,
         });
 
@@ -113,7 +119,11 @@ export default function LandingPage({ onNavigate }) {
                         application<span>AI</span>
                     </div>
                     <div className="lp-nav-actions">
-                        <button className="lp-nav-link">Sign In</button>
+                        {localStorage.getItem('token') ? (
+                            <button className="lp-nav-link" onClick={onLogout}>Sign Out</button>
+                        ) : (
+                            <button className="lp-nav-link" onClick={onSignIn}>Sign In</button>
+                        )}
                         <button className="lp-nav-cta" onClick={() => onNavigate('')}>Try Demo</button>
                     </div>
                 </div>
@@ -122,35 +132,42 @@ export default function LandingPage({ onNavigate }) {
             {/* ===== HERO ===== */}
             <section className="lp-hero">
                 <div className="lp-hero-content">
-                    {/* Typewriter */}
-                    <div className="lp-typewriter-wrap">
-                        <h1 className="lp-typewriter">
-                            {typedText}
-                            <span className="lp-cursor" />
-                        </h1>
+                    <div className="lp-hero-left">
+                        {/* Typewriter */}
+                        <div className="lp-typewriter-wrap">
+                            <h1 className="lp-typewriter">
+                                {typedText}
+                                <span className="lp-cursor" />
+                            </h1>
+                        </div>
+                        <p className="lp-motto">
+                            The intelligence layer between policy and design. We read the city's rules so you don't have to.
+                        </p>
                     </div>
 
-                    {/* Bright map preview */}
-                    <div className="lp-map-preview">
-                        <div className="lp-map-container" ref={mapPreviewRef} />
-                        <div className="lp-map-shine" />
-                    </div>
+                    <div className="lp-hero-right">
+                        {/* Bright map preview */}
+                        <div className="lp-map-preview">
+                            <div className="lp-map-container" ref={mapPreviewRef} />
+                            <div className="lp-map-shine" />
+                        </div>
 
-                    {/* Address input */}
-                    <form className="lp-address-bar" onSubmit={handleSubmit}>
-                        <svg className="lp-address-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <circle cx="11" cy="11" r="8" />
-                            <line x1="21" y1="21" x2="16.65" y2="16.65" />
-                        </svg>
-                        <input
-                            type="text"
-                            className="lp-address-input"
-                            placeholder="Enter an address to get started..."
-                            value={address}
-                            onChange={(e) => setAddress(e.target.value)}
-                        />
-                        <kbd className="lp-address-kbd">↵</kbd>
-                    </form>
+                        {/* Address input */}
+                        <form className="lp-address-bar" onSubmit={handleSubmit}>
+                            <svg className="lp-address-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <circle cx="11" cy="11" r="8" />
+                                <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                            </svg>
+                            <input
+                                type="text"
+                                className="lp-address-input"
+                                placeholder="Enter an address to get started..."
+                                value={address}
+                                onChange={(e) => setAddress(e.target.value)}
+                            />
+                            <kbd className="lp-address-kbd">↵</kbd>
+                        </form>
+                    </div>
                 </div>
 
                 {/* Scroll hint */}

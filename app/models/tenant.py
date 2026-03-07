@@ -7,6 +7,7 @@ from sqlalchemy.dialects.postgresql import JSON, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base, TimestampMixin, UUIDPrimaryKey
+from .ingestion import SnapshotManifest
 
 
 class Organization(Base, UUIDPrimaryKey, TimestampMixin):
@@ -16,8 +17,15 @@ class Organization(Base, UUIDPrimaryKey, TimestampMixin):
     slug: Mapped[str] = mapped_column(String, nullable=False, unique=True)
     settings_json: Mapped[dict] = mapped_column(JSON, nullable=False, server_default="{}")
 
-    users: Mapped[list["User"]] = relationship(back_populates="organization", secondary="workspace_members")
-    workspace_members: Mapped[list["WorkspaceMember"]] = relationship(back_populates="organization")
+    users: Mapped[list["User"]] = relationship(
+        back_populates="organization",
+        secondary="workspace_members",
+        overlaps="workspace_members,workspace_memberships,organization,user",
+    )
+    workspace_members: Mapped[list["WorkspaceMember"]] = relationship(
+        back_populates="organization",
+        overlaps="users,organization,user",
+    )
     projects: Mapped[list["Project"]] = relationship(back_populates="organization")
 
 
@@ -31,9 +39,15 @@ class User(Base, UUIDPrimaryKey):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     organization: Mapped[Optional["Organization"]] = relationship(
-        back_populates="users", secondary="workspace_members", viewonly=True
+        back_populates="users",
+        secondary="workspace_members",
+        viewonly=True,
+        overlaps="workspace_members,workspace_memberships,organization,user",
     )
-    workspace_memberships: Mapped[list["WorkspaceMember"]] = relationship(back_populates="user")
+    workspace_memberships: Mapped[list["WorkspaceMember"]] = relationship(
+        back_populates="user",
+        overlaps="users,organization,workspace_members",
+    )
 
 
 class WorkspaceMember(Base, UUIDPrimaryKey):
@@ -51,8 +65,14 @@ class WorkspaceMember(Base, UUIDPrimaryKey):
     role: Mapped[str] = mapped_column(String, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
-    organization: Mapped["Organization"] = relationship(back_populates="workspace_members")
-    user: Mapped["User"] = relationship(back_populates="workspace_memberships")
+    organization: Mapped["Organization"] = relationship(
+        back_populates="workspace_members",
+        overlaps="users,organization,workspace_memberships",
+    )
+    user: Mapped["User"] = relationship(
+        back_populates="workspace_memberships",
+        overlaps="users,organization,workspace_members",
+    )
 
 
 class Project(Base, UUIDPrimaryKey, TimestampMixin):

@@ -8,6 +8,7 @@ from app.dependencies import get_current_user, get_db_session
 from app.models.geospatial import ProjectParcel
 from app.models.tenant import Project
 from app.schemas.tenant import AddParcelRequest, ProjectCreate, ProjectResponse
+from app.services.access_control import get_project_for_org
 
 router = APIRouter()
 
@@ -84,6 +85,12 @@ async def add_parcel_to_project(
     db: AsyncSession = Depends(get_db_session),
     user: dict = Depends(get_current_user),
 ):
+    await get_project_for_org(db, project_id, user["organization_id"])
+    existing = await db.execute(
+        select(ProjectParcel).where(ProjectParcel.project_id == project_id, ProjectParcel.parcel_id == body.parcel_id)
+    )
+    if existing.scalar_one_or_none() is not None:
+        raise HTTPException(status_code=409, detail="Parcel already linked to project")
     link = ProjectParcel(project_id=project_id, parcel_id=body.parcel_id, role=body.role)
     db.add(link)
     await db.flush()
@@ -97,6 +104,7 @@ async def remove_parcel_from_project(
     db: AsyncSession = Depends(get_db_session),
     user: dict = Depends(get_current_user),
 ):
+    await get_project_for_org(db, project_id, user["organization_id"])
     result = await db.execute(
         select(ProjectParcel).where(ProjectParcel.project_id == project_id, ProjectParcel.parcel_id == parcel_id)
     )

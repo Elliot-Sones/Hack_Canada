@@ -8,6 +8,7 @@ from sqlalchemy.orm import selectinload
 from app.dependencies import get_current_user, get_db_session
 from app.models.ingestion import ReviewQueueItem, SnapshotManifest
 from app.schemas.governance import ReviewQueueItemResponse, SnapshotManifestResponse
+from app.services.access_control import require_admin
 
 router = APIRouter()
 
@@ -18,6 +19,7 @@ async def get_snapshot_manifest(
     db: AsyncSession = Depends(get_db_session),
     user: dict = Depends(get_current_user),
 ):
+    require_admin(user)
     result = await db.execute(
         select(SnapshotManifest)
         .options(selectinload(SnapshotManifest.items))
@@ -36,6 +38,7 @@ async def list_review_queue_items(
     db: AsyncSession = Depends(get_db_session),
     user: dict = Depends(get_current_user),
 ):
+    require_admin(user)
     query = select(ReviewQueueItem).order_by(ReviewQueueItem.opened_at.desc())
     if status:
         query = query.where(ReviewQueueItem.status == status)

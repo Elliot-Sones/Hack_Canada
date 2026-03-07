@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 
 from geoalchemy2 import Geometry
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Numeric, String, UniqueConstraint, func
+from sqlalchemy import Boolean, Computed, DateTime, Float, ForeignKey, Numeric, String, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSON, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -50,7 +50,7 @@ class Parcel(Base, UUIDPrimaryKey, TimestampMixin):
     pin: Mapped[Optional[str]] = mapped_column(String, nullable=True, index=True)
     address: Mapped[Optional[str]] = mapped_column(String, nullable=True, index=True)
     geom = mapped_column(Geometry("MultiPolygon", srid=4326), nullable=False)
-    geom_area_m2: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    geom_area_m2: Mapped[Optional[float]] = mapped_column(Float, Computed("ST_Area(ST_Transform(geom, 3857))"), nullable=True)
     lot_area_m2: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     lot_frontage_m: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     lot_depth_m: Mapped[Optional[float]] = mapped_column(Float, nullable=True)

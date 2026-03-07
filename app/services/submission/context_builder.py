@@ -197,6 +197,7 @@ def build_document_context(
     project_name: str = "",
     organization_name: str = "",
     parsed_parameters: dict | None = None,
+    source_filename: str = "",
 ) -> dict[str, Any]:
     """Assemble complete context dict for all 10 document templates.
 
@@ -217,6 +218,13 @@ def build_document_context(
     lot_area = (parcel_data or {}).get("lot_area_m2")
     lot_frontage = (parcel_data or {}).get("lot_frontage_m")
     lot_depth = (parcel_data or {}).get("lot_depth_m")
+    # Estimate frontage/depth from lot area if not available
+    if lot_area and not lot_frontage:
+        import math
+        lot_frontage = round(math.sqrt(lot_area) * 0.6, 1)  # typical urban lot ratio
+    if lot_area and not lot_depth:
+        import math
+        lot_depth = round(math.sqrt(lot_area) * 1.67, 1)
     current_use = _or((parcel_data or {}).get("current_use"))
 
     # Proposed development
@@ -237,10 +245,31 @@ def build_document_context(
         if compliance
         else _NOT_AVAILABLE
     )
+    variance_summary = _build_variance_summary(compliance)
+    extracted_summary = "\n".join(
+        [
+            f"- Address: {address}",
+            f"- Project Name: {_or(project_name or params.get('project_name'))}",
+            f"- Development Type: {dev_type}",
+            f"- Building Type: {building_type}",
+            f"- Height: {_fmt_number(height_m, 1, suffix=' m')}",
+            f"- Storeys: {_or(storeys)}",
+            f"- Unit Count: {_or(unit_count)}",
+            f"- Gross Floor Area: {_fmt_area(gfa)}",
+        ]
+    )
+    overall_assessment = (
+        "Deterministic checks indicate the current proposal is broadly aligned with the resolved zoning controls. "
+        "Professional review is still required before submission."
+        if compliance and compliance.overall_compliant
+        else "Potential compliance issues or missing data were identified. "
+        "Professional review is required before the package is used for submission."
+    )
 
     context = {
         # Site information
         "address": address,
+        "source_filename": _or(source_filename),
         "zoning_code": zoning_code,
         "lot_area_sqm": _fmt_area(lot_area),
         "lot_frontage_m": _fmt_number(lot_frontage, 1, suffix=" m"),
@@ -262,14 +291,16 @@ def build_document_context(
         "parking_type": "Underground" if building_type and "tower" in str(building_type).lower() else "Surface/Underground",
 
         # Policy context
-        "policy_stack_summary": _build_policy_stack_summary(policy_stack),
-        "policy_provisions": _build_policy_stack_summary(policy_stack),
-        "policy_constraints": _build_policy_stack_summary(policy_stack),
+        "policy_stack_summary": _build_policy_stack_summary(policy_stack) if policy_stack else _build_policy_from_zoning(zoning),
+        "policy_provisions": _build_policy_stack_summary(policy_stack) if policy_stack else _build_policy_from_zoning(zoning),
+        "policy_constraints": _build_policy_constraints_from_compliance(zoning, massing, compliance),
 
         # Compliance — DETERMINISTIC
         "compliance_summary": compliance_summary,
         "entitlement_results": compliance_summary,
-        "variance_summary": _build_variance_summary(compliance),
+        "variance_summary": variance_summary,
+        "compliance_issues": variance_summary if compliance else "No compliance issues identified.",
+        "overall_assessment": overall_assessment,
 
         # Massing
         "massing_summary": _build_massing_parameters(massing),
@@ -281,6 +312,8 @@ def build_document_context(
         # Layout
         "unit_mix_data": _build_unit_mix_data(layout),
         "layout_results": _build_unit_mix_data(layout),
+        "unit_mix_summary": _build_unit_mix_data(layout),
+        "extracted_summary": extracted_summary,
 
         # Finance
         "financial_results": _build_financial_results(finance),
@@ -293,8 +326,13 @@ def build_document_context(
         "similarity_analysis": _build_precedent_results(precedents),
 
         # Public benefit / community
-        "public_benefits": _NOT_AVAILABLE,
-        "community_context": _NOT_AVAILABLE,
+        "public_benefits": _build_public_benefits(massing, layout, compliance),
+        "community_context": _build_community_context(address, precedents),
+        "auto_fixable": "None identified automatically. Manual confirmation required.",
+        "requires_professional": (
+            "Planning rationale, zoning interpretation, and final submission sign-off require "
+            "qualified professional review."
+        ),
     }
 
     return context
@@ -340,3 +378,160 @@ def _build_financial_assumptions(finance: dict | None) -> str:
         lines.append(f"- Interest Rate: {_fmt_number(financing.get('interest_rate', 0) * 100, 2, suffix='%')}")
 
     return "\n".join(lines) if lines else "Assumptions detail not available."
+
+
+def _build_policy_from_zoning(zoning: ZoningAnalysis | None) -> str:
+    """Build policy summary from zoning analysis when no policy stack is available."""
+    if not zoning:
+        return "No zoning data available for policy analysis."
+
+    lines = [
+        "The applicable policy framework includes:",
+        "1. **Provincial Planning Statement, 2024 (PPS 2024)** — Promotes intensification and efficient use of land and infrastructure.",
+        "2. **City of Toronto Official Plan** — Directs growth to areas well served by transit.",
+        "3. **Zoning By-law 569-2013** — Establishes as-of-right permissions and development standards.",
+    ]
+
+    if zoning.standards:
+        s = zoning.standards
+        lines.append(f"\nThe site is zoned **{zoning.zone_string}** under By-law 569-2013 (§{s.bylaw_section}).")
+        parts = []
+        if s.max_fsi is not None:
+            parts.append(f"Max FSI {s.max_fsi:.1f}x")
+        if s.max_height_m is not None:
+            parts.append(f"Max Height {s.max_height_m:.1f}m")
+        parts.append(f"Front Setback {s.min_front_setback_m:.1f}m")
+        parts.append(f"Rear Setback {s.min_rear_setback_m:.1f}m")
+        lines.append(f"Key standards: {', '.join(parts)}.")
+
+    return "\n".join(lines)
+
+
+def _build_policy_constraints_from_compliance(
+    zoning: ZoningAnalysis | None,
+    massing: dict | None,
+    compliance: ComplianceResult | None,
+) -> str:
+    """Build policy constraints section from zoning + compliance data."""
+    lines = []
+
+    if zoning and zoning.standards:
+        s = zoning.standards
+        if s.max_fsi is not None:
+            lines.append(f"- **Maximum FSI**: {s.max_fsi:.1f}x")
+        if s.max_height_m is not None:
+            lines.append(f"- **Maximum Height**: {s.max_height_m:.1f} m")
+        if s.max_lot_coverage_pct is not None:
+            lines.append(f"- **Maximum Lot Coverage**: {s.max_lot_coverage_pct * 100:.0f}%")
+        lines.append(f"- **Front Setback**: {s.min_front_setback_m:.1f} m")
+        lines.append(f"- **Rear Setback**: {s.min_rear_setback_m:.1f} m")
+        lines.append(f"- **Side Setback (Interior)**: {s.min_interior_side_setback_m:.1f} m")
+
+    if compliance and compliance.variances_needed:
+        lines.append(f"\n**{len(compliance.variances_needed)} variance(s) required** from as-of-right permissions.")
+
+    return "\n".join(lines) if lines else _NOT_AVAILABLE
+
+
+def _build_public_benefits(massing: dict | None, layout: dict | None, compliance: ComplianceResult | None) -> str:
+    """Generate public benefits from project data."""
+    lines = []
+
+    if layout:
+        total_units = layout.get("total_units", 0)
+        if total_units:
+            lines.append(f"- **Housing supply**: {total_units:,} new residential units contributing to the City's housing targets.")
+        amenity = layout.get("amenity_required_m2")
+        if amenity:
+            lines.append(f"- **Amenity space**: {amenity:,.0f} m² of indoor amenity space for residents.")
+        accessible = layout.get("accessible_units_required", 0)
+        if accessible:
+            lines.append(f"- **Accessibility**: {accessible} accessible units ({accessible / total_units * 100:.0f}% of total).")
+
+    if massing:
+        gfa = massing.get("estimated_gfa_m2", 0)
+        if gfa:
+            lines.append(f"- **Intensification**: Efficient use of urban land with {gfa:,.0f} m² GFA supporting transit-oriented growth.")
+
+    lines.append("- **Section 37 / Community Benefits Charge**: Applicable contributions to be determined through the development approval process.")
+
+    return "\n".join(lines) if lines else _NOT_AVAILABLE
+
+
+def build_upload_context(
+    extracted_data: dict | None,
+    compliance_findings: dict | None,
+    source_filename: str = "",
+) -> dict[str, Any]:
+    """Build template context from uploaded document analysis results.
+
+    Maps AI-extracted data and compliance findings into the placeholder dict
+    used by response document templates.
+    """
+    extracted = extracted_data or {}
+    findings = compliance_findings or {}
+    dims = extracted.get("dimensions", {})
+    building = extracted.get("building", {})
+    unit_mix = extracted.get("unit_mix", {})
+
+    # Build extracted summary
+    summary_lines = []
+    if building.get("storeys"):
+        summary_lines.append(f"- Storeys: {building['storeys']}")
+    if building.get("height_m"):
+        summary_lines.append(f"- Height: {building['height_m']} m")
+    if building.get("unit_count"):
+        summary_lines.append(f"- Units: {building['unit_count']}")
+    if building.get("gfa_m2"):
+        summary_lines.append(f"- GFA: {_fmt_area(building['gfa_m2'])}")
+    if dims.get("lot_area_m2"):
+        summary_lines.append(f"- Lot Area: {_fmt_area(dims['lot_area_m2'])}")
+    if dims.get("lot_frontage_m"):
+        summary_lines.append(f"- Lot Frontage: {_fmt_number(dims['lot_frontage_m'], 1, suffix=' m')}")
+
+    # Unit mix summary
+    mix_lines = []
+    for unit_type, data in unit_mix.items():
+        if isinstance(data, dict) and data.get("count"):
+            mix_lines.append(f"- {unit_type.replace('_', ' ').title()}: {data['count']} units ({_fmt_area(data.get('avg_area_m2'))} avg)")
+
+    # Compliance issues summary
+    issues = findings.get("issues", [])
+    issue_lines = []
+    for issue in issues:
+        severity = issue.get("severity", "info").upper()
+        issue_lines.append(f"- **[{severity}]** {issue.get('description', 'N/A')} ({issue.get('code_reference', 'N/A')})")
+
+    return {
+        "source_filename": source_filename,
+        "address": _or(extracted.get("address")),
+        "project_name": _or(extracted.get("project_name")),
+        "extracted_summary": "\n".join(summary_lines) if summary_lines else _NOT_AVAILABLE,
+        "unit_mix_summary": "\n".join(mix_lines) if mix_lines else _NOT_AVAILABLE,
+        "compliance_issues": "\n".join(issue_lines) if issue_lines else "No compliance issues identified.",
+        "overall_assessment": _or(findings.get("overall_assessment")),
+        "auto_fixable": ", ".join(findings.get("auto_fixable", [])) or "None identified.",
+        "requires_professional": ", ".join(findings.get("requires_professional", [])) or "None identified.",
+        "storeys": _or(building.get("storeys")),
+        "height_m": _fmt_number(building.get("height_m"), 1),
+        "unit_count": _or(building.get("unit_count")),
+        "gfa_m2": _fmt_area(building.get("gfa_m2")),
+        "lot_area_m2": _fmt_area(dims.get("lot_area_m2")),
+    }
+
+
+def _build_community_context(address: str, precedents: list[dict] | None) -> str:
+    """Build community context from address and precedent data."""
+    lines = [f"The proposed development at {address} is situated within an evolving urban context."]
+
+    if precedents:
+        approved = [p for p in precedents if p.get("decision") == "approved"]
+        lines.append(
+            f"There are {len(precedents)} recent development application(s) within the surrounding area, "
+            f"{'including ' + str(len(approved)) + ' approved application(s), ' if approved else ''}"
+            f"demonstrating an established pattern of intensification in this neighbourhood."
+        )
+    else:
+        lines.append("Further neighbourhood analysis is recommended to establish community context.")
+
+    return "\n".join(lines)

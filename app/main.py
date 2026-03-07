@@ -5,6 +5,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from app import __version__
 from app.config import settings
 from app.middleware.request_id import RequestIDMiddleware
+from app.routers import auth as auth
+from app.routers import assistant as assistant
 from app.routers import entitlement as entitlement
 from app.routers import exports as exports
 from app.routers import finance as finance
@@ -17,6 +19,8 @@ from app.routers import policy as policy
 from app.routers import projects as projects
 from app.routers import scenarios as scenarios
 from app.routers import simulation as simulation
+from app.routers import ingestion as ingestion
+from app.routers import uploads as uploads
 
 structlog.configure(
     processors=[
@@ -50,7 +54,9 @@ def create_app() -> FastAPI:
 
     prefix = settings.API_V1_PREFIX
 
+    application.include_router(auth.router, prefix=prefix, tags=["auth"])
     application.include_router(health.router, prefix=prefix, tags=["health"])
+    application.include_router(assistant.router, prefix=prefix, tags=["assistant"])
     application.include_router(projects.router, prefix=prefix, tags=["projects"])
     application.include_router(parcels.router, prefix=prefix, tags=["parcels"])
     application.include_router(scenarios.router, prefix=prefix, tags=["scenarios"])
@@ -62,6 +68,8 @@ def create_app() -> FastAPI:
     application.include_router(exports.router, prefix=prefix, tags=["exports"])
     application.include_router(plans.router, prefix=prefix, tags=["plans"])
     application.include_router(jobs.router, prefix=prefix, tags=["jobs"])
+    application.include_router(uploads.router, prefix=prefix, tags=["uploads"])
+    application.include_router(ingestion.router, prefix=prefix, tags=["ingestion"])
 
     return application
 

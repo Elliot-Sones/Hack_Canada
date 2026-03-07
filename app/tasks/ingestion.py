@@ -8,6 +8,7 @@ from app.database import get_sync_db
 from app.models.dataset import DatasetLayer
 from app.models.ingestion import SourceSnapshot
 from app.models.policy import PolicyClause, PolicyReviewItem, PolicyVersion
+from app.services.geospatial_ingestion import get_or_create_jurisdiction
 from app.worker import celery_app
 
 logger = structlog.get_logger()
@@ -135,6 +136,81 @@ def publish_dataset_layer(self, dataset_layer_id: str, source_snapshot_id: str |
         }
     except Exception:
         db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+@celery_app.task(bind=True, name="app.tasks.ingestion.ingest_building_permits_task")
+def ingest_building_permits_task(self):
+    """Ingest building permits from Toronto CKAN Open Data."""
+    from app.services.ckan_ingestion import ingest_building_permits
+
+    db = get_sync_db()
+    try:
+        jurisdiction = get_or_create_jurisdiction(db, name="Toronto")
+        db.commit()
+        summary = ingest_building_permits(db, jurisdiction.id)
+        return {
+            "status": "completed",
+            "processed": summary.processed,
+            "failed": summary.failed,
+        }
+    except Exception as e:
+        logger.error("ingestion.building_permits.failed", error=str(e))
+        raise
+    finally:
+        db.close()
+
+
+@celery_app.task(bind=True, name="app.tasks.ingestion.ingest_coa_applications_task")
+def ingest_coa_applications_task(self):
+    """Ingest COA applications from Toronto CKAN Open Data."""
+    from app.services.ckan_ingestion import ingest_coa_applications
+
+    db = get_sync_db()
+    try:
+        jurisdiction = get_or_create_jurisdiction(db, name="Toronto")
+        db.commit()
+        summary = ingest_coa_applications(db, jurisdiction.id)
+        return {
+            "status": "completed",
+            "processed": summary.processed,
+            "failed": summary.failed,
+        }
+    except Exception as e:
+        logger.error("ingestion.coa_applications.failed", error=str(e))
+        raise
+    finally:
+        db.close()
+
+
+@celery_app.task(bind=True, name="app.tasks.ingestion.ingest_toronto_open_data")
+def ingest_toronto_open_data(self):
+    """Run both building permit and COA ingestion sequentially."""
+    from app.services.ckan_ingestion import ingest_building_permits, ingest_coa_applications
+
+    db = get_sync_db()
+    try:
+        jurisdiction = get_or_create_jurisdiction(db, name="Toronto")
+        db.commit()
+
+        permit_summary = ingest_building_permits(db, jurisdiction.id)
+        coa_summary = ingest_coa_applications(db, jurisdiction.id)
+
+        return {
+            "status": "completed",
+            "building_permits": {
+                "processed": permit_summary.processed,
+                "failed": permit_summary.failed,
+            },
+            "coa_applications": {
+                "processed": coa_summary.processed,
+                "failed": coa_summary.failed,
+            },
+        }
+    except Exception as e:
+        logger.error("ingestion.toronto_open_data.failed", error=str(e))
         raise
     finally:
         db.close()

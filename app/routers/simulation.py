@@ -4,7 +4,6 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from app.config import settings
 from app.dependencies import get_current_user, get_db_session, get_optional_idempotency_key
@@ -18,6 +17,8 @@ from app.schemas.simulation import (
     MassingTemplateReferenceResponse,
     UnitTypeReferenceResponse,
 )
+from app.services.access_control import get_layout_run_for_org, get_massing_for_org, get_scenario_for_org
+from app.services.idempotency import cache_response, get_cached_response
 from app.services.thin_slice_runtime import ensure_reference_data, validate_massing_template
 from app.tasks.layout import run_layout
 from app.tasks.massing import run_massing
@@ -71,6 +72,11 @@ async def create_massing(
     user: dict = Depends(get_current_user),
     idempotency_key: str | None = Depends(get_optional_idempotency_key),
 ):
+    cached_response = await get_cached_response(idempotency_key, JobAccepted)
+    if cached_response is not None:
+        return cached_response
+
+    await get_scenario_for_org(db, scenario_id, user["organization_id"])
     if body.template_id is not None:
         template_result = await db.execute(select(MassingTemplate).where(MassingTemplate.id == body.template_id))
         template = template_result.scalar_one_or_none()
@@ -85,27 +91,26 @@ async def create_massing(
     db.add(massing)
     await db.flush()
     await db.refresh(massing)
+    await db.commit()
 
     run_massing.delay(str(massing.id), str(scenario_id), body.parameters)
 
-    return JobAccepted(
+    response = JobAccepted(
         job_id=massing.id,
         status="accepted",
         location=f"{settings.API_V1_PREFIX}/massings/{massing.id}",
     )
+    await cache_response(idempotency_key, response)
+    return response
 
 
 @router.get("/massings/{massing_id}", response_model=MassingResponse)
 async def get_massing(
     massing_id: uuid.UUID,
     db: AsyncSession = Depends(get_db_session),
+    user: dict = Depends(get_current_user),
 ):
-    result = await db.execute(
-        select(Massing).options(selectinload(Massing.template)).where(Massing.id == massing_id)
-    )
-    massing = result.scalar_one_or_none()
-    if not massing:
-        raise HTTPException(status_code=404, detail="Massing not found")
+    massing = await get_massing_for_org(db, massing_id, user["organization_id"], load_template=True)
     return _serialize_massing(massing)
 
 
@@ -151,7 +156,16 @@ async def create_layout_run(
     user: dict = Depends(get_current_user),
     idempotency_key: str | None = Depends(get_optional_idempotency_key),
 ):
-    normalized_objective = "max_revenue" if body.optimization_objective == "maximize_revenue" else body.optimization_objective
+    cached_response = await get_cached_response(idempotency_key, JobAccepted)
+    if cached_response is not None:
+        return cached_response
+
+    await get_massing_for_org(db, massing_id, user["organization_id"])
+    normalized_objective = (
+        "max_revenue"
+        if body.optimization_objective == "maximize_revenue"
+        else body.optimization_objective
+    )
     if body.unit_types:
         requested_ids = list(dict.fromkeys(body.unit_types))
         result = await db.execute(select(UnitType.id).where(UnitType.id.in_(requested_ids)))
@@ -176,23 +190,23 @@ async def create_layout_run(
     db.add(layout)
     await db.flush()
     await db.refresh(layout)
+    await db.commit()
 
     run_layout.delay(str(layout.id), str(massing_id), task_params)
 
-    return JobAccepted(
+    response = JobAccepted(
         job_id=layout.id,
         status="accepted",
         location=f"{settings.API_V1_PREFIX}/layout-runs/{layout.id}",
     )
+    await cache_response(idempotency_key, response)
+    return response
 
 
 @router.get("/layout-runs/{layout_run_id}", response_model=LayoutRunResponse)
 async def get_layout_run(
     layout_run_id: uuid.UUID,
     db: AsyncSession = Depends(get_db_session),
+    user: dict = Depends(get_current_user),
 ):
-    result = await db.execute(select(LayoutRun).where(LayoutRun.id == layout_run_id))
-    layout = result.scalar_one_or_none()
-    if not layout:
-        raise HTTPException(status_code=404, detail="Layout run not found")
-    return layout
+    return await get_layout_run_for_org(db, layout_run_id, user["organization_id"])

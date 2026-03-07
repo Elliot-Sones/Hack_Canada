@@ -1,10 +1,13 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import MapView from './components/MapView.jsx';
 import SearchBar from './components/SearchBar.jsx';
 import Sidebar from './components/Sidebar.jsx';
 import PolicyPanel from './components/PolicyPanel.jsx';
 import ChatPanel from './components/ChatPanel.jsx';
 import LandingPage from './components/LandingPage.jsx';
+import LoginPage from './components/LoginPage.jsx';
+import { searchParcels } from './api.js';
+import { buildParcelState, isResolvedParcel } from './lib/parcelState.js';
 import './landing.css';
 
 export default function App() {
@@ -13,28 +16,29 @@ export default function App() {
   const [isPanelOpen, setIsPanelOpen] = useState(true);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [activeNav, setActiveNav] = useState('overview');
-  const [pendingAddress, setPendingAddress] = useState(null);
+  const [savedParcels, setSavedParcels] = useState([]);
 
   const mapRef = useRef(null);
 
-  const handleLocationSelected = useCallback((location) => {
+  const handleAuth = useCallback(() => {
+    setCurrentPage('landing');
+  }, []);
+
+  const handleLogout = useCallback(() => {
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+    setCurrentPage('login');
+    setSelectedParcel(null);
+  }, []);
+
+  const handleLocationSelected = useCallback(async (location) => {
     if (mapRef.current) {
       mapRef.current.flyTo(location.lng, location.lat, 16);
       mapRef.current.setMarker(location.lng, location.lat);
     }
-    const zonings = ['R', 'RD', 'RS', 'RT', 'RM', 'RA', 'CR'];
-    const randomZoning = zonings[Math.floor(Math.random() * zonings.length)];
-    const parcel = {
-      address: location.shortAddress || location.address,
-      zoning: randomZoning,
-      lotArea: 300 + Math.floor(Math.random() * 500),
-    };
-    setSelectedParcel(parcel);
-    setIsPanelOpen(true);
-  }, []);
 
-  const handleParcelSelect = useCallback((parcel) => {
-    setSelectedParcel(parcel);
+    const parcels = await searchParcels(location.shortAddress || location.address);
+    setSelectedParcel(buildParcelState(location, parcels));
     setIsPanelOpen(true);
   }, []);
 
@@ -48,14 +52,21 @@ export default function App() {
 
   const handleNavClick = useCallback((panel) => {
     setActiveNav(panel);
+    setIsPanelOpen(true);
   }, []);
 
-  // Navigate from landing to dashboard
+  const handleSaveParcel = useCallback((parcel) => {
+    setSavedParcels((prev) => {
+      if (!isResolvedParcel(parcel)) return prev;
+      if (prev.some((p) => p.address === parcel.address)) return prev;
+      return [...prev, parcel];
+    });
+  }, []);
+
   const handleLandingNavigate = useCallback(async (address) => {
     setCurrentPage('dashboard');
 
     if (address) {
-      // Geocode the address and fly to it
       try {
         const res = await fetch(
           `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(address + ' Toronto Canada')}&format=json&addressdetails=1&limit=1&countrycodes=ca`,
@@ -71,7 +82,6 @@ export default function App() {
           let shortAddress = parts.join(' ') || result.display_name.split(',')[0];
           if (addr.city || addr.town) shortAddress += `, ${addr.city || addr.town}`;
 
-          // Small delay to let the map mount
           setTimeout(() => {
             handleLocationSelected({
               lng: parseFloat(result.lon),
@@ -87,27 +97,34 @@ export default function App() {
     }
   }, [handleLocationSelected]);
 
-  // Landing page
-  if (currentPage === 'landing') {
-    return <LandingPage onNavigate={handleLandingNavigate} />;
+  useEffect(() => {
+    if (typeof document === 'undefined') return undefined;
+
+    const isDashboard = currentPage === 'dashboard';
+    document.body.classList.toggle('sidebar-collapsed', isDashboard && isSidebarCollapsed);
+    document.body.classList.toggle('panel-open', isDashboard && isPanelOpen);
+
+    return () => {
+      document.body.classList.remove('sidebar-collapsed');
+      document.body.classList.remove('panel-open');
+    };
+  }, [currentPage, isSidebarCollapsed, isPanelOpen]);
+
+  // Login page
+  if (currentPage === 'login') {
+    return <LoginPage onAuth={handleAuth} />;
   }
 
-  // Dashboard — apply body classes
-  const bodyClasses = [];
-  if (isSidebarCollapsed) bodyClasses.push('sidebar-collapsed');
-  if (isPanelOpen) bodyClasses.push('panel-open');
-  if (typeof document !== 'undefined') {
-    document.body.className = bodyClasses.join(' ');
+  // Landing page
+  if (currentPage === 'landing') {
+    return <LandingPage onNavigate={handleLandingNavigate} onSignIn={() => setCurrentPage('login')} onLogout={handleLogout} />;
   }
 
   return (
     <>
-      <MapView ref={mapRef} onParcelSelect={handleParcelSelect} />
+      <MapView ref={mapRef} />
 
-      <SearchBar
-        isSidebarCollapsed={isSidebarCollapsed}
-        onLocationSelected={handleLocationSelected}
-      />
+      <SearchBar onLocationSelected={handleLocationSelected} />
 
       <Sidebar
         isCollapsed={isSidebarCollapsed}
@@ -120,9 +137,11 @@ export default function App() {
         parcel={selectedParcel}
         isOpen={isPanelOpen}
         onClose={handlePanelClose}
+        activeNav={activeNav}
+        savedParcels={savedParcels}
+        onSaveParcel={handleSaveParcel}
       />
 
-      {/* Small tab to reopen the panel when closed */}
       {!isPanelOpen && (
         <button
           className="panel-reopen-tab"

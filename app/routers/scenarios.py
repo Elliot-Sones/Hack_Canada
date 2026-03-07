@@ -2,13 +2,13 @@ import hashlib
 import json
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_current_user, get_db_session
 from app.models.tenant import ScenarioRun
 from app.schemas.tenant import ScenarioCreate, ScenarioResponse
+from app.services.access_control import get_project_for_org, get_scenario_for_org
 
 router = APIRouter()
 
@@ -20,6 +20,7 @@ async def create_scenario(
     db: AsyncSession = Depends(get_db_session),
     user: dict = Depends(get_current_user),
 ):
+    await get_project_for_org(db, project_id, user["organization_id"])
     input_hash = hashlib.sha256(
         json.dumps(body.model_dump(), sort_keys=True, default=str).encode()
     ).hexdigest()
@@ -43,11 +44,7 @@ async def get_scenario(
     db: AsyncSession = Depends(get_db_session),
     user: dict = Depends(get_current_user),
 ):
-    result = await db.execute(select(ScenarioRun).where(ScenarioRun.id == scenario_id))
-    scenario = result.scalar_one_or_none()
-    if not scenario:
-        raise HTTPException(status_code=404, detail="Scenario not found")
-    return scenario
+    return await get_scenario_for_org(db, scenario_id, user["organization_id"])
 
 
 @router.get("/scenarios/{scenario_id}/compare/{other_id}")
@@ -57,6 +54,8 @@ async def compare_scenarios(
     db: AsyncSession = Depends(get_db_session),
     user: dict = Depends(get_current_user),
 ):
+    await get_scenario_for_org(db, scenario_id, user["organization_id"])
+    await get_scenario_for_org(db, other_id, user["organization_id"])
     # TODO: Implement scenario comparison logic
     return {
         "scenario_a": str(scenario_id),

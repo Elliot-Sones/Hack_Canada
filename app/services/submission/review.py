@@ -10,7 +10,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
-from app.models.plan import DevelopmentPlan, SubmissionDocument
+from app.models.plan import SubmissionDocument
+from app.services.submission.readiness import document_has_unresolved_placeholders
 
 
 async def submit_for_review(
@@ -29,6 +30,10 @@ async def submit_for_review(
         raise ValueError(
             f"Document cannot be submitted for review from status '{doc.review_status}'"
         )
+    if doc.status != "completed":
+        raise ValueError("Document must be fully generated before review")
+    if not doc.content_text and not doc.content_json:
+        raise ValueError("Document has no generated content to review")
 
     doc.review_status = "under_review"
     await db.flush()
@@ -53,6 +58,8 @@ async def approve_document(
         raise ValueError(
             f"Document cannot be approved from status '{doc.review_status}'"
         )
+    if document_has_unresolved_placeholders(doc.content_text):
+        raise ValueError("Document still contains unresolved placeholders and cannot be approved")
 
     doc.review_status = "approved"
     doc.reviewed_by = user_id

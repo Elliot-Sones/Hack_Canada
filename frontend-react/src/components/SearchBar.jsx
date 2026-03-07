@@ -16,7 +16,7 @@ function formatAddress(result) {
     return formatted;
 }
 
-export default function SearchBar({ isSidebarCollapsed, onLocationSelected }) {
+export default function SearchBar({ onLocationSelected }) {
     const [query, setQuery] = useState('');
     const [suggestions, setSuggestions] = useState([]);
     const [showSuggestions, setShowSuggestions] = useState(false);

@@ -7,6 +7,8 @@ IMPORTANT: All references use Provincial Planning Statement, 2024 (PPS 2024),
 which replaced PPS 2020 and the Growth Plan effective October 20, 2024.
 """
 
+from app.data.ontario_policy import get_policy_grounding
+
 SAFETY_PREAMBLE = (
     "DRAFT — FOR PROFESSIONAL REVIEW ONLY. This document was generated with "
     "computational assistance and must be reviewed by a qualified Ontario Land "
@@ -58,13 +60,7 @@ DOCUMENT_TEMPLATES = {
             f"{SAFETY_PREAMBLE}\n\n"
             "You are a senior planning consultant writing a Planning Rationale for submission "
             "to the City of Toronto. This document must analyze conformity with the applicable "
-            "policy framework in the following hierarchy:\n\n"
-            "1. Provincial Planning Statement, 2024 (PPS 2024) — replaced PPS 2020 and the "
-            "Growth Plan for the Greater Golden Horseshoe, effective October 20, 2024\n"
-            "2. City of Toronto Official Plan (consolidated 2022)\n"
-            "3. Secondary Plans / Site and Area Specific Policies\n"
-            "4. Zoning By-law 569-2013 (as amended)\n"
-            "5. Design Guidelines (Tall Building, Mid-Rise, Growing Up, Pet-Friendly)\n\n"
+            "policy framework.\n\n"
             "For each policy layer:\n"
             "- Describe the site and surrounding context\n"
             "- Analyze conformity with specific policies, citing section numbers\n"
@@ -72,7 +68,8 @@ DOCUMENT_TEMPLATES = {
             "- Conclude with a recommendation for approval\n\n"
             "Use professional planning language. Cite specific by-law sections. "
             "This is a legal document that will be reviewed by city planners.\n\n"
-            f"{_GROUNDING_INSTRUCTION}"
+            f"{_GROUNDING_INSTRUCTION}\n\n"
+            f"{get_policy_grounding('planning_rationale')}"
         ),
         "user_prompt_template": (
             "Write a Planning Rationale for this development proposal:\n\n"
@@ -333,5 +330,92 @@ DOCUMENT_TEMPLATES = {
             "and estimated impact based on building dimensions."
         ),
         "max_tokens": 3072,
+    },
+
+    # ─── Upload-based response templates ───
+
+    "correction_response": {
+        "title": "Correction Response Letter",
+        "system_prompt": (
+            f"{SAFETY_PREAMBLE}\n\n"
+            "You are a professional urban planning consultant drafting a formal response "
+            "to a corrections letter issued by the City of Toronto Planning Department. "
+            "Address each deficiency or comment point-by-point, referencing the applicable "
+            "by-law sections and explaining how the issue has been or will be resolved. "
+            "Use professional language suitable for a government submission.\n\n"
+            f"{_GROUNDING_INSTRUCTION}"
+        ),
+        "user_prompt_template": (
+            "Draft a response to the following corrections/comments:\n\n"
+            "Source Document: {source_filename}\n"
+            "Address: {address}\n\n"
+            "## Extracted Project Data\n"
+            "{extracted_summary}\n\n"
+            "## Compliance Issues Identified\n"
+            "{compliance_issues}\n\n"
+            "## Overall Assessment\n"
+            "{overall_assessment}\n\n"
+            "Address each issue with a professional response explaining how it will be resolved."
+        ),
+        "max_tokens": 4096,
+    },
+
+    "compliance_review_report": {
+        "title": "Compliance Review Report",
+        "system_prompt": (
+            f"{SAFETY_PREAMBLE}\n\n"
+            "You are generating a detailed Compliance Review Report based on analysis of "
+            "uploaded architectural plans. Present findings organized by category with "
+            "specific code references from Zoning By-law 569-2013 and the Ontario Building Code. "
+            "Distinguish between critical issues requiring immediate attention and minor items.\n\n"
+            f"{_GROUNDING_INSTRUCTION}"
+        ),
+        "user_prompt_template": (
+            "Generate a compliance review report:\n\n"
+            "Source Document: {source_filename}\n"
+            "Address: {address}\n\n"
+            "## Extracted Plan Data\n"
+            "{extracted_summary}\n\n"
+            "## Unit Mix\n"
+            "{unit_mix_summary}\n\n"
+            "## Compliance Findings\n"
+            "{compliance_issues}\n\n"
+            "## Auto-Fixable Items\n"
+            "{auto_fixable}\n\n"
+            "## Items Requiring Professional Review\n"
+            "{requires_professional}\n\n"
+            "## Overall Assessment\n"
+            "{overall_assessment}"
+        ),
+        "max_tokens": 4096,
+    },
+
+    "variance_justification": {
+        "title": "Variance Justification Report",
+        "system_prompt": (
+            f"{SAFETY_PREAMBLE}\n\n"
+            "You are generating a Variance Justification Report for a Toronto development "
+            "application. For each identified variance from Zoning By-law 569-2013, provide "
+            "a planning justification addressing the four tests under Section 45(1) of the "
+            "Planning Act:\n"
+            "1. The variance is minor\n"
+            "2. It is desirable for the appropriate development of the land\n"
+            "3. The general intent and purpose of the zoning by-law is maintained\n"
+            "4. The general intent and purpose of the official plan is maintained\n\n"
+            "Reference precedent approvals where available.\n\n"
+            f"{_GROUNDING_INSTRUCTION}"
+        ),
+        "user_prompt_template": (
+            "Generate variance justifications:\n\n"
+            "Source Document: {source_filename}\n"
+            "Address: {address}\n\n"
+            "## Extracted Plan Data\n"
+            "{extracted_summary}\n\n"
+            "## Compliance Findings\n"
+            "{compliance_issues}\n\n"
+            "For each variance identified, provide a justification addressing the four tests "
+            "under Section 45(1) of the Planning Act."
+        ),
+        "max_tokens": 4096,
     },
 }

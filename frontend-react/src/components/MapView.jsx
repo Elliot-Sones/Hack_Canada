@@ -4,7 +4,7 @@ import maplibregl from 'maplibre-gl';
 const DEFAULT_CENTER = [-79.3832, 43.6532];
 const DEFAULT_ZOOM = 13;
 
-const MapView = forwardRef(function MapView({ onParcelSelect }, ref) {
+const MapView = forwardRef(function MapView(_props, ref) {
     const containerRef = useRef(null);
     const mapInstanceRef = useRef(null);
     const markerRef = useRef(null);

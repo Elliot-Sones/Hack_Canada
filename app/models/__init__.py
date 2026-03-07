@@ -29,6 +29,7 @@ from app.models.ingestion import (
     SourceSnapshot,
 )
 from app.models.plan import DevelopmentPlan, SubmissionDocument
+from app.models.upload import DocumentPage, UploadedDocument
 from app.models.policy import (
     PolicyApplicabilityRule,
     PolicyClause,
@@ -62,4 +63,5 @@ __all__ = [
     "SourceSnapshot", "IngestionJob", "SnapshotManifest", "SnapshotManifestItem", "ParseArtifact", "ReviewQueueItem",
     "RefreshSchedule",
     "DevelopmentPlan", "SubmissionDocument",
+    "UploadedDocument", "DocumentPage",
 ]
