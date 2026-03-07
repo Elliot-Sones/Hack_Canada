@@ -74,13 +74,11 @@ export default function LandingPage({ onNavigate }) {
         [auth0Logout]
     );
 
-    // Enable scrolling on body when landing page is active
     useEffect(() => {
         document.body.classList.add('lp-active');
         return () => document.body.classList.remove('lp-active');
     }, []);
 
-    // Initialize bright map preview
     useEffect(() => {
         if (mapInstanceRef.current || !mapPreviewRef.current) return;
 
@@ -129,7 +127,6 @@ export default function LandingPage({ onNavigate }) {
 
     return (
         <div className="lp">
-            {/* Background */}
             <div className="lp-bg" />
 
             {/* ===== NAVBAR ===== */}
@@ -140,19 +137,20 @@ export default function LandingPage({ onNavigate }) {
                     </div>
                     <div className="lp-nav-actions">
                         {isLoading ? (
-                            <span className="lp-nav-link lp-nav-loading">Loading…</span>
+                            <span className="lp-nav-loading">Loading…</span>
                         ) : isAuthenticated ? (
                             <>
                                 {user?.picture && (
                                     <img
                                         src={user.picture}
-                                        alt={user.name}
+                                        alt={user.name || 'User'}
                                         className="lp-nav-avatar"
                                     />
                                 )}
                                 <span className="lp-nav-greeting">
                                     {user?.name || user?.email}
                                 </span>
+                                <div className="lp-nav-divider" />
                                 <button className="lp-nav-link" onClick={logout}>
                                     Sign Out
                                 </button>
@@ -183,7 +181,6 @@ export default function LandingPage({ onNavigate }) {
             <section className="lp-hero">
                 <div className="lp-hero-content">
                     <div className="lp-hero-left">
-                        {/* Typewriter */}
                         <div className="lp-typewriter-wrap">
                             <h1 className="lp-typewriter">
                                 {typedText}
@@ -197,13 +194,11 @@ export default function LandingPage({ onNavigate }) {
                     </div>
 
                     <div className="lp-hero-right">
-                        {/* Bright map preview */}
                         <div className="lp-map-preview">
                             <div className="lp-map-container" ref={mapPreviewRef} />
                             <div className="lp-map-shine" />
                         </div>
 
-                        {/* Address input */}
                         <form className="lp-address-bar" onSubmit={handleSubmit}>
                             <svg
                                 className="lp-address-icon"
@@ -227,7 +222,6 @@ export default function LandingPage({ onNavigate }) {
                     </div>
                 </div>
 
-                {/* Scroll hint */}
                 <div className="lp-scroll-hint">
                     <svg
                         viewBox="0 0 24 24"
