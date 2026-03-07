@@ -26,6 +26,23 @@ export default function App() {
   const [isChatExpanded, setIsChatExpanded] = useState(false);
   const [modelParams, setModelParams] = useState(null);
   const [isModelOpen, setIsModelOpen] = useState(false);
+  const [analyzedUploads, setAnalyzedUploads] = useState([]);
+  const [floorPlans, setFloorPlans] = useState(null);
+  const [projectId, setProjectId] = useState(null);
+
+  const handleUploadAnalyzed = useCallback((upload) => {
+    setAnalyzedUploads((prev) => {
+      // Deduplicate by id
+      if (prev.some((u) => u.id === upload.id)) return prev;
+      return [...prev, upload];
+    });
+    // If upload has floor plan data, set it and open model viewer
+    if (upload.extractedData?.floor_plans) {
+      setFloorPlans(upload.extractedData.floor_plans);
+      setProjectId(upload.id); // Use upload id as project scope
+      setIsModelOpen(true);
+    }
+  }, []);
 
   const historyKey = useMemo(
     () => (user?.sub ? `arterial_history_${user.sub}` : null),
@@ -278,6 +295,7 @@ export default function App() {
         activeNav={activeNav}
         savedParcels={savedParcels}
         onSaveParcel={handleSaveParcel}
+        onUploadAnalyzed={handleUploadAnalyzed}
       />
       {!isPanelOpen && (
         <button
@@ -300,6 +318,7 @@ export default function App() {
         onToggleExpand={setIsChatExpanded}
         modelParams={modelParams}
         onModelUpdate={(params) => { setModelParams(params); setIsModelOpen(true); }}
+        analyzedUploads={analyzedUploads}
         onPlanComplete={(massing) => {
           if (mapRef.current && selectedParcel?.geom) {
             mapRef.current.setProposedMassing(selectedParcel.geom, massing.height_m || (massing.storeys * 3.5));
@@ -323,6 +342,9 @@ export default function App() {
           isPanelOpen={isPanelOpen}
           isSidebarCollapsed={isSidebarCollapsed}
           isChatExpanded={isChatExpanded}
+          floorPlans={floorPlans}
+          projectId={projectId}
+          parcelId={selectedParcel?.id}
         />
       </Suspense>
     </>

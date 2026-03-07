@@ -40,6 +40,10 @@ class UploadedDocument(Base, UUIDPrimaryKey, TimestampMixin):
 
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # Floor plan data
+    page_classifications: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    floor_plan_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
     # Relationships
     pages: Mapped[list["DocumentPage"]] = relationship(
         back_populates="document", cascade="all, delete-orphan", order_by="DocumentPage.page_number"

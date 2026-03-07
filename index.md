@@ -87,7 +87,7 @@ finance → entitlement → precedent_search → document_generation
 | File | Purpose |
 |------|---------|
 | `app/__init__.py` | Package version (0.1.0) |
-| `app/main.py` | FastAPI init, router registration, CORS + RequestID middleware |
+| `app/main.py` | FastAPI init, router registration (incl. design_versions), CORS + RequestID middleware |
 | `app/config.py` | Pydantic Settings: DB URLs, S3, JWT, AI provider, Celery config |
 | `app/database.py` | Async/sync SQLAlchemy engine factories, session makers, Redis connection |
 | `app/worker.py` | Celery app config: JSON serialization, task autodiscovery, beat schedule |
@@ -189,10 +189,16 @@ finance → entitlement → precedent_search → document_generation
 | `ExportJob` | governance_status (pending/approved/blocked); applied_controls_json; S3 object_key; signed_url; expiry |
 | `AuditEvent` | All material actions: user, event_type, entity_id, payload, IP, timestamp |
 
+#### `app/models/design_version.py`
+| Model | Key Fields |
+|-------|-----------|
+| `DesignBranch` | project_id, organization_id, name, created_by; has many DesignVersions |
+| `DesignVersion` | branch_id, parent_version_id, version_number, floor_plans (JSON), model_params (JSON), compliance_status, compliance_details, variance_items, blocking_issues, message, change_summary |
+
 #### `app/models/upload.py`
 | Model | Key Fields |
 |-------|-----------|
-| `UploadedDocument` | file metadata; extraction state; compliance findings; AI provider metadata |
+| `UploadedDocument` | file metadata; extraction state; compliance findings; AI provider metadata; page_classifications; floor_plan_data (DXF/PDF vector geometry) |
 | `DocumentPage` | Page-level extraction (text, analysis JSON); image dims; S3 object_key |
 
 ---
@@ -223,7 +229,7 @@ finance → entitlement → precedent_search → document_generation
 | Method | Route | Purpose |
 |--------|-------|---------|
 | POST | `/api/v1/assistant/chat` | Multi-turn chat; returns message + optional ProposedAction |
-| POST | `/api/v1/assistant/parse-model` | Parse natural-language building description → ModelParseResponse (storeys, height_m, typology, setback_m, etc.) |
+| POST | `/api/v1/assistant/parse-model` | Parse natural-language building description → ModelParseResponse (storeys, height_m, typology, setback_m, unit_width, tower_shape, warnings); zoning-aware clamping when zone_code provided |
 
 #### Parcels — `app/routers/parcels.py`
 | Method | Route | Purpose |
@@ -286,6 +292,17 @@ finance → entitlement → precedent_search → document_generation
 | POST | `/api/v1/uploads/{id}/generate-plan` | Feed upload into plan pipeline |
 | POST | `/api/v1/uploads/{id}/generate-response` | Generate response doc from findings |
 
+#### Design Versions — `app/routers/design_versions.py`
+| Method | Route | Purpose |
+|--------|-------|---------|
+| POST | `/api/v1/designs/{project_id}/branches` | Create design branch (optionally fork from existing version) |
+| GET | `/api/v1/designs/{project_id}/branches` | List branches for project |
+| DELETE | `/api/v1/designs/{project_id}/branches/{branch_id}` | Delete branch and all versions |
+| POST | `/api/v1/designs/branches/{branch_id}/commit` | Commit new version with compliance check |
+| GET | `/api/v1/designs/branches/{branch_id}/versions` | List versions on branch |
+| GET | `/api/v1/designs/branches/{branch_id}/latest` | Get latest version on branch |
+| GET | `/api/v1/designs/versions/{version_id}` | Get specific version |
+
 #### Ingestion — `app/routers/ingestion.py`
 | Method | Route | Purpose |
 |--------|-------|---------|
@@ -299,6 +316,7 @@ finance → entitlement → precedent_search → document_generation
 
 | File | Purpose |
 |------|---------|
+| `app/services/design_version_service.py` | Design version control: create/list/delete branches, commit versions with auto-compliance check against parcel zoning, change summary generation |
 | `app/services/compliance_engine.py` | **Deterministic, no AI.** Rule-by-rule compliance matrix (lot coverage, FSI, height, setbacks, parking, amenity space). Returns `ComplianceResult` with variances needed. |
 | `app/services/zoning_service.py` | `ZoningAnalysis` builder; normalize zone codes; extract params from map labels |
 | `app/services/zoning_parser.py` | Parse zone strings like `RD(f12.0; a370; d0.6)` into structured standards |
@@ -309,7 +327,8 @@ finance → entitlement → precedent_search → document_generation
 | `app/services/access_control.py` | Org ownership checks for all resource types |
 | `app/services/idempotency.py` | Cache job responses by Idempotency-Key header (Redis) |
 | `app/services/storage.py` | S3/MinIO: upload_file, generate_presigned_url, ensure_bucket_exists |
-| `app/services/document_processor.py` | PDF parsing, page extraction, OCR |
+| `app/services/dxf_parser.py` | DXF floor plan parsing using ezdxf; extracts walls, rooms, doors/windows, floor groupings; handles xref-prefixed layers, %%u formatting codes, oversized hatch filtering; outputs centred metre coordinates |
+| `app/services/document_processor.py` | PDF parsing, page extraction, OCR, DXF file classification, PDF vector geometry extraction |
 | `app/services/document_analyzer.py` | AI-powered analysis: extract dims, unit mix, compliance issues from docs |
 | `app/services/thin_slice_runtime.py` | `ensure_reference_data()` — seed massing templates, unit types, assumptions |
 | `app/services/simulation_runtime.py` | Parametric massing envelope; unit mix layout optimization |
@@ -336,7 +355,7 @@ finance → entitlement → precedent_search → document_generation
 | `app/tasks/massing.py` | `run_massing` | Generate 3D envelope: height, storeys, GFA, lot_coverage, FSI, 2D geom |
 | `app/tasks/layout.py` | `run_layout` | Optimize unit mix; outputs unit breakdown, total_units, total_area |
 | `app/tasks/finance.py` | `run_financial_analysis` | Pro forma: revenue, costs, NOI, valuation, residual land value, IRR |
-| `app/tasks/document_analysis.py` | `analyze_document` | Extract pages, OCR, AI analysis; populate extracted_data, compliance_findings |
+| `app/tasks/document_analysis.py` | `analyze_document` | DXF floor plan parsing, PDF page extraction + vector geometry, AI analysis; populate extracted_data, compliance_findings, floor_plan_data |
 | `app/tasks/ingestion.py` | `ingest_building_permits_task` | Fetch + upsert permits from Toronto CKAN |
 | `app/tasks/ingestion.py` | `ingest_coa_applications_task` | Fetch + upsert COA apps from CKAN |
 | `app/tasks/export.py` | Export task | Render to PDF; apply governance controls; generate signed URL |
@@ -358,12 +377,13 @@ finance → entitlement → precedent_search → document_generation
 |------|------------|
 | `app/schemas/auth.py` | LoginRequest, RegisterRequest, TokenResponse, UserInfo |
 | `app/schemas/plan.py` | PlanGenerateRequest, PlanResponse, PlanListResponse, SubmissionDocumentResponse, PlanSubmissionReadinessResponse |
-| `app/schemas/assistant.py` | AssistantChatRequest, AssistantChatResponse, ProposedAction, ModelParseRequest, ModelParseResponse |
+| `app/schemas/assistant.py` | AssistantChatRequest, AssistantChatResponse, ProposedAction, ModelParseRequest (zone_code, lot_area_m2), ModelParseResponse (unit_width, tower_shape, warnings) |
 | `app/schemas/geospatial.py` | ParcelResponse, ParcelDetailResponse, ParcelSearchParams, PolicyStackResponse, ParcelOverlaysResponse |
 | `app/schemas/entitlement.py` | EntitlementRunRequest/Response, PrecedentSearchRequest/Response |
 | `app/schemas/simulation.py` | MassingRequest/Response, LayoutRunRequest/Response, UnitTypeReferenceResponse |
 | `app/schemas/finance.py` | FinancialRunRequest/Response, FinancialAssumptionSetReferenceResponse |
-| `app/schemas/upload.py` | UploadResponse, UploadDetail, UploadListItem, PageDetail |
+| `app/schemas/design_version.py` | BranchCreate, BranchResponse, CommitRequest, VersionResponse |
+| `app/schemas/upload.py` | UploadResponse, UploadDetail (+ page_classifications, floor_plan_data), UploadListItem, PageDetail |
 | `app/schemas/tenant.py` | ProjectCreate/Response, ScenarioCreate/Response, AddParcelRequest |
 | `app/schemas/common.py` | JobAccepted, ErrorResponse |
 
@@ -397,8 +417,8 @@ finance → entitlement → precedent_search → document_generation
 | File | Purpose |
 |------|---------|
 | `src/main.jsx` | React 19 mount; Auth0Provider with hardcoded domain/clientId; localstorage token cache |
-| `src/App.jsx` | Root orchestrator; routing via `currentPage` state ('landing'/'dashboard'); auth gate; multi-component layout |
-| `src/api.js` | HTTP wrapper; base `/api/v1`; reads `localStorage['token']` for Bearer auth; all backend endpoints |
+| `src/App.jsx` | Root orchestrator; routing via `currentPage` state ('landing'/'dashboard'); auth gate; multi-component layout; floorPlans + projectId state wired to ModelViewer for upload-driven floor plan viewing |
+| `src/api.js` | HTTP wrapper; base `/api/v1`; reads `localStorage['token']` for Bearer auth; all backend endpoints including design version control (createBranch, listBranches, commitVersion, listVersions, getVersion, getLatestVersion) |
 
 **App.jsx key state:**
 ```
@@ -413,10 +433,12 @@ activeNav, savedParcels, showHistory, searchHistory (localStorage per user)
 | File | Purpose | Key Features |
 |------|---------|--------------|
 | `src/components/MapView.jsx` | MapLibre GL map; Toronto center | Imperative handle API: `flyTo()`, `setMarker()`, `setParcel()`, `setProposedMassing()`. Layers: osm-buildings-3d, parcel-fill, parcel-line, proposed-massing-extrusion (3D). Pitch 60° when massing shown. Shows "Model" button when parcel resolved. |
-| `src/components/ModelViewer.jsx` | Full-screen 3D building model modal | Three.js/R3F Canvas; OrbitControls; podium+tower ExtrudeGeometry from real parcel footprint; gold massing (#c8a55c/#d4b87a); dark background; Reset camera button. Lazy-loaded. |
+| `src/components/ModelViewer.jsx` | Full-screen 3D building model modal | Three.js/R3F Canvas; OrbitControls; typology-dispatched floor-plate geometry (midrise, tower_on_podium, point_tower, townhouse, slab, mixed_use_midrise); floor gaps between slabs; zoning warning display in info bar. View modes (massing/interior/blueprint), floor selector, room info panel, version control bar (branch selector, commit/discard, history panel). Lazy-loaded. |
+| `src/components/FloorPlanView.jsx` | 3D interior floor plan renderer | R3F component; renders rooms as extruded polygons with type-based colors, walls as boxes; floor slab per level; click-to-select rooms with gold emissive highlight; per-floor Y spacing. |
+| `src/components/BlueprintOverlay.jsx` | Blueprint image overlay | R3F component; loads blueprint page images as textured planes at floor Y offsets; supports per-floor or all-floors display. |
 | `src/components/SearchBar.jsx` | Address search + geocoding | 350ms debounce; Nominatim OSM API scoped to Toronto; 6 suggestions max; Enter/Escape keyboard support |
 | `src/components/Sidebar.jsx` | Left nav panel | 7 nav items: Overview/Massing/Finances/Entitlements/Policies/Datasets/Precedents. History panel. Collapsed/expanded state. |
-| `src/components/PolicyPanel.jsx` | Right-side 7-tab panel | Tabs: Overview (compliance status), Massing (envelope), Policies (accordion), Datasets (overlays), Precedents (stub), Entitlements (pathway badges + export), Finances (stub). Hardcoded `ZONING_DATA` lookup. `complianceStatus()` logic: ok/variance(≤+15%)/rezone(>+15%). Export to HTML. |
+| `src/components/PolicyPanel.jsx` | Right-side 7-tab panel | Tabs: Overview (compliance status + file upload zone for blueprints/drawings/reports), Massing (envelope), Policies (accordion), Datasets (overlays), Precedents (stub), Entitlements (pathway badges + export), Finances (stub). `FileUploadZone` component with drag-drop, multi-file, polling analysis. `complianceStatus()` logic: ok/variance(≤+15%)/rezone(>+15%). Export to HTML. |
 | `src/components/ChatPanel.jsx` | AI assistant + file upload | Chat with backend `/assistant/chat`. Plan generation polling (30 attempts × 3s). File upload (PDF/img/xlsx/csv, 50MB max). Upload polling (40 attempts × 3s). `parseChatCommand()` regex for special commands. Drag-and-drop. |
 | `src/components/LandingPage.jsx` | Marketing homepage | Auth0 login/logout. Typewriter effect (10 dev queries, 45ms/char). MapLibre preview. Hero → Story → Vision → Footer. |
 | `src/components/UserBubble.jsx` | Animated user bubble (bottom-right) | Hover expand (44px→260px, 0.45s). Breathing pulse. User avatar + online dot + sign out. |
@@ -429,8 +451,8 @@ activeNav, savedParcels, showHistory, searchHistory (localStorage per user)
 | File | Purpose |
 |------|---------|
 | `src/lib/parcelState.js` | Parcel shape builders: `buildParcelState()`, `isResolvedParcel()`, `isUnresolvedParcel()`, `formatParcelContext()`, `normalizeZoneCode()` (extracts leading alpha prefix e.g. `"CR 4.0..."` → `"CR"`) |
-| `src/lib/chatCommands.js` | Regex command parser: `PLAN_FROM_UPLOAD_RE`, `RESPONSE_FROM_UPLOAD_RE`, `PLAN_RE`, `MODEL_RE` → `{type, query}` |
-| `src/lib/buildingGeometry.js` | GeoJSON polygon → local metres; polygon shrink (centroid offset); `extractFootprint()` with fallback 20×15m rectangle |
+| `src/lib/chatCommands.js` | Regex command parser: `PLAN_FROM_UPLOAD_RE`, `RESPONSE_FROM_UPLOAD_RE`, `PLAN_RE`, `MODEL_RE`, `FLOOR_RE`, `VIEW_MODE_RE`, `COMMIT_RE`, `BRANCH_RE`, `HISTORY_RE` → `{type, query/floor/mode/message/name}` |
+| `src/lib/buildingGeometry.js` | GeoJSON polygon → local metres; polygon shrink; `extractFootprint()`; `makeCircularFootprint()` for point towers; `subdivideFootprintIntoUnits()` for townhouse rows |
 | `src/lib/parcelState.test.js` | Node native test runner unit tests for parcelState |
 | `src/lib/chatCommands.test.js` | Unit tests for chatCommands |
 
@@ -440,7 +462,7 @@ activeNav, savedParcels, showHistory, searchHistory (localStorage per user)
 
 | File | Purpose |
 |------|---------|
-| `src/ModelViewer.css` | 3D model modal styles: dark overlay, header, canvas, controls bar, "Model" map button |
+| `src/ModelViewer.css` | 3D model modal styles: dark overlay, header, canvas, controls bar, "Model" map button, version control bar, view mode toggle, floor selector, room info panel, commit modal, history panel |
 | `src/index.css` | 52KB global design system: dark theme, gold accent (#c8a55c), Inter font, sidebar/panel/chat/searchbar/button styles. Layout states via body classes: `.sidebar-collapsed`, `.panel-open`, `.lp-active` |
 | `src/landing.css` | 554 lines marketing page styles: navbar, hero, typewriter, map preview, address bar, sections, footer |
 | `src/UserBubble.css` | Bubble animations: width expansion, pulse breathing, content reveal |
@@ -461,7 +483,7 @@ activeNav, savedParcels, showHistory, searchHistory (localStorage per user)
 | `Dockerfile` | Python 3.11-slim; geospatial libs (libgdal, libgeos, libproj, gcc); uvicorn port 8000 |
 | `.env.example` | Template: DATABASE_URL, REDIS_URL, MINIO settings, JWT_SECRET, AI_PROVIDER, ANTHROPIC_API_KEY, CELERY config |
 | `.env` | Live localhost config; **contains real API key** |
-| `pyproject.toml` | Project: `arterial` v0.1.0, Python ≥3.11. Deps: FastAPI, SQLAlchemy, asyncpg, GeoAlchemy2, pgvector, Celery, Redis, Pydantic. Dev: pytest, ruff. |
+| `pyproject.toml` | Project: `arterial` v0.1.0, Python ≥3.11. Deps: FastAPI, SQLAlchemy, asyncpg, GeoAlchemy2, pgvector, Celery, Redis, Pydantic, ezdxf. Dev: pytest, ruff. |
 | `alembic.ini` | Alembic migration config; script location `./alembic`; logging |
 | `scripts/init-extensions.sql` | PostgreSQL init: uuid-ossp, postgis, vector extensions |
 
@@ -475,6 +497,8 @@ activeNav, savedParcels, showHistory, searchHistory (localStorage per user)
 | `alembic/versions/001_initial_schema.py` | Initial schema (48KB) |
 | `alembic/versions/002_full_schema_evolution.py` | Full schema evolution (45KB) |
 | `alembic/versions/003_add_uploaded_documents.py` | Adds UploadedDocument + DocumentPage tables (3KB) |
+| `alembic/versions/004_add_policy_versions_created_at.py` | Adds created_at to policy_versions |
+| `alembic/versions/005_add_design_versions.py` | Adds design_branches + design_versions tables; floor plan columns on uploaded_documents |
 
 ---
 
@@ -644,10 +668,17 @@ Full table — all routes across all routers:
 | GET | `/api/v1/uploads/{id}/analysis` | Yes | No | ✓ |
 | POST | `/api/v1/uploads/{id}/generate-plan` | Yes | Yes | ✓ |
 | POST | `/api/v1/uploads/{id}/generate-response` | Yes | No | ✓ |
+| POST | `/api/v1/designs/{project_id}/branches` | Yes | No | ✓ |
+| GET | `/api/v1/designs/{project_id}/branches` | Yes | No | ✓ |
+| DELETE | `/api/v1/designs/{project_id}/branches/{branch_id}` | Yes | No | ✓ |
+| POST | `/api/v1/designs/branches/{branch_id}/commit` | Yes | No | ✓ |
+| GET | `/api/v1/designs/branches/{branch_id}/versions` | Yes | No | ✓ |
+| GET | `/api/v1/designs/branches/{branch_id}/latest` | Yes | No | ✓ |
+| GET | `/api/v1/designs/versions/{version_id}` | Yes | No | ✓ |
 | POST | `/api/v1/admin/ingest/building-permits` | Yes | Yes | ✓ |
 | POST | `/api/v1/admin/ingest/coa-applications` | Yes | Yes | ✓ |
 | GET | `/api/v1/admin/ingest/status` | Yes | No | ✓ |
 
 ---
 
-*Last updated: 2026-03-07*
+*Last updated: 2026-03-07 (Phase 3+4: enhanced 3D viewer with floor plans, view modes, version control UI, design API wiring)*

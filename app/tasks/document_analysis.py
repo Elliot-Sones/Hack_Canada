@@ -4,6 +4,7 @@ import asyncio
 import uuid
 
 import structlog
+from botocore.exceptions import BotoCoreError, ClientError
 
 from app.database import get_sync_db
 from app.models.upload import DocumentPage, UploadedDocument
@@ -20,7 +21,14 @@ def _update_status(db, doc, status, error=None):
     db.refresh(doc)
 
 
-@celery_app.task(bind=True, name="app.tasks.document_analysis.analyze_document")
+@celery_app.task(
+    bind=True,
+    name="app.tasks.document_analysis.analyze_document",
+    autoretry_for=(BotoCoreError, ClientError, ConnectionError, TimeoutError),
+    retry_backoff=True,
+    retry_jitter=True,
+    retry_kwargs={"max_retries": 3},
+)
 def analyze_document(self, document_id: str):
     """Process an uploaded document: convert PDF pages, run AI extraction and compliance review.
 
@@ -44,11 +52,30 @@ def analyze_document(self, document_id: str):
         file_bytes = download_file(doc.object_key)
         logger.info("document_analysis.downloaded", document_id=document_id, size=len(file_bytes))
 
-        # Step 2: If PDF, convert to page PNGs
+        # Step 2: Check file type and process accordingly
         page_images: list[bytes] = []
         is_pdf = doc.content_type == "application/pdf" or doc.original_filename.lower().endswith(".pdf")
+        is_dxf = doc.original_filename.lower().endswith(".dxf")
 
-        if is_pdf:
+        if is_dxf:
+            from app.services.dxf_parser import parse_dxf
+
+            try:
+                floor_plan_data = parse_dxf(file_bytes)
+                doc.floor_plan_data = floor_plan_data
+                doc.extracted_data = {"floor_plans": floor_plan_data}
+                doc.page_count = len(floor_plan_data.get("floor_plans", []))
+                _update_status(db, doc, "analyzed")
+                logger.info("document_analysis.dxf_parsed", document_id=document_id,
+                           floors=len(floor_plan_data.get("floor_plans", [])))
+                return {"document_id": document_id, "status": "analyzed", "type": "dxf"}
+            except Exception as e:
+                logger.warning("document_analysis.dxf_failed", document_id=document_id, error=str(e))
+                doc.extracted_data = {"error": f"DXF parsing failed: {e}"}
+                _update_status(db, doc, "failed", error=str(e))
+                return {"document_id": document_id, "status": "failed"}
+
+        elif is_pdf:
             from app.services.document_processor import process_pdf
             from app.services.storage import upload_file
 
@@ -71,6 +98,12 @@ def analyze_document(self, document_id: str):
 
             db.commit()
             logger.info("document_analysis.pages_converted", document_id=document_id, page_count=len(pages))
+
+            # Try vector extraction for floor plan geometry
+            from app.services.document_processor import extract_pdf_vectors
+            vectors = extract_pdf_vectors(file_bytes)
+            if vectors:
+                doc.floor_plan_data = {"pages": vectors, "source": "pdf_vectors"}
 
         elif doc.content_type.startswith("image/"):
             # Single image — use directly

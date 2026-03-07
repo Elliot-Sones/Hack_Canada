@@ -50,11 +50,92 @@ def get_file_category(filename: str, content_type: str) -> str:
     if content_type.startswith("image/"):
         return "site_photo"
 
+    if lower.endswith(".dxf"):
+        return "cad_drawing"
+
     spreadsheet_exts = (".xlsx", ".xls", ".csv", ".ods")
     if any(lower.endswith(ext) for ext in spreadsheet_exts):
         return "spreadsheet"
 
     return "other"
+
+
+def extract_pdf_vectors(file_bytes: bytes) -> list[dict] | None:
+    """Try to extract vector geometry from PDF pages using PyMuPDF.
+
+    Returns list of per-page geometry dicts, or None if extraction fails.
+    """
+    import fitz
+
+    try:
+        doc = fitz.open(stream=file_bytes, filetype="pdf")
+        pages_geometry = []
+
+        for page_num in range(len(doc)):
+            page = doc.load_page(page_num)
+            drawings = page.get_drawings()
+
+            if not drawings:
+                pages_geometry.append(None)
+                continue
+
+            walls = []
+            room_polygons = []
+
+            for path in drawings:
+                items = path.get("items", [])
+                fill = path.get("fill")
+
+                points = []
+                for item in items:
+                    if item[0] == "l":  # line
+                        p1, p2 = item[1], item[2]
+                        # Convert from points to metres (1 point = 1/72 inch = 0.000352778 m)
+                        scale = 0.000352778
+                        walls.append({
+                            "start": [p1.x * scale, p1.y * scale],
+                            "end": [p2.x * scale, p2.y * scale],
+                            "thickness_m": (path.get("width", 1) or 1) * scale,
+                            "type": "interior",
+                        })
+                    elif item[0] in ("c", "qu"):  # curve
+                        pass  # skip curves for now
+
+                    if item[0] == "l":
+                        points.extend([item[1], item[2]])
+
+                # If path is filled/closed, treat as room polygon
+                if fill is not None and len(points) >= 6:
+                    scale = 0.000352778
+                    polygon = [(p.x * scale, p.y * scale) for p in points]
+                    # Remove duplicates
+                    seen = set()
+                    unique = []
+                    for pt in polygon:
+                        key = (round(pt[0], 4), round(pt[1], 4))
+                        if key not in seen:
+                            seen.add(key)
+                            unique.append(list(pt))
+                    if len(unique) >= 3:
+                        room_polygons.append(unique)
+
+            if walls or room_polygons:
+                pages_geometry.append({
+                    "walls": walls,
+                    "rooms": [{"polygon": poly, "name": f"Room {i+1}", "type": "other"} for i, poly in enumerate(room_polygons)],
+                })
+            else:
+                pages_geometry.append(None)
+
+        doc.close()
+
+        # Return None if no pages had vector data
+        if all(pg is None for pg in pages_geometry):
+            return None
+
+        return pages_geometry
+    except Exception:
+        return None
 
 
 def compute_file_hash(file_bytes: bytes) -> str:

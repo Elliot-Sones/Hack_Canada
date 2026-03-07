@@ -27,6 +27,8 @@ class UploadDetail(BaseModel):
     ai_provider: str | None = None
     ai_model: str | None = None
     error_message: str | None = None
+    page_classifications: dict | None = None
+    floor_plan_data: dict | None = None
     plan_id: uuid.UUID | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None

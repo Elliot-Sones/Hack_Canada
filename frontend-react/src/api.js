@@ -22,10 +22,19 @@ function getErrorMessage(data, status) {
     return `API returned ${status}`;
 }
 
+function isAbortError(error) {
+    return error?.name === 'AbortError';
+}
+
 async function apiFetch(url, options = {}) {
     const res = await fetch(url, { ...options, headers: { ...authHeaders(), ...options.headers } });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(getErrorMessage(data, res.status));
+    if (!res.ok) {
+        const error = new Error(getErrorMessage(data, res.status));
+        error.status = res.status;
+        error.data = data;
+        throw error;
+    }
     return data;
 }
 
@@ -55,46 +64,69 @@ export async function searchParcels(address) {
     }
 }
 
-export async function getParcel(parcelId) {
+export async function getParcel(parcelId, options = {}) {
     try {
-        return await apiFetch(`${API_BASE}/parcels/${parcelId}`);
-    } catch {
+        return await apiFetch(`${API_BASE}/parcels/${parcelId}`, options);
+    } catch (error) {
+        if (isAbortError(error)) throw error;
         return null;
     }
 }
 
-export async function getPolicyStack(parcelId) {
+export async function getPolicyStack(parcelId, options = {}) {
     try {
-        return await apiFetch(`${API_BASE}/parcels/${parcelId}/policy-stack`);
-    } catch {
+        return await apiFetch(`${API_BASE}/parcels/${parcelId}/policy-stack`, options);
+    } catch (error) {
+        if (isAbortError(error)) throw error;
         return { parcel_id: parcelId, applicable_policies: [], citations: [] };
     }
 }
 
-export async function getParcelOverlays(parcelId) {
+export async function getParcelOverlays(parcelId, options = {}) {
     try {
-        return await apiFetch(`${API_BASE}/parcels/${parcelId}/overlays`);
-    } catch {
+        return await apiFetch(`${API_BASE}/parcels/${parcelId}/overlays`, options);
+    } catch (error) {
+        if (isAbortError(error)) throw error;
         return { parcel_id: parcelId, overlays: [] };
+    }
+}
+
+export async function getParcelZoningAnalysis(parcelId, options = {}) {
+    try {
+        return await apiFetch(`${API_BASE}/parcels/${parcelId}/zoning-analysis`, options);
+    } catch (error) {
+        if (isAbortError(error)) throw error;
+        return null;
     }
 }
 
 // ─── Assistant ───
 
-export async function parseModel(text, currentParams = null) {
+export async function parseModel(text, currentParams = null, zoneCode = null, lotAreaM2 = null) {
+    const payload = { text, current_params: currentParams };
+    if (zoneCode) payload.zone_code = zoneCode;
+    if (lotAreaM2) payload.lot_area_m2 = lotAreaM2;
     return apiFetch(`${API_BASE}/assistant/parse-model`, {
         method: 'POST',
-        body: JSON.stringify({ text, current_params: currentParams }),
+        body: JSON.stringify(payload),
     });
 }
 
-export async function chatWithAssistant({ messages, parcelContext = null }) {
+export async function chatWithAssistant({ messages, parcelContext = null, modelParams = null, zoneCode = null, uploadContext = null }) {
+    const payload = { messages, parcel_context: parcelContext };
+    if (modelParams) payload.model_params = modelParams;
+    if (zoneCode) payload.zone_code = zoneCode;
+    if (uploadContext?.length) payload.upload_context = uploadContext;
     const data = await apiFetch(`${API_BASE}/assistant/chat`, {
         method: 'POST',
-        body: JSON.stringify({ messages, parcel_context: parcelContext }),
+        body: JSON.stringify(payload),
     });
     if (typeof data?.message !== 'string') throw new Error('Assistant response was malformed.');
-    return { message: data.message, proposedAction: data.proposed_action ?? null };
+    return {
+        message: data.message,
+        proposedAction: data.proposed_action ?? null,
+        modelUpdate: data.model_update ?? null,
+    };
 }
 
 // ─── Plans ───
@@ -106,17 +138,17 @@ export async function generatePlan(query) {
     });
 }
 
-export async function getPlan(planId) {
-    return apiFetch(`${API_BASE}/plans/${planId}`);
+export async function getPlan(planId, options = {}) {
+    return apiFetch(`${API_BASE}/plans/${planId}`, options);
 }
 
-export async function getPlanDocuments(planId) {
-    return apiFetch(`${API_BASE}/plans/${planId}/documents`);
+export async function getPlanDocuments(planId, options = {}) {
+    return apiFetch(`${API_BASE}/plans/${planId}/documents`, options);
 }
 
 // ─── Uploads ───
 
-export async function uploadDocument(file) {
+export async function uploadDocument(file, options = {}) {
     const formData = new FormData();
     formData.append('file', file);
     const token = localStorage.getItem('token');
@@ -127,22 +159,28 @@ export async function uploadDocument(file) {
         method: 'POST',
         headers,
         body: formData,
+        signal: options.signal,
     });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(getErrorMessage(data, res.status));
+    if (!res.ok) {
+        const error = new Error(getErrorMessage(data, res.status));
+        error.status = res.status;
+        error.data = data;
+        throw error;
+    }
     return data;
 }
 
-export async function getUpload(uploadId) {
-    return apiFetch(`${API_BASE}/uploads/${uploadId}`);
+export async function getUpload(uploadId, options = {}) {
+    return apiFetch(`${API_BASE}/uploads/${uploadId}`, options);
 }
 
-export async function getUploadPages(uploadId) {
-    return apiFetch(`${API_BASE}/uploads/${uploadId}/pages`);
+export async function getUploadPages(uploadId, options = {}) {
+    return apiFetch(`${API_BASE}/uploads/${uploadId}/pages`, options);
 }
 
-export async function getUploadAnalysis(uploadId) {
-    return apiFetch(`${API_BASE}/uploads/${uploadId}/analysis`);
+export async function getUploadAnalysis(uploadId, options = {}) {
+    return apiFetch(`${API_BASE}/uploads/${uploadId}/analysis`, options);
 }
 
 export async function generatePlanFromUpload(uploadId, projectName = null) {
@@ -157,4 +195,53 @@ export async function generateResponseFromUpload(uploadId, responseType = 'corre
         method: 'POST',
         body: JSON.stringify({ response_type: responseType }),
     });
+}
+
+// ─── Design Version Control ───
+
+export async function createBranch(projectId, name, fromVersionId = null) {
+    return apiFetch(`${API_BASE}/designs/${projectId}/branches`, {
+        method: 'POST',
+        body: JSON.stringify({ name, from_version_id: fromVersionId }),
+    });
+}
+
+export async function listBranches(projectId) {
+    try {
+        return await apiFetch(`${API_BASE}/designs/${projectId}/branches`);
+    } catch {
+        return [];
+    }
+}
+
+export async function commitVersion(branchId, { floorPlans, modelParams, message, parcelId }) {
+    return apiFetch(`${API_BASE}/designs/branches/${branchId}/commit`, {
+        method: 'POST',
+        body: JSON.stringify({
+            floor_plans: floorPlans,
+            model_params: modelParams,
+            message,
+            parcel_id: parcelId,
+        }),
+    });
+}
+
+export async function listVersions(branchId) {
+    try {
+        return await apiFetch(`${API_BASE}/designs/branches/${branchId}/versions`);
+    } catch {
+        return [];
+    }
+}
+
+export async function getVersion(versionId) {
+    return apiFetch(`${API_BASE}/designs/versions/${versionId}`);
+}
+
+export async function getLatestVersion(branchId) {
+    try {
+        return await apiFetch(`${API_BASE}/designs/branches/${branchId}/latest`);
+    } catch {
+        return null;
+    }
 }
