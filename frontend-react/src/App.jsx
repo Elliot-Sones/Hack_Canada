@@ -12,7 +12,7 @@ import { buildParcelState, isResolvedParcel } from './lib/parcelState.js';
 import './landing.css';
 
 export default function App() {
-  const { isLoading } = useAuth0();
+  const { isLoading, isAuthenticated, loginWithRedirect } = useAuth0();
 
   const [currentPage, setCurrentPage] = useState('landing');
   const [selectedParcel, setSelectedParcel] = useState(null);
@@ -20,6 +20,9 @@ export default function App() {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [activeNav, setActiveNav] = useState('overview');
   const [savedParcels, setSavedParcels] = useState([]);
+
+  // Store pending address to process after authentication
+  const [pendingAddress, setPendingAddress] = useState(null);
 
   const mapRef = useRef(null);
 
@@ -59,6 +62,19 @@ export default function App() {
 
   const handleLandingNavigate = useCallback(
     async (address) => {
+      // If user is not authenticated, store the address and redirect to login
+      if (!isAuthenticated) {
+        if (address) {
+          setPendingAddress(address);
+          // Store in sessionStorage so it persists through the redirect
+          sessionStorage.setItem('pendingAddress', address);
+        }
+        loginWithRedirect({
+          appState: { returnTo: '/dashboard', pendingAddress: address },
+        });
+        return;
+      }
+
       setCurrentPage('dashboard');
 
       if (address) {
@@ -95,8 +111,26 @@ export default function App() {
         }
       }
     },
-    [handleLocationSelected]
+    [handleLocationSelected, isAuthenticated, loginWithRedirect]
   );
+
+  // After authentication, process any pending address
+  useEffect(() => {
+    if (isAuthenticated && !isLoading && currentPage === 'landing') {
+      const stored = sessionStorage.getItem('pendingAddress');
+      if (stored) {
+        sessionStorage.removeItem('pendingAddress');
+        handleLandingNavigate(stored);
+      }
+    }
+  }, [isAuthenticated, isLoading, currentPage, handleLandingNavigate]);
+
+  // Redirect unauthenticated users away from dashboard
+  useEffect(() => {
+    if (!isLoading && !isAuthenticated && currentPage === 'dashboard') {
+      loginWithRedirect();
+    }
+  }, [isLoading, isAuthenticated, currentPage, loginWithRedirect]);
 
   useEffect(() => {
     if (typeof document === 'undefined') return undefined;
@@ -119,22 +153,24 @@ export default function App() {
     return <LandingPage onNavigate={handleLandingNavigate} />;
   }
 
-  // Dashboard loading
-  if (isLoading) {
+  // Dashboard loading or waiting for auth
+  if (isLoading || !isAuthenticated) {
     return (
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        height: '100vh',
-        background: '#fafafa',
-      }}>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          height: '100vh',
+          background: '#fafafa',
+        }}
+      >
         <p>Loading...</p>
       </div>
     );
   }
 
-  // Dashboard
+  // Dashboard (authenticated only)
   return (
     <>
       {/* ✨ Dynamic Island User Bubble */}
@@ -162,7 +198,12 @@ export default function App() {
           onClick={() => setIsPanelOpen(true)}
           title="Show project info"
         >
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+          >
             <polyline points="15 18 9 12 15 6" />
           </svg>
         </button>

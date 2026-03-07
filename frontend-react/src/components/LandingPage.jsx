@@ -138,7 +138,7 @@ export default function LandingPage({ onNavigate }) {
                     <div className="lp-nav-actions">
                         {isLoading ? (
                             <span className="lp-nav-loading">Loading…</span>
-                        ) : isAuthenticated ? (
+                        ) : isAuthenticated && (
                             <>
                                 {user?.picture && (
                                     <img
@@ -155,23 +155,9 @@ export default function LandingPage({ onNavigate }) {
                                     Sign Out
                                 </button>
                             </>
-                        ) : (
-                            <>
-                                {error && (
-                                    <span className="lp-nav-error">
-                                        {error.message}
-                                    </span>
-                                )}
-                                <button className="lp-nav-link" onClick={login}>
-                                    Sign In
-                                </button>
-                                <button className="lp-nav-link" onClick={signup}>
-                                    Sign Up
-                                </button>
-                            </>
                         )}
                         <button className="lp-nav-cta" onClick={() => onNavigate('')}>
-                            Try Demo
+                            Get Started
                         </button>
                     </div>
                 </div>
