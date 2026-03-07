@@ -12,18 +12,18 @@ import {
 import { parseChatCommand } from '../lib/chatCommands.js';
 import { formatParcelContext } from '../lib/parcelState.js';
 
-export default function ChatPanel({ parcelContext }) {
+export default function ChatPanel({ parcelContext, onPlanComplete }) {
     const [isExpanded, setIsExpanded] = useState(false);
     const [messages, setMessages] = useState([
         {
             role: 'assistant',
-            text: "Hello! I'm your development due-diligence assistant. Search for a property above or ask me anything about zoning, policies, or development potential.\n\nYou can also say \"generate a plan for ...\" to trigger document generation.",
+            text: "Hello! I'm your development due-diligence assistant. Search for a property above or ask me anything about zoning, policies, or development potential.",
         },
     ]);
     const [inputValue, setInputValue] = useState('');
     const [isTyping, setIsTyping] = useState(false);
     const [isDragOver, setIsDragOver] = useState(false);
-    const [uploadProgress, setUploadProgress] = useState(null); // { filename, status }
+    const [uploadProgress, setUploadProgress] = useState(null);
     const [latestAnalyzedUpload, setLatestAnalyzedUpload] = useState(null);
 
     const conversationHistoryRef = useRef([]);
@@ -59,6 +59,9 @@ export default function ChatPanel({ parcelContext }) {
                         role: 'assistant',
                         text: `Plan generation complete! Generated documents:\n\n${docList}`,
                     }]);
+                    if (onPlanComplete && plan.summary?.massing) {
+                        onPlanComplete(plan.summary.massing);
+                    }
                     return;
                 }
                 if (plan.status === 'failed' || plan.status === 'error') {
@@ -84,7 +87,27 @@ export default function ChatPanel({ parcelContext }) {
             role: 'assistant',
             text: 'Plan generation is still in progress. Check back shortly.',
         }]);
-    }, []);
+    }, [onPlanComplete]);
+
+    const handleGenerateAction = useCallback(async (action, msgIdx) => {
+        // Disable the button on the message that proposed it
+        setMessages((prev) => prev.map((m, i) =>
+            i === msgIdx ? { ...m, actionFired: true } : m
+        ));
+        setMessages((prev) => [...prev, {
+            role: 'assistant',
+            text: `Starting: ${action.label}...`,
+        }]);
+        try {
+            const result = await generatePlan(action.query);
+            pollPlan(result.job_id);
+        } catch (err) {
+            setMessages((prev) => [...prev, {
+                role: 'assistant',
+                text: `Failed to start generation: ${err.message}`,
+            }]);
+        }
+    }, [pollPlan]);
 
     const sendMessage = useCallback(async () => {
         const text = inputValue.trim();
@@ -96,6 +119,7 @@ export default function ChatPanel({ parcelContext }) {
         conversationHistoryRef.current = nextHistory;
         setIsTyping(true);
 
+        // Keep upload-specific commands as direct shortcuts
         const command = parseChatCommand(text);
 
         if (command.type === 'plan_from_upload') {
@@ -107,7 +131,6 @@ export default function ChatPanel({ parcelContext }) {
                 setIsTyping(false);
                 return;
             }
-
             try {
                 const result = await generatePlanFromUpload(latestAnalyzedUpload.id);
                 setMessages((prev) => [...prev, {
@@ -136,7 +159,6 @@ export default function ChatPanel({ parcelContext }) {
                 setIsTyping(false);
                 return;
             }
-
             try {
                 const result = await generateResponseFromUpload(latestAnalyzedUpload.id);
                 const responseLabel = (result.response_type || 'response').replace(/_/g, ' ');
@@ -155,43 +177,26 @@ export default function ChatPanel({ parcelContext }) {
             return;
         }
 
-        if (command.type === 'plan') {
-            try {
-                const result = await generatePlan(command.query);
-                setMessages((prev) => [...prev, {
-                    role: 'assistant',
-                    text: `Plan generation started! I'll let you know when it's ready...`,
-                }]);
-                setIsTyping(false);
-                pollPlan(result.job_id);
-                return;
-            } catch (err) {
-                setMessages((prev) => [...prev, {
-                    role: 'assistant',
-                    text: `Failed to start plan generation: ${err.message}`,
-                }]);
-                setIsTyping(false);
-                return;
-            }
-        }
-
+        // All other messages go to the AI — it decides whether to answer or propose generation
         try {
-            const response = await chatWithAssistant({
+            const { message, proposedAction } = await chatWithAssistant({
                 messages: nextHistory.slice(-20),
                 parcelContext: parcelContextStr,
             });
-            const assistantMessage = { role: 'assistant', text: response };
+            const assistantMessage = {
+                role: 'assistant',
+                text: message,
+                action: proposedAction || null,
+                actionFired: false,
+            };
             setMessages((prev) => [...prev, assistantMessage]);
-            conversationHistoryRef.current = [...nextHistory, assistantMessage];
+            conversationHistoryRef.current = [...nextHistory, { role: 'assistant', text: message }];
         } catch (err) {
             console.error('Assistant chat error:', err);
-            setMessages((prev) => [
-                ...prev,
-                {
-                    role: 'assistant',
-                    text: `Sorry, I couldn't get a response right now. ${err.message}`,
-                },
-            ]);
+            setMessages((prev) => [...prev, {
+                role: 'assistant',
+                text: `Sorry, I couldn't get a response right now. ${err.message}`,
+            }]);
         } finally {
             setIsTyping(false);
         }
@@ -205,7 +210,7 @@ export default function ChatPanel({ parcelContext }) {
                 const upload = await getUpload(uploadId);
                 if (upload.status === 'analyzed') {
                     setUploadProgress(null);
-                    const parts = [`Document analyzed: **${filename}**`];
+                    const parts = [`Document analyzed: ${filename}`];
                     if (upload.doc_category) parts.push(`Category: ${upload.doc_category.replace(/_/g, ' ')}`);
                     if (upload.page_count) parts.push(`Pages: ${upload.page_count}`);
                     if (upload.extracted_data && !upload.extracted_data.error && !upload.extracted_data.note) {
@@ -219,12 +224,9 @@ export default function ChatPanel({ parcelContext }) {
                     if (upload.compliance_findings?.issues?.length) {
                         parts.push(`Compliance issues found: ${upload.compliance_findings.issues.length}`);
                     }
-                    parts.push(`\nYou can say "generate plan from upload" or "generate response from upload" to proceed.`);
+                    parts.push(`\nSay "generate plan from upload" or "generate response from upload" to proceed.`);
                     setMessages((prev) => [...prev, { role: 'assistant', text: parts.join('\n') }]);
-                    setLatestAnalyzedUpload({
-                        id: uploadId,
-                        filename,
-                    });
+                    setLatestAnalyzedUpload({ id: uploadId, filename });
                     return;
                 }
                 if (upload.status === 'failed') {
@@ -328,6 +330,20 @@ export default function ChatPanel({ parcelContext }) {
                             <div className="message-avatar">{msg.role === 'assistant' ? 'AI' : 'You'}</div>
                             <div className="message-content">
                                 <p style={{ whiteSpace: 'pre-wrap', margin: 0 }}>{msg.text}</p>
+                                {msg.role === 'assistant' && msg.action && !msg.actionFired && (
+                                    <button
+                                        className="generate-action-btn"
+                                        onClick={() => handleGenerateAction(msg.action, idx)}
+                                    >
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="13" height="13">
+                                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                                            <polyline points="14 2 14 8 20 8"/>
+                                            <line x1="12" y1="18" x2="12" y2="12"/>
+                                            <line x1="9" y1="15" x2="15" y2="15"/>
+                                        </svg>
+                                        {msg.action.label}
+                                    </button>
+                                )}
                             </div>
                         </div>
                     ))}
@@ -368,7 +384,7 @@ export default function ChatPanel({ parcelContext }) {
                     <input
                         type="text"
                         id="chat-input"
-                        placeholder="Ask about zoning, or drop a file to analyze..."
+                        placeholder="Ask about zoning, setbacks, variance requirements..."
                         autoComplete="off"
                         value={inputValue}
                         onChange={(e) => setInputValue(e.target.value)}

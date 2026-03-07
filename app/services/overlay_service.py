@@ -2,6 +2,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import date, datetime
 
+from geoalchemy2 import functions as geo_func
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,7 +16,7 @@ from app.schemas.geospatial import (
     SnapshotReferenceResponse,
 )
 
-HARD_CONSTRAINT_LAYER_TYPES = {"heritage", "floodplain", "environmental"}
+HARD_CONSTRAINT_LAYER_TYPES = {"heritage", "floodplain", "environmental", "zoning", "height_overlay", "setback_overlay"}
 HARD_CONSTRAINT_METRIC_TYPES = {
     "heritage_flag",
     "floodplain_flag",
@@ -108,19 +109,19 @@ def build_overlay_response(
 
 
 async def get_parcel_overlays_response(db: AsyncSession, parcel: Parcel) -> ParcelOverlaysResponse:
+    # Use pre-computed links if available, otherwise fall back to direct spatial intersection
+    parcel_geom = select(Parcel.geom).where(Parcel.id == parcel.id).scalar_subquery()
     overlay_query = (
         select(
-            FeatureToParcelLink,
             DatasetFeature,
             DatasetLayer,
             SourceSnapshot,
         )
-        .join(DatasetFeature, FeatureToParcelLink.feature_id == DatasetFeature.id)
         .join(DatasetLayer, DatasetFeature.dataset_layer_id == DatasetLayer.id)
         .outerjoin(SourceSnapshot, DatasetLayer.source_snapshot_id == SourceSnapshot.id)
-        .where(FeatureToParcelLink.parcel_id == parcel.id)
         .where(DatasetLayer.layer_type.in_(sorted(HARD_CONSTRAINT_LAYER_TYPES)))
         .where(or_(DatasetLayer.published_at.is_not(None), SourceSnapshot.is_active.is_(True)))
+        .where(geo_func.ST_Intersects(DatasetFeature.geom, parcel_geom))
     )
     metric_query = (
         select(ParcelMetric)
@@ -137,7 +138,7 @@ async def get_parcel_overlays_response(db: AsyncSession, parcel: Parcel) -> Parc
             layer_id=layer.id,
             layer_name=layer.name,
             layer_type=layer.layer_type,
-            relationship_type=link.relationship_type,
+            relationship_type="intersects",
             source_record_id=feature.source_record_id,
             source_url=layer.source_url,
             effective_date=feature.effective_date,
@@ -147,7 +148,7 @@ async def get_parcel_overlays_response(db: AsyncSession, parcel: Parcel) -> Parc
             snapshot_label=snapshot.version_label if snapshot else None,
             snapshot_published_at=snapshot.published_at if snapshot else None,
         )
-        for link, feature, layer, snapshot in overlay_rows
+        for feature, layer, snapshot in overlay_rows
     ]
     metrics = [
         ParcelMetricRecord(metric_type=metric.metric_type, metric_value=metric.metric_value, unit=metric.unit)

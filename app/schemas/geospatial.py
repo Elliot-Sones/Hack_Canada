@@ -44,6 +44,7 @@ class ParcelResponse(BaseModel):
     lot_frontage_m: float | None = None
     zone_code: str | None = None
     current_use: str | None = None
+    geom: dict | None = None
 
     model_config = {"from_attributes": True}
 

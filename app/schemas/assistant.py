@@ -13,5 +13,11 @@ class AssistantChatRequest(BaseModel):
     parcel_context: str | None = Field(default=None, max_length=2000)
 
 
+class ProposedAction(BaseModel):
+    label: str
+    query: str
+
+
 class AssistantChatResponse(BaseModel):
     message: str
+    proposed_action: ProposedAction | None = None

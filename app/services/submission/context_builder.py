@@ -8,6 +8,16 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.data.ontario_policy import (
+    APPROVAL_PATHWAY,
+    MINOR_VARIANCE_FOUR_TESTS,
+    OBC_CONSTRAINTS,
+    ONTARIO_POLICY_HIERARCHY,
+    OREG_462_24,
+    RECENT_LEGISLATION,
+    TORONTO_OP_DESIGNATIONS,
+    TORONTO_ZONING_KEY_RULES,
+)
 from app.services.compliance_engine import ComplianceResult, render_compliance_matrix_markdown
 from app.services.zoning_service import ZoningAnalysis
 
@@ -381,20 +391,10 @@ def _build_financial_assumptions(finance: dict | None) -> str:
 
 
 def _build_policy_from_zoning(zoning: ZoningAnalysis | None) -> str:
-    """Build policy summary from zoning analysis when no policy stack is available."""
-    if not zoning:
-        return "No zoning data available for policy analysis."
-
-    lines = [
-        "The applicable policy framework includes:",
-        "1. **Provincial Planning Statement, 2024 (PPS 2024)** — Promotes intensification and efficient use of land and infrastructure.",
-        "2. **City of Toronto Official Plan** — Directs growth to areas well served by transit.",
-        "3. **Zoning By-law 569-2013** — Establishes as-of-right permissions and development standards.",
-    ]
-
-    if zoning.standards:
+    """Build policy context for the AI agent using real Ontario planning law."""
+    site_section = ""
+    if zoning and zoning.standards:
         s = zoning.standards
-        lines.append(f"\nThe site is zoned **{zoning.zone_string}** under By-law 569-2013 (§{s.bylaw_section}).")
         parts = []
         if s.max_fsi is not None:
             parts.append(f"Max FSI {s.max_fsi:.1f}x")
@@ -402,9 +402,23 @@ def _build_policy_from_zoning(zoning: ZoningAnalysis | None) -> str:
             parts.append(f"Max Height {s.max_height_m:.1f}m")
         parts.append(f"Front Setback {s.min_front_setback_m:.1f}m")
         parts.append(f"Rear Setback {s.min_rear_setback_m:.1f}m")
-        lines.append(f"Key standards: {', '.join(parts)}.")
+        site_section = (
+            f"\n## Site Zoning\n"
+            f"The site is zoned **{zoning.zone_string}** under By-law 569-2013 (§{s.bylaw_section}).\n"
+            f"Key standards: {', '.join(parts)}.\n"
+        )
 
-    return "\n".join(lines)
+    return "\n\n".join([
+        ONTARIO_POLICY_HIERARCHY,
+        TORONTO_OP_DESIGNATIONS,
+        TORONTO_ZONING_KEY_RULES,
+        OREG_462_24,
+        RECENT_LEGISLATION,
+        MINOR_VARIANCE_FOUR_TESTS,
+        OBC_CONSTRAINTS,
+        APPROVAL_PATHWAY,
+        site_section,
+    ])
 
 
 def _build_policy_constraints_from_compliance(

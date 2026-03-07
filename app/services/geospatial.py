@@ -27,9 +27,9 @@ ZONING_ASSIGNMENT_PRIORITY = {
 }
 
 LOOKUP_LOCATION_SUFFIX_RE = re.compile(r",\s*(Toronto|ON|Ontario|Canada|CA).*$", re.IGNORECASE)
-LOOKUP_DIRECTIONAL_SUFFIX_RE = re.compile(r"\s+[NSEW]$", re.IGNORECASE)
+LOOKUP_DIRECTIONAL_SUFFIX_RE = re.compile(r"\s+(?:N|S|E|W|North|South|East|West)$", re.IGNORECASE)
 LOOKUP_STREET_BASE_RE = re.compile(
-    r"^(\d+[\w-]*)\s+(.+?)(?:\s+(?:St|Ave|Rd|Dr|Blvd|Cres|Ct|Pl|Way|Lane|Terr?)\.?)?(?:\s+[NSEW])?$",
+    r"^(\d+[\w-]*)\s+(.+?)(?:\s+(?:Street|St|Avenue|Ave|Road|Rd|Drive|Dr|Boulevard|Blvd|Crescent|Cres|Court|Ct|Place|Pl|Way|Lane|Terrace|Terr?)\.?)?(?:\s+(?:N|S|E|W|North|South|East|West))?$",
     re.IGNORECASE,
 )
 
@@ -142,7 +142,15 @@ def build_parcel_search_statement(
     if active_snapshot_ids:
         query = query.where(Parcel.source_snapshot_id.in_(list(active_snapshot_ids)))
     if params.address:
-        query = query.where(Parcel.address.ilike(f"%{params.address}%"))
+        clean = clean_parcel_lookup_address(params.address)
+        # Try to strip street type suffix so "192 Jarvis Street" matches "192 Jarvis St"
+        street_match = LOOKUP_STREET_BASE_RE.match(clean)
+        if street_match:
+            number, street_base = street_match.groups()
+            search_term = f"{number} {street_base}"
+        else:
+            search_term = clean
+        query = query.where(Parcel.address.ilike(f"%{search_term}%"))
     if params.pin:
         query = query.where(Parcel.pin == params.pin)
     if params.zoning_code:
@@ -226,7 +234,7 @@ def resolve_active_parcel_by_address_sync(
     if normalized and normalized != clean_address:
         statements.append(base_query.where(Parcel.address.ilike(f"%{normalized}%")))
 
-    street_match = LOOKUP_STREET_BASE_RE.match(clean_address)
+    street_match = LOOKUP_STREET_BASE_RE.match(normalized or clean_address)
     if street_match:
         number, street_base = street_match.groups()
         statements.append(base_query.where(Parcel.address.ilike(f"{number} {street_base}%")))

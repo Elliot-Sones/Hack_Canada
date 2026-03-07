@@ -128,59 +128,25 @@ def _run_query_parsing(query: str) -> dict:
 
 def _run_parcel_lookup(db, parsed: dict) -> object | None:
     """Look up a parcel by address from parsed parameters."""
-    import re
-
-    from sqlalchemy import func, select
-
-    from app.models.geospatial import Parcel
+    from app.services.geospatial import resolve_active_parcel_by_address_sync
 
     address = parsed.get("address")
     if not address:
         logger.warning("plan.parcel_lookup.no_address")
         return None
 
-    # Strip city/province/country suffixes (e.g., ", Toronto", ", ON", ", Canada")
-    clean_address = re.sub(r',\s*(Toronto|ON|Ontario|Canada|CA).*$', '', address.strip(), flags=re.IGNORECASE).strip()
+    jurisdiction_id = parsed.get("jurisdiction_id")
+    if jurisdiction_id:
+        try:
+            jurisdiction_id = uuid.UUID(str(jurisdiction_id))
+        except (TypeError, ValueError):
+            jurisdiction_id = None
 
-    # Try exact match first, then progressively looser
-    parcel = db.execute(
-        select(Parcel).where(func.lower(Parcel.address) == clean_address.lower()).limit(1)
-    ).scalar_one_or_none()
-    if parcel is None:
-        # Try with ILIKE but anchor to start of string to avoid "4900" matching "900"
-        parcel = db.execute(
-            select(Parcel).where(Parcel.address.ilike(f"{clean_address}%")).limit(1)
-        ).scalar_one_or_none()
-    if parcel is None:
-        parcel = db.execute(
-            select(Parcel).where(Parcel.address.ilike(f"%{clean_address}%")).limit(1)
-        ).scalar_one_or_none()
-
-    if parcel is None:
-        # Strip directional suffixes (N, S, E, W) and street type variations
-        normalized = re.sub(r'\s+[NSEW]$', '', clean_address, flags=re.IGNORECASE)
-        if normalized != clean_address:
-            parcel = db.execute(
-                select(Parcel).where(Parcel.address.ilike(f"%{normalized}%")).limit(1)
-            ).scalar_one_or_none()
-
-    if parcel is None:
-        # Extract just number + street name base (e.g., "100 King")
-        match = re.match(
-            r'^(\d+[\w-]*)\s+(.+?)(?:\s+(?:St|Ave|Rd|Dr|Blvd|Cres|Ct|Pl|Way|Lane|Terr?)\.?)?(?:\s+[NSEW])?$',
-            clean_address,
-            re.IGNORECASE,
-        )
-        if match:
-            number = match.group(1)
-            street_base = match.group(2)
-            parcel = db.execute(
-                select(Parcel).where(
-                    Parcel.address.ilike(f"{number} {street_base}%")
-                ).limit(1)
-            ).scalar_one_or_none()
-
-    return parcel
+    return resolve_active_parcel_by_address_sync(
+        db,
+        address,
+        jurisdiction_id=jurisdiction_id,
+    )
 
 
 def _run_zoning_analysis(db, parcel):

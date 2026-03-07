@@ -425,38 +425,51 @@ function FinancesTab() {
 
 function mapPolicyStack(data) {
     if (!data) return [];
-    const policies = data.applicable_policies || [];
-    const citations = data.citations || [];
-
-    // Group citations by policy document id
-    const citationsByPolicy = {};
-    for (const c of citations) {
-        const pid = c.policy_document_id || c.policy_version_id;
-        if (!pid) continue;
-        if (!citationsByPolicy[pid]) citationsByPolicy[pid] = [];
-        citationsByPolicy[pid].push(c);
+    const entries = data.applicable_policies || [];
+    // Each entry is a clause-level record with document_title, section_ref, raw_text.
+    // Group by document to show one card per policy document.
+    const byDoc = {};
+    for (const entry of entries) {
+        const key = entry.document_id || entry.document_title;
+        if (!byDoc[key]) {
+            byDoc[key] = {
+                name: entry.document_title || entry.doc_type || 'Policy Document',
+                sections: [],
+            };
+        }
+        if (entry.raw_text || entry.section_ref) {
+            byDoc[key].sections.push({
+                title: entry.section_ref || 'Section',
+                text: entry.raw_text || '',
+            });
+        }
     }
-
-    return policies.map((doc) => {
-        const docCitations = citationsByPolicy[doc.id] || [];
-        return {
-            name: doc.title || doc.doc_type || 'Policy Document',
-            extracts: docCitations.length || doc.clause_count || 0,
-            sections: docCitations.map((c) => ({
-                title: c.section_ref || 'Section',
-                text: c.raw_text || c.normalized_json?.text || '',
-            })).filter((s) => s.text),
-        };
-    });
+    return Object.values(byDoc).map((doc) => ({
+        ...doc,
+        extracts: doc.sections.length,
+    }));
 }
 
 function mapOverlays(data) {
     if (!data) return [];
     const overlays = data.overlays || [];
-    return overlays.map((o) => ({
-        name: o.name || o.layer_type || 'Dataset',
-        description: o.source_url ? `Source: ${o.publisher || o.source_url}` : (o.publisher || ''),
-        values: o.feature_count ?? null,
+    // Group features by layer to avoid listing every individual geometry
+    const byLayer = {};
+    for (const o of overlays) {
+        const key = o.layer_id || o.layer_name || o.layer_type;
+        if (!byLayer[key]) {
+            byLayer[key] = {
+                name: o.layer_name || o.name || o.layer_type || 'Dataset',
+                description: o.source_url ? `Source: ${o.source_url}` : (o.layer_type || ''),
+                count: 0,
+            };
+        }
+        byLayer[key].count += 1;
+    }
+    return Object.values(byLayer).map((layer) => ({
+        name: layer.name,
+        description: layer.description,
+        values: layer.count,
     }));
 }
 
@@ -482,28 +495,52 @@ export default function PolicyPanel({ parcel, isOpen, onClose, activeNav, savedP
     // Fetch live data whenever the parcel changes
     useEffect(() => {
         if (!isResolvedParcel(parcel)) {
-            setPolicies([]);
-            setOverlays([]);
-            return;
+            return undefined;
         }
 
-        setLoadingPolicies(true);
-        getPolicyStack(parcel.id)
-            .then((data) => setPolicies(mapPolicyStack(data)))
-            .catch(() => setPolicies([]))
-            .finally(() => setLoadingPolicies(false));
+        let isCancelled = false;
 
-        setLoadingOverlays(true);
+        queueMicrotask(() => {
+            if (isCancelled) return;
+            setLoadingPolicies(true);
+            setLoadingOverlays(true);
+        });
+
+        getPolicyStack(parcel.id)
+            .then((data) => {
+                if (!isCancelled) setPolicies(mapPolicyStack(data));
+            })
+            .catch(() => {
+                if (!isCancelled) setPolicies([]);
+            })
+            .finally(() => {
+                if (!isCancelled) setLoadingPolicies(false);
+            });
+
         getParcelOverlays(parcel.id)
-            .then((data) => setOverlays(mapOverlays(data)))
-            .catch(() => setOverlays([]))
-            .finally(() => setLoadingOverlays(false));
+            .then((data) => {
+                if (!isCancelled) setOverlays(mapOverlays(data));
+            })
+            .catch(() => {
+                if (!isCancelled) setOverlays([]);
+            })
+            .finally(() => {
+                if (!isCancelled) setLoadingOverlays(false);
+            });
+
+        return () => {
+            isCancelled = true;
+        };
     }, [parcel]);
 
     const zoning = useMemo(() => {
         if (!isResolvedParcel(parcel) || !parcel?.zoning) return null;
         return ZONING_DATA[parcel.zoning] || null;
     }, [parcel]);
+    const visiblePolicies = isResolvedParcel(parcel) ? policies : [];
+    const visibleOverlays = isResolvedParcel(parcel) ? overlays : [];
+    const visiblePoliciesLoading = isResolvedParcel(parcel) ? loadingPolicies : false;
+    const visibleOverlaysLoading = isResolvedParcel(parcel) ? loadingOverlays : false;
 
     const renderTab = () => {
         if (!parcel) {
@@ -522,8 +559,8 @@ export default function PolicyPanel({ parcel, isOpen, onClose, activeNav, savedP
         switch (activeNav) {
             case 'overview':     return <OverviewTab parcel={parcel} zoning={zoning} proposal={proposal} setProposal={setProposal} />;
             case 'massing':      return <MassingTab zoning={zoning} parcel={parcel} />;
-            case 'policies':     return <PoliciesTab policies={policies} loading={loadingPolicies} />;
-            case 'datasets':     return <DatasetsTab overlays={overlays} loading={loadingOverlays} />;
+            case 'policies':     return <PoliciesTab policies={visiblePolicies} loading={visiblePoliciesLoading} />;
+            case 'datasets':     return <DatasetsTab overlays={visibleOverlays} loading={visibleOverlaysLoading} />;
             case 'precedents':   return <PrecedentsTab parcel={parcel} />;
             case 'entitlements': return <EntitlementsTab parcel={parcel} zoning={zoning} proposal={proposal} />;
             case 'finances':     return <FinancesTab />;

@@ -30,8 +30,29 @@ async def search_parcels(
 
     active_snapshot_ids = await list_active_snapshot_ids(db, "parcel_base")
     query = build_parcel_search_statement(params, active_snapshot_ids=active_snapshot_ids)
+    
+    from sqlalchemy import func
+    import json
+    from app.models.geospatial import Parcel
+    
+    query = query.add_columns(func.ST_AsGeoJSON(Parcel.geom).label("geom_json"))
     result = await db.execute(query)
-    return result.scalars().all()
+    
+    response = []
+    for parcel, geom_json in result:
+        p_dict = {
+            "id": parcel.id,
+            "jurisdiction_id": parcel.jurisdiction_id,
+            "pin": parcel.pin,
+            "address": parcel.address,
+            "lot_area_m2": parcel.lot_area_m2,
+            "lot_frontage_m": parcel.lot_frontage_m,
+            "zone_code": parcel.zone_code,
+            "current_use": parcel.current_use,
+            "geom": json.loads(geom_json) if geom_json else None
+        }
+        response.append(p_dict)
+    return response
 
 
 @router.get("/parcels/{parcel_id}", response_model=ParcelDetailResponse)
@@ -40,10 +61,35 @@ async def get_parcel(
     db: AsyncSession = Depends(get_db_session),
 ):
     active_snapshot_ids = await list_active_snapshot_ids(db, "parcel_base")
-    parcel = await get_active_parcel_by_id(db, parcel_id, active_snapshot_ids=active_snapshot_ids)
-    if not parcel:
+    from sqlalchemy import select, func
+    import json
+    from app.models.geospatial import Parcel
+    
+    query = select(Parcel, func.ST_AsGeoJSON(Parcel.geom).label("geom_json")).where(Parcel.id == parcel_id)
+    if active_snapshot_ids:
+        query = query.where(Parcel.source_snapshot_id.in_(list(active_snapshot_ids)))
+        
+    result = await db.execute(query)
+    row = result.first()
+    if not row:
         raise HTTPException(status_code=404, detail="Parcel not found")
-    return parcel
+        
+    parcel, geom_json = row
+    p_dict = {
+        "id": parcel.id,
+        "jurisdiction_id": parcel.jurisdiction_id,
+        "pin": parcel.pin,
+        "address": parcel.address,
+        "lot_area_m2": parcel.lot_area_m2,
+        "lot_frontage_m": parcel.lot_frontage_m,
+        "zone_code": parcel.zone_code,
+        "current_use": parcel.current_use,
+        "lot_depth_m": parcel.lot_depth_m,
+        "assessed_value": parcel.assessed_value,
+        "created_at": parcel.created_at,
+        "geom": json.loads(geom_json) if geom_json else None
+    }
+    return p_dict
 
 
 @router.get("/parcels/{parcel_id}/policy-stack", response_model=PolicyStackResponse)

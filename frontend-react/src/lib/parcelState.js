@@ -5,10 +5,12 @@ function getDisplayAddress(location) {
   return location?.shortAddress || location?.address || 'Selected location';
 }
 
+// Toronto zone codes are stored as full bylaw strings like "CR 4.0 (c3.0; r4.0) SS1 (x2315)".
+// Extract the leading alphabetic prefix ("CR", "R", "RM", etc.) for ZONING_DATA lookup.
 function normalizeZoneCode(zoneCode) {
   if (typeof zoneCode !== 'string') return null;
-  const normalized = zoneCode.trim().toUpperCase();
-  return normalized || null;
+  const match = zoneCode.trim().match(/^([A-Za-z]+)/);
+  return match ? match[1].toUpperCase() : null;
 }
 
 export function createResolvedParcel(location, parcelMatch) {
@@ -19,6 +21,7 @@ export function createResolvedParcel(location, parcelMatch) {
     fullAddress: location?.address || getDisplayAddress(location),
     zoning: normalizeZoneCode(parcelMatch?.zone_code ?? parcelMatch?.zoning),
     lotArea: Number.isFinite(parcelMatch?.lot_area_m2) ? parcelMatch.lot_area_m2 : null,
+    geom: parcelMatch?.geom || null,
   };
 }
 

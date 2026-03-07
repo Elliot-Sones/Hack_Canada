@@ -1,5 +1,3 @@
-import { useCallback } from 'react';
-
 const NAV_ITEMS = [
     {
         id: 'overview',

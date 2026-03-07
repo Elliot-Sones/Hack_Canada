@@ -38,8 +38,10 @@ function useTypewriter(strings, typingSpeed = 45, pauseTime = 2200, erasingSpeed
                     setDisplayText(displayText.slice(0, -1));
                 }, erasingSpeed);
             } else {
-                setCurrentIndex((prev) => (prev + 1) % strings.length);
-                setIsTyping(true);
+                timeout = setTimeout(() => {
+                    setCurrentIndex((prev) => (prev + 1) % strings.length);
+                    setIsTyping(true);
+                }, 0);
             }
         }
 

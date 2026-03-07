@@ -56,16 +56,6 @@ export default function SearchBar({ onLocationSelected }) {
         debounceRef.current = setTimeout(() => geocode(val.trim()), 350);
     }, [geocode]);
 
-    const handleKeyDown = useCallback((e) => {
-        if (e.key === 'Escape') {
-            setShowSuggestions(false);
-            e.target.blur();
-        }
-        if (e.key === 'Enter' && suggestions.length > 0 && !suggestions[0].noResults) {
-            handleSuggestionClick(suggestions[0]);
-        }
-    }, [suggestions]);
-
     const handleSuggestionClick = useCallback((result) => {
         setQuery(formatAddress(result));
         setShowSuggestions(false);
@@ -76,6 +66,16 @@ export default function SearchBar({ onLocationSelected }) {
             shortAddress: formatAddress(result),
         });
     }, [onLocationSelected]);
+
+    const handleKeyDown = useCallback((e) => {
+        if (e.key === 'Escape') {
+            setShowSuggestions(false);
+            e.target.blur();
+        }
+        if (e.key === 'Enter' && suggestions.length > 0 && !suggestions[0].noResults) {
+            handleSuggestionClick(suggestions[0]);
+        }
+    }, [handleSuggestionClick, suggestions]);
 
     // Close suggestions on outside click
     useEffect(() => {

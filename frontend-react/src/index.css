@@ -1524,6 +1524,28 @@ body.panel-open #chat-panel {
   font-size: var(--font-sm);
 }
 
+.generate-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-top: var(--space-md);
+  padding: 7px var(--space-md);
+  background: var(--accent-bg);
+  border: 1px solid var(--border-accent);
+  border-radius: var(--radius-md);
+  color: var(--accent);
+  font-size: var(--font-sm);
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--transition);
+}
+
+.generate-action-btn:hover {
+  background: rgba(200, 165, 92, 0.2);
+  border-color: var(--accent);
+  color: var(--accent-light);
+}
+
 .upload-status {
   display: flex;
   align-items: center;

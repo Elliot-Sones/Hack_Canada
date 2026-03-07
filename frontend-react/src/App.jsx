@@ -30,13 +30,19 @@ export default function App() {
     if (mapRef.current) {
       mapRef.current.flyTo(location.lng, location.lat, 16);
       mapRef.current.setMarker(location.lng, location.lat);
+      mapRef.current.setProposedMassing(null, null);
     }
 
-    const parcels = await searchParcels(
-      location.shortAddress || location.address
-    );
-    setSelectedParcel(buildParcelState(location, parcels));
+    const parcels = await searchParcels(location.shortAddress || location.address);
+    const selected = buildParcelState(location, parcels);
+    setSelectedParcel(selected);
     setIsPanelOpen(true);
+
+    if (mapRef.current && isResolvedParcel(selected) && selected.geom) {
+      mapRef.current.setParcel(selected.geom);
+    } else if (mapRef.current) {
+      mapRef.current.setParcel(null);
+    }
   }, []);
 
   const handlePanelClose = useCallback(() => {
@@ -208,7 +214,14 @@ export default function App() {
           </svg>
         </button>
       )}
-      <ChatPanel parcelContext={selectedParcel} />
+      <ChatPanel
+        parcelContext={selectedParcel}
+        onPlanComplete={(massing) => {
+          if (mapRef.current && selectedParcel?.geom) {
+            mapRef.current.setProposedMassing(selectedParcel.geom, massing.height_m || (massing.storeys * 3.5));
+          }
+        }}
+      />
     </>
   );
 }

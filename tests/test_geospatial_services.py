@@ -8,14 +8,53 @@ from app.services.geospatial import (
     AddressCandidate,
     ZoningAssignmentCandidate,
     build_parcel_search_statement,
+    clean_parcel_lookup_address,
     choose_canonical_address,
     choose_primary_zoning_assignment,
     normalize_address_text,
+    resolve_active_parcel_by_address_sync,
 )
+
+
+class _FakeScalarListResult:
+    def __init__(self, values):
+        self._values = values
+
+    def scalars(self):
+        return self
+
+    def all(self):
+        return self._values
+
+
+class _FakeScalarResult:
+    def __init__(self, value):
+        self._value = value
+
+    def scalar_one_or_none(self):
+        return self._value
+
+
+class _FakeSyncDb:
+    def __init__(self, results):
+        self._results = iter(results)
+        self.statements = []
+
+    def execute(self, statement):
+        self.statements.append(statement)
+        return next(self._results)
 
 
 def test_normalize_address_text_collapses_whitespace():
     assert normalize_address_text(" 123   Main   St ") == "123 Main St"
+
+
+def test_clean_parcel_lookup_address_strips_location_suffixes():
+    assert clean_parcel_lookup_address(" 123 Main St, Toronto, ON, Canada ") == "123 Main St"
+
+
+def test_clean_parcel_lookup_address_preserves_directional_words_for_followup_matching():
+    assert clean_parcel_lookup_address("100 King Street West") == "100 King Street West"
 
 
 def test_choose_canonical_address_prefers_highest_confidence_then_method():
@@ -112,3 +151,64 @@ def test_build_parcel_search_statement_includes_new_filters():
     assert "ST_MakeEnvelope" in compiled
     assert "OFFSET" in compiled
     assert "LIMIT" in compiled
+
+
+def test_resolve_active_parcel_by_address_sync_filters_to_active_snapshots():
+    active_snapshot_id = uuid.uuid4()
+    parcel = object()
+    db = _FakeSyncDb(
+        [
+            _FakeScalarListResult([active_snapshot_id]),
+            _FakeScalarResult(None),
+            _FakeScalarResult(parcel),
+        ]
+    )
+
+    resolved = resolve_active_parcel_by_address_sync(db, "123 Main St, Toronto, ON, Canada")
+
+    assert resolved is parcel
+
+    compiled_lookup_sql = [
+        str(statement.compile(dialect=postgresql.dialect()))
+        for statement in db.statements[1:]
+    ]
+    assert all("parcels.source_snapshot_id IN" in sql for sql in compiled_lookup_sql)
+    assert "parcels.address ILIKE" in compiled_lookup_sql[1]
+
+
+def test_resolve_active_parcel_by_address_sync_returns_none_without_active_snapshots():
+    db = _FakeSyncDb([_FakeScalarListResult([])])
+
+    resolved = resolve_active_parcel_by_address_sync(db, "123 Main St, Toronto")
+
+    assert resolved is None
+    assert len(db.statements) == 1
+
+
+def test_resolve_active_parcel_by_address_sync_uses_street_base_fallback():
+    active_snapshot_id = uuid.uuid4()
+    parcel = object()
+    db = _FakeSyncDb(
+        [
+            _FakeScalarResult(None),
+            _FakeScalarResult(None),
+            _FakeScalarResult(None),
+            _FakeScalarResult(None),
+            _FakeScalarResult(parcel),
+        ]
+    )
+
+    resolved = resolve_active_parcel_by_address_sync(
+        db,
+        "100 King Street West",
+        active_snapshot_ids=[active_snapshot_id],
+    )
+
+    assert resolved is parcel
+
+    compiled_lookup_sql = [
+        statement.compile(dialect=postgresql.dialect())
+        for statement in db.statements
+    ]
+    assert str(compiled_lookup_sql[-1]).count("parcels.source_snapshot_id IN") == 1
+    assert "100 King%" in compiled_lookup_sql[-1].params.values()

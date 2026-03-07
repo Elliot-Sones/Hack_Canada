@@ -87,7 +87,7 @@ export async function chatWithAssistant({ messages, parcelContext = null }) {
         body: JSON.stringify({ messages, parcel_context: parcelContext }),
     });
     if (typeof data?.message !== 'string') throw new Error('Assistant response was malformed.');
-    return data.message;
+    return { message: data.message, proposedAction: data.proposed_action ?? null };
 }
 
 // ─── Plans ───
