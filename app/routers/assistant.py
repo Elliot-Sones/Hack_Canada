@@ -440,7 +440,7 @@ async def chat_with_assistant(body: AssistantChatRequest) -> AssistantChatRespon
     prompt_parts.append("Respond to the latest user message.")
 
     try:
-        response = await provider.generate(
+        rag_response = await provider.generate(
             prompt="\n\n".join(prompt_parts),
             system=SYSTEM_PROMPT,
             max_tokens=1500,
@@ -451,8 +451,51 @@ async def chat_with_assistant(body: AssistantChatRequest) -> AssistantChatRespon
             detail=f"Assistant generation failed: {exc}",
         ) from exc
 
+    # Fine-tuned model step
+    user_query = history[-1].text.strip() if history else ""
+    ft_advice = ""
+    FINE_TUNED_MODEL_ID = "ft:gpt-4o-2024-08-06:personal:hack-canada:DH3gbrwx" 
+    
+    try:
+        from openai import AsyncOpenAI
+        client = AsyncOpenAI()
+        ft_res = await client.chat.completions.create(
+            model=FINE_TUNED_MODEL_ID,
+            messages=[
+                {"role": "system", "content": "You provide strategic advice based on the user's goals and preliminary RAG analysis."},
+                {"role": "user", "content": f"User Query: {user_query}\n\nInitial RAG Answer:\n{rag_response.content}"}
+            ],
+            max_tokens=500
+        )
+        ft_advice = ft_res.choices[0].message.content
+    except Exception as e:
+        logger.warning(f"FT model error: {e}")
+        ft_advice = "No additional strategic advice."
+
+    # Final logic pass taking inputs, adding more processing variables, then passing into AI query
+    final_prompt = (
+        "Re-evaluate and finalize the response for the user.\n\n"
+        f"User Query: {user_query}\n\n"
+        f"Initial Analysis (RAG):\n{rag_response.content}\n\n"
+        f"Strategic Advice:\n{ft_advice}\n\n"
+        "Synthesize all the above information. Provide the final, accurate answer. "
+        "Remember to adhere to your SYSTEM PROMPT rules and append any necessary ACTION, MODEL, or CONTRACTORS markers."
+    )
+
+    try:
+        final_response = await provider.generate(
+            prompt=final_prompt,
+            system=SYSTEM_PROMPT,
+            max_tokens=1500,
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Assistant final generation failed: {exc}",
+        ) from exc
+
     message, proposed_action, model_update, contractor_trades = _parse_response(
-        response.content, zone_constraints, zone_label
+        final_response.content, zone_constraints, zone_label
     )
 
     # If the AI didn't emit a CONTRACTORS marker, detect from context
