@@ -6,7 +6,6 @@ import Sidebar from './components/Sidebar.jsx';
 import PolicyPanel from './components/PolicyPanel.jsx';
 import ChatPanel from './components/ChatPanel.jsx';
 import LandingPage from './components/LandingPage.jsx';
-import UserBubble from './components/UserBubble.jsx';
 import { searchParcels } from './api.js';
 import { buildParcelState, isResolvedParcel } from './lib/parcelState.js';
 import './landing.css';
@@ -264,8 +263,6 @@ export default function App() {
   // Dashboard (authenticated only)
   return (
     <>
-      {/* ✨ Dynamic Island User Bubble */}
-      <UserBubble />
 
       <MapView
         ref={mapRef}
