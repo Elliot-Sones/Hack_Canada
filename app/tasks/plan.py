@@ -426,9 +426,23 @@ def _build_context_and_generate_docs(
     )
 
     # Determine which docs to generate
-    docs_to_generate = SUBMISSION_DOCUMENTS
     if generate_subset:
+        # Explicit subset provided — use as-is
         docs_to_generate = [d for d in SUBMISSION_DOCUMENTS if d["doc_type"] in generate_subset]
+    else:
+        # Auto-select based on project context
+        from app.services.submission.document_selector import select_documents_for_project
+
+        selected_types, _reasons = select_documents_for_project(
+            compliance_result=compliance_result,
+            massing=massing_summary,
+            layout=layout_result,
+            overlays=overlays,
+            precedents=precedents,
+            parsed=parsed,
+            financial_output=financial_output,
+        )
+        docs_to_generate = [d for d in SUBMISSION_DOCUMENTS if d["doc_type"] in selected_types]
 
     generated_documents: list[SubmissionDocument] = []
 
@@ -827,7 +841,7 @@ def run_plan_generation(self, plan_id: str, query: str, auto_run: bool = True, g
         plan.completed_at = datetime.now(timezone.utc)
         plan.summary = {
             "pipeline_steps_completed": len(PIPELINE_STEPS),
-            "documents_generated": len(SUBMISSION_DOCUMENTS),
+            "documents_generated": len(generated_documents),
             "parcel_found": parcel is not None,
             "zoning_resolved": zoning is not None,
             "massing": massing_summary,

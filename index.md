@@ -351,6 +351,7 @@ finance → entitlement → precedent_search → document_generation
 | `app/services/submission/templates.py` | `DOCUMENT_TEMPLATES`: 19 AI templates (system/user prompts + max_tokens) per doc type; embeds SAFETY_PREAMBLE + _GROUNDING_INSTRUCTION |
 | `app/services/submission/context_builder.py` | Build context dict (parcel, policy, compliance, precedents, financials, approval pathway, due diligence flags, OLT grounds, PAC requirements) for doc generation |
 | `app/services/submission/readiness.py` | `evaluate_submission_readiness()` — checklist scoring; `EXTENDED_ESSENTIAL_TYPES` for 27-doc plans (backward-compatible) |
+| `app/services/submission/document_selector.py` | `select_documents_for_project()` — deterministic selection of which docs to generate based on compliance, massing, overlays, precedents; returns doc list + `SelectionReason` audit trail |
 | `app/services/submission/review.py` | Doc review state machine: submit_for_review, approve_document, reject_document |
 | `app/services/submission/generator.py` | Main doc generation orchestrator: `generate_document()` (AI), `generate_rule_based_document()` (5 deterministic renderers: as-of-right check, required studies, timeline/cost, building permit checklist, professional referral) |
 | `app/services/governance.py` | Data governance checks |
@@ -475,6 +476,12 @@ activeNav, savedParcels, showHistory, searchHistory (localStorage per user)
 | `src/components/LoginPage.jsx` | Legacy login form | **Unused** — replaced by Auth0. Still in codebase. |
 
 ---
+
+### Hooks
+
+| File | Purpose |
+|------|---------|
+| `src/hooks/useResizable.js` | Reusable panel-resize hook: drag handles for any edge, CSS variable sync, transition suppression during drag. Used by Sidebar, PolicyPanel, ChatPanel |
 
 ### Utilities
 
