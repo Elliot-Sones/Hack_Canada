@@ -4,7 +4,7 @@ from datetime import date, datetime
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, defer
 
 from app.models.geospatial import Parcel
 from app.models.ingestion import SourceSnapshot
@@ -132,6 +132,7 @@ async def get_policy_stack_response(db: AsyncSession, parcel: Parcel) -> PolicyS
         .join(PolicyVersion, PolicyClause.policy_version_id == PolicyVersion.id)
         .join(PolicyDocument, PolicyVersion.document_id == PolicyDocument.id)
         .outerjoin(SourceSnapshot, PolicyVersion.source_snapshot_id == SourceSnapshot.id)
+        .options(defer(PolicyClause.embedding))
         .where(PolicyApplicabilityRule.jurisdiction_id == parcel.jurisdiction_id)
         .where(PolicyVersion.is_active.is_(True))
         .where(or_(PolicyDocument.effective_date.is_(None), PolicyDocument.effective_date <= func.current_date()))
@@ -198,6 +199,7 @@ def get_policy_stack_response_sync(db: Session, parcel: Parcel) -> PolicyStackRe
         .join(PolicyVersion, PolicyClause.policy_version_id == PolicyVersion.id)
         .join(PolicyDocument, PolicyVersion.document_id == PolicyDocument.id)
         .outerjoin(SourceSnapshot, PolicyVersion.source_snapshot_id == SourceSnapshot.id)
+        .options(defer(PolicyClause.embedding))
         .where(PolicyApplicabilityRule.jurisdiction_id == parcel.jurisdiction_id)
         .where(PolicyVersion.is_active.is_(True))
         .where(or_(PolicyDocument.effective_date.is_(None), PolicyDocument.effective_date <= func.current_date()))
