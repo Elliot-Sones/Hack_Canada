@@ -1,6 +1,7 @@
 # Arterial Platform — Full Codebase Index
 
 > **Auto-maintained**: This file is updated automatically after any file edit or creation. See `.claude/CLAUDE.md` for update rules.
+> **Last updated**: 2026-03-08 | **PRD**: [`.claude/docs/PRD.md`](.claude/docs/PRD.md)
 
 ---
 
