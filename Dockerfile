@@ -18,11 +18,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
+# Copy source and install
 COPY pyproject.toml .
+COPY app/ ./app/
 RUN pip install --no-cache-dir .
 
+# Copy remaining files (alembic, scripts, etc.)
 COPY . .
-RUN pip install --no-cache-dir -e .
 
 # Embed the built frontend
 COPY --from=frontend-builder /frontend/dist /app/frontend-dist
