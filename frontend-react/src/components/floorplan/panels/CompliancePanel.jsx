@@ -35,12 +35,10 @@ export default function CompliancePanel({
 
   const rules = complianceResult.rules || [];
   const errors = rules.filter(
-    (r) => r.severity === 'error' || r.severity === 'blocker'
+    (r) => !r.compliant && (r.severity === 'error' || r.severity === 'blocker')
   );
-  const warnings = rules.filter((r) => r.severity === 'warning');
-  const passed = rules.filter(
-    (r) => r.severity === 'pass' || r.severity === 'compliant'
-  );
+  const warnings = rules.filter((r) => r.severity === 'warning' && r.note);
+  const passed = rules.filter((r) => r.compliant && !(r.severity === 'warning' && r.note));
 
   const allPass = errors.length === 0 && warnings.length === 0;
 
@@ -139,6 +137,9 @@ export default function CompliancePanel({
                           <span>Required: {rule.required}{rule.unit ? ` ${rule.unit}` : ''}</span>
                           <span>Actual: {rule.actual}{rule.unit ? ` ${rule.unit}` : ''}</span>
                         </div>
+                      )}
+                      {rule.description && (
+                        <div className="compliance-rule-description">{rule.description}</div>
                       )}
                       {rule.note && (
                         <div className="compliance-rule-note">{rule.note}</div>

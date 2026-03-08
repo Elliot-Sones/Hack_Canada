@@ -85,6 +85,10 @@ def create_app() -> FastAPI:
 
         @application.get("/{full_path:path}", include_in_schema=False)
         async def serve_spa(full_path: str):
+            # Serve static files from frontend-dist root (images, fonts, etc.)
+            static_file = frontend_dist / full_path
+            if full_path and static_file.exists() and static_file.is_file():
+                return FileResponse(static_file)
             return FileResponse(frontend_dist / "index.html")
 
     return application

@@ -53,8 +53,9 @@ export default function FloorPlanEditor({
   // Compliance
   const [complianceResult, setComplianceResult] = useState(null);
   const [complianceLoading, setComplianceLoading] = useState(false);
-  const [showCompliance, setShowCompliance] = useState(false);
+  const [showCompliance, setShowCompliance] = useState(true);
   const complianceTimerRef = useRef(null);
+  const originalFloorPlanRef = useRef(null);
 
   // Drag and Drop state
   const [activeDragItem, setActiveDragItem] = useState(null);
@@ -155,11 +156,14 @@ export default function FloorPlanEditor({
     });
   }, [currentFloor, stageSize]);
 
-  // Initialize undo history
+  // Initialize undo history and capture original floor plan for wall-removal detection
   useEffect(() => {
     if (normalizedPlans && editHistory.length === 0) {
       setEditHistory([JSON.parse(JSON.stringify(normalizedPlans))]);
       setHistoryIndex(0);
+      if (!originalFloorPlanRef.current) {
+        originalFloorPlanRef.current = JSON.parse(JSON.stringify(normalizedPlans.floor_plans?.[0] || null));
+      }
     }
   }, [normalizedPlans]);
 
@@ -173,10 +177,35 @@ export default function FloorPlanEditor({
         try {
           const floorPlanData = plans?.floor_plans?.[0] || currentFloor;
           if (!floorPlanData) return;
+
+          // Map frontend field names to backend compliance engine expectations
+          const mappedRooms = (floorPlanData.rooms || []).map((r) => ({
+            ...r,
+            type: r.type || r.room_type || 'other',
+            area_m2: r.area_m2 ?? r.area_sqm ?? null,
+            name: r.name || r.id || r.room_type || 'unknown',
+            center: r.center || (r.polygon ? computeCentroid(r.polygon) : null),
+          }));
+
+          const mappedOpenings = (floorPlanData.openings || []).map((o) => ({
+            ...o,
+            room_id: o.room_id || null,
+          }));
+
+          const mappedFloorPlan = {
+            ...floorPlanData,
+            rooms: mappedRooms,
+            openings: mappedOpenings,
+          };
+
           const res = await fetch('/api/v1/compliance/interior', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ floor_plan: floorPlanData, ceiling_height_m: 2.7 }),
+            body: JSON.stringify({
+              floor_plan: mappedFloorPlan,
+              ceiling_height_m: 2.7,
+              original_floor_plan: originalFloorPlanRef.current || null,
+            }),
           });
           if (res.ok) {
             setComplianceResult(await res.json());
@@ -190,6 +219,13 @@ export default function FloorPlanEditor({
     },
     [parcelId, currentFloor]
   );
+
+  // Run compliance on initial load
+  useEffect(() => {
+    if (normalizedPlans?.floor_plans?.length) {
+      runComplianceCheck(normalizedPlans);
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Deep-clone helper
   const clonePlans = useCallback(() => {

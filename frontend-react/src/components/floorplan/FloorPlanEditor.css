@@ -444,6 +444,17 @@
   color: var(--text-secondary);
 }
 
+.compliance-rule-description {
+  color: var(--text-secondary);
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 6px 8px;
+  background: var(--bg-secondary, rgba(255, 255, 255, 0.03));
+  border-radius: 4px;
+  border-left: 2px solid var(--accent-muted, #555);
+}
+
 .compliance-rule-note {
   color: var(--text-muted);
   margin-top: 2px;
