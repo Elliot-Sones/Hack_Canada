@@ -10,7 +10,7 @@ import math
 from dataclasses import dataclass, field
 from typing import Any
 
-from app.data.obc_interior_standards import OBC_INTERIOR_RULES, OBC_SECTIONS
+from app.data.obc_interior_standards import OBC_DESCRIPTIONS, OBC_INTERIOR_RULES, OBC_SECTIONS
 
 
 @dataclass(frozen=True)
@@ -28,6 +28,7 @@ class InteriorComplianceRule:
     element_type: str | None = None
     severity: str = "error"  # "error", "warning", "blocker"
     note: str = ""
+    description: str = ""
 
 
 @dataclass
@@ -41,6 +42,19 @@ class InteriorComplianceResult:
     load_bearing_warnings: list[str] = field(default_factory=list)
 
 
+def _compute_polygon_area(polygon: list[list[float]]) -> float | None:
+    """Compute the area of a polygon using the shoelace formula."""
+    if not polygon or len(polygon) < 3:
+        return None
+    area = 0.0
+    n = len(polygon)
+    for i in range(n):
+        j = (i + 1) % n
+        area += polygon[i][0] * polygon[j][1]
+        area -= polygon[j][0] * polygon[i][1]
+    return abs(area) / 2.0
+
+
 def _check_min_area(
     room: dict[str, Any],
     min_area: float,
@@ -49,6 +63,11 @@ def _check_min_area(
 ) -> InteriorComplianceRule:
     """Check that a room meets the minimum area requirement."""
     actual_area = room.get("area_m2")
+    # Fallback: compute from polygon if area not provided
+    if actual_area is None:
+        polygon = room.get("polygon")
+        if polygon:
+            actual_area = _compute_polygon_area(polygon)
     element_id = room.get("id") or room.get("name", "unknown")
     element_type = room.get("type", "room")
 
@@ -149,16 +168,75 @@ def _check_min_dimension(
     )
 
 
+def _point_in_polygon(px: float, py: float, polygon: list[list[float]]) -> bool:
+    """Ray-casting point-in-polygon test."""
+    n = len(polygon)
+    inside = False
+    j = n - 1
+    for i in range(n):
+        xi, yi = polygon[i]
+        xj, yj = polygon[j]
+        if ((yi > py) != (yj > py)) and (px < (xj - xi) * (py - yi) / (yj - yi) + xi):
+            inside = not inside
+        j = i
+    return inside
+
+
 def _find_openings_in_room(
     room: dict[str, Any],
     openings: list[dict[str, Any]],
+    walls: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
-    """Find windows/doors that belong to a room based on room_id or spatial containment."""
+    """Find windows/doors that belong to a room.
+
+    Matches by:
+    1. Explicit room_id on the opening
+    2. Spatial: opening is on a wall whose midpoint falls on the room polygon boundary
+    """
     room_id = room.get("id") or room.get("name")
+    polygon = room.get("polygon")
     matched = []
+    seen_ids = set()
+
+    # 1. Explicit room_id match
     for opening in openings:
         if opening.get("room_id") == room_id:
             matched.append(opening)
+            seen_ids.add(opening.get("id"))
+
+    # 2. Spatial match via wall midpoints on room edges
+    if polygon and walls and len(polygon) >= 3:
+        wall_map = {w.get("id"): w for w in walls}
+        for opening in openings:
+            if opening.get("id") in seen_ids:
+                continue
+            wall_id = opening.get("wall_id")
+            if not wall_id or wall_id not in wall_map:
+                continue
+            wall = wall_map[wall_id]
+            # Check if wall midpoint is near/on the room polygon edges
+            mx = (wall["start"][0] + wall["end"][0]) / 2
+            my = (wall["start"][1] + wall["end"][1]) / 2
+            # Check if either endpoint of the wall matches a polygon edge
+            for i in range(len(polygon)):
+                j = (i + 1) % len(polygon)
+                ex, ey = polygon[i]
+                fx, fy = polygon[j]
+                # Check if wall start and end are close to this edge
+                edge_len = math.sqrt((fx - ex) ** 2 + (fy - ey) ** 2)
+                if edge_len < 0.01:
+                    continue
+                # Project wall midpoint onto edge
+                t = ((mx - ex) * (fx - ex) + (my - ey) * (fy - ey)) / (edge_len ** 2)
+                if 0 <= t <= 1:
+                    proj_x = ex + t * (fx - ex)
+                    proj_y = ey + t * (fy - ey)
+                    dist = math.sqrt((mx - proj_x) ** 2 + (my - proj_y) ** 2)
+                    if dist < 0.3:  # Within 30cm of edge — wall is on this room's boundary
+                        matched.append(opening)
+                        seen_ids.add(opening.get("id"))
+                        break
+
     return matched
 
 
@@ -168,10 +246,11 @@ def _check_egress(
     min_window_area: float,
     obc_section: str,
     rule_id: str,
+    walls: list[dict[str, Any]] | None = None,
 ) -> InteriorComplianceRule:
     """Check that a bedroom has an egress window meeting minimum area."""
     element_id = room.get("id") or room.get("name", "unknown")
-    room_openings = _find_openings_in_room(room, openings)
+    room_openings = _find_openings_in_room(room, openings, walls)
 
     # Find windows (not doors) in this room
     windows = [o for o in room_openings if o.get("type") in ("window", "egress_window")]
@@ -384,6 +463,7 @@ def check_interior_compliance(
 
     rooms = floor_plan.get("rooms", [])
     openings = floor_plan.get("openings", [])
+    walls = floor_plan.get("walls", [])
     exits = floor_plan.get("exits", [])
     rule_counter = 0
 
@@ -443,6 +523,7 @@ def check_interior_compliance(
                 OBC_INTERIOR_RULES["bedroom_egress_window_m2"],
                 OBC_SECTIONS["bedroom_egress_window"],
                 f"obc-{rule_counter}",
+                walls=walls,
             )
             rules.append(egress_rule)
             if not egress_rule.compliant and egress_rule.note:
@@ -464,7 +545,7 @@ def check_interior_compliance(
         # Bathroom ventilation (warning)
         if room_type in ("bathroom", "washroom", "ensuite", "bath"):
             room_id = room.get("id") or room.get("name", "unknown")
-            room_openings = _find_openings_in_room(room, openings)
+            room_openings = _find_openings_in_room(room, openings, walls)
             has_window = any(o.get("type") in ("window", "egress_window") for o in room_openings)
             rule_counter += 1
             rules.append(InteriorComplianceRule(
@@ -486,7 +567,7 @@ def check_interior_compliance(
         # Kitchen ventilation (warning)
         if room_type in ("kitchen", "kitchenette"):
             room_id = room.get("id") or room.get("name", "unknown")
-            room_openings = _find_openings_in_room(room, openings)
+            room_openings = _find_openings_in_room(room, openings, walls)
             has_window = any(o.get("type") in ("window", "egress_window") for o in room_openings)
             rule_counter += 1
             rules.append(InteriorComplianceRule(
@@ -519,6 +600,56 @@ def check_interior_compliance(
             if not fire_rule.compliant and fire_rule.note:
                 errors.append(fire_rule.note)
 
+    # --- Room enclosure check: verify polygon edges have walls ---
+    if walls:
+        for room in rooms:
+            polygon = room.get("polygon")
+            if not polygon or len(polygon) < 3:
+                continue
+            room_id = room.get("id") or room.get("name", "unknown")
+            missing_edges = 0
+            total_edges = len(polygon)
+            for i in range(total_edges):
+                j = (i + 1) % total_edges
+                edge_start = polygon[i]
+                edge_end = polygon[j]
+                edge_mx = (edge_start[0] + edge_end[0]) / 2
+                edge_my = (edge_start[1] + edge_end[1]) / 2
+                # Check if any wall covers this edge (midpoint within tolerance)
+                found = False
+                for wall in walls:
+                    ws, we = wall.get("start", [0, 0]), wall.get("end", [0, 0])
+                    wmx = (ws[0] + we[0]) / 2
+                    wmy = (ws[1] + we[1]) / 2
+                    dist = math.sqrt((wmx - edge_mx) ** 2 + (wmy - edge_my) ** 2)
+                    if dist < 0.5:
+                        found = True
+                        break
+                if not found:
+                    missing_edges += 1
+
+            if missing_edges > 0:
+                rule_counter += 1
+                rules.append(InteriorComplianceRule(
+                    id=f"obc-{rule_counter}",
+                    parameter="Room Enclosure",
+                    obc_section="OBC 9.5.1",
+                    required=total_edges,
+                    actual=total_edges - missing_edges,
+                    unit="walls",
+                    compliant=False,
+                    element_id=room_id,
+                    element_type=room.get("type", "room"),
+                    severity="error",
+                    note=f"Room '{room_id}' is missing {missing_edges} enclosing wall(s) — room is not fully enclosed",
+                    description=(
+                        "Every habitable room must be fully enclosed by walls. "
+                        "A missing wall means the room boundary is incomplete, which affects fire separation, "
+                        "sound transmission, and overall building code compliance."
+                    ),
+                ))
+                errors.append(f"Room '{room_id}' is missing {missing_edges} enclosing wall(s)")
+
     # --- Exit door width checks ---
     exit_doors = [o for o in openings if o.get("type") in ("exit_door", "door") and o.get("is_exit")]
     for door in exit_doors:
@@ -538,7 +669,7 @@ def check_interior_compliance(
         original_walls = {
             w.get("id") or w.get("name")
             for w in original_floor_plan.get("walls", [])
-            if w.get("load_bearing")
+            if w.get("load_bearing") in ("yes", True)
         }
         current_walls = {
             w.get("id") or w.get("name")
@@ -563,6 +694,40 @@ def check_interior_compliance(
             load_bearing_warnings.append(
                 f"Load-bearing wall '{wall_id}' removed \u2014 structural engineer review required"
             )
+
+    # Map parameter names to description keys
+    _PARAM_TO_DESC_KEY = {
+        "Minimum Room Area": "bedroom_min_area",
+        "Minimum Room Dimension": "bedroom_min_dimension",
+        "Bedroom Egress Window": "bedroom_egress_window",
+        "Minimum Hallway Width": "hallway_min_width",
+        "Minimum Exit Door Width": "exit_door_min_width",
+        "Minimum Ceiling Height": "ceiling_min_height",
+        "Fire Travel Distance": "fire_travel_distance",
+        "Fire Access Width": "fire_access_width",
+        "Bathroom Ventilation": "bathroom_ventilation",
+        "Kitchen Ventilation": "kitchen_ventilation",
+        "Load-Bearing Wall Modification": "load_bearing_wall",
+        "Room Enclosure": "room_enclosure",
+    }
+
+    # Attach descriptions (frozen dataclass — rebuild with description)
+    enriched_rules = []
+    for r in rules:
+        desc_key = _PARAM_TO_DESC_KEY.get(r.parameter, "")
+        desc = OBC_DESCRIPTIONS.get(desc_key, "")
+        if desc and not r.description:
+            # Rebuild with description since dataclass is frozen
+            enriched_rules.append(InteriorComplianceRule(
+                id=r.id, parameter=r.parameter, obc_section=r.obc_section,
+                required=r.required, actual=r.actual, unit=r.unit,
+                compliant=r.compliant, element_id=r.element_id,
+                element_type=r.element_type, severity=r.severity,
+                note=r.note, description=desc,
+            ))
+        else:
+            enriched_rules.append(r)
+    rules = enriched_rules
 
     # Determine overall compliance
     overall_compliant = all(

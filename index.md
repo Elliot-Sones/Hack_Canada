@@ -14,7 +14,7 @@
    - [Database Models](#database-models)
    - [API Routes](#api-routes)
    - [Services](#services)
-   - [Background Tasks (Celery)](#background-tasks-celery)
+   - [Background Tasks](#background-tasks)
    - [Data & Policy References](#data--policy-references)
    - [Schemas](#schemas)
    - [Middleware & Dependencies](#middleware--dependencies)
@@ -44,7 +44,7 @@
 |-----------|-------|
 | App Name | `arterial` v0.1.0 |
 | Backend | FastAPI + SQLAlchemy async + PostgreSQL + PostGIS |
-| Queue | Celery + Redis |
+| Background Tasks | threading (in-process) |
 | Frontend | React 19 + Vite |
 | AI | Claude (primary) or OpenAI (configurable via `AI_PROVIDER`) |
 | Spatial | GeoAlchemy2, PostGIS, pyproj |
@@ -64,7 +64,7 @@
 ┌────────────────────────────────────────────────────────┐
 │  FastAPI Backend (port 8000)                           │
 │  Routers → Services → SQLAlchemy (async)               │
-│  Celery tasks dispatched for long-running work         │
+│  Background threads for long-running work               │
 └────────────────────────────────────────────────────────┘
          │                │               │
    PostgreSQL+PostGIS   Redis          MinIO (S3)
@@ -73,7 +73,7 @@
 
 **Pipeline flow** (plan generation):
 ```
-User query → plans/generate → Celery task → query_parsing →
+User query → plans/generate → background thread → query_parsing →
 parcel_lookup → policy_resolution → massing → layout →
 finance → entitlement → precedent_search → document_generation
 → SubmissionDocument rows
@@ -89,9 +89,8 @@ finance → entitlement → precedent_search → document_generation
 |------|---------|
 | `app/__init__.py` | Package version (0.1.0) |
 | `app/main.py` | FastAPI init, router registration (incl. design_versions), CORS + RequestID middleware |
-| `app/config.py` | Pydantic Settings: DB URLs, S3, JWT, AI provider, Celery config |
+| `app/config.py` | Pydantic Settings: DB URLs, S3, JWT, AI provider config |
 | `app/database.py` | Async/sync SQLAlchemy engine factories, session makers, Redis connection |
-| `app/worker.py` | Celery app config: JSON serialization, task autodiscovery, beat schedule |
 | `app/dependencies.py` | FastAPI DI: `get_db_session`, `get_current_user`, `get_optional_user`, `get_optional_idempotency_key` |
 
 ---
@@ -225,6 +224,9 @@ finance → entitlement → precedent_search → document_generation
 | POST | `/api/v1/plans/{plan_id}/documents/{doc_id}/submit-review` | Mark for review |
 | POST | `/api/v1/plans/{plan_id}/documents/{doc_id}/approve` | Approve |
 | POST | `/api/v1/plans/{plan_id}/documents/{doc_id}/reject` | Reject |
+| POST | `/api/v1/plans/{plan_id}/generate-document/{doc_type}` | Generate/regenerate single doc from completed plan |
+| GET | `/api/v1/plans/{plan_id}/documents/{doc_id}/download` | Download doc as markdown/html/docx |
+| POST | `/api/v1/plans/{plan_id}/export` | Export all docs as single DOCX |
 
 #### Chat Assistant — `app/routers/assistant.py`
 | Method | Route | Purpose |
@@ -326,8 +328,8 @@ finance → entitlement → precedent_search → document_generation
 | File | Purpose |
 |------|---------|
 | `app/services/design_version_service.py` | Design version control: create/list/delete branches, commit versions with auto-compliance check against parcel zoning + OBC interior checks, change summary generation |
-| `app/services/compliance_engine.py` | **Deterministic, no AI.** Rule-by-rule compliance matrix (lot coverage, FSI, height, setbacks, parking, amenity space). Returns `ComplianceResult` with variances needed. |
-| `app/services/interior_compliance.py` | **Deterministic, no AI.** OBC Part 9 interior compliance: bedroom area/dimension/egress, hallway width, door width, ceiling height, fire travel, ventilation warnings, load-bearing wall detection. Returns `InteriorComplianceResult`. |
+| `app/services/compliance_engine.py` | **Deterministic, no AI.** Rule-by-rule compliance matrix (lot coverage, FSI, height, setbacks, parking, amenity space). O.Reg 462/24 (45% lot coverage for ≤3 unit multiplex), Bill 185 (zero parking for ≤10 unit residential). Returns `ComplianceResult` with variances needed. |
+| `app/services/interior_compliance.py` | **Deterministic, no AI.** OBC Part 9 interior compliance: bedroom area/dimension/egress, hallway width, door width, ceiling height, fire travel, ventilation warnings, load-bearing wall detection, room enclosure check. Computes area from polygon fallback. Spatial opening-to-room linkage via wall geometry. Returns `InteriorComplianceResult` with `description` field per rule. |
 | `app/services/zoning_service.py` | `ZoningAnalysis` builder; normalize zone codes; extract params from map labels |
 | `app/services/zoning_parser.py` | Parse zone strings like `RD(f12.0; a370; d0.6)` into structured standards |
 | `app/services/overlay_service.py` | Fetch GIS overlays (heritage, flood, TRCA, railway, etc.) for a parcel |
@@ -337,29 +339,31 @@ finance → entitlement → precedent_search → document_generation
 | `app/services/access_control.py` | Org ownership checks for all resource types |
 | `app/services/idempotency.py` | Cache job responses by Idempotency-Key header (Redis) |
 | `app/services/storage.py` | S3/MinIO: upload_file, generate_presigned_url, ensure_bucket_exists |
-| `app/services/dxf_parser.py` | DXF floor plan parsing using ezdxf; extracts walls, rooms, doors/windows, floor groupings; handles xref-prefixed layers, %%u formatting codes, oversized hatch filtering; outputs centred metre coordinates |
+| `app/services/dxf_parser.py` | DXF floor plan parsing using ezdxf; extracts walls (with load_bearing/structural type), rooms, doors/windows (with sill_height_m, head_height_m, swing_direction from block attributes), columns, ceiling heights (from CLG annotations), balcony polygons; Y-band floor detection from FLOOR label annotations; handles xref-prefixed layers; outputs centred metre coordinates |
 | `app/services/document_processor.py` | PDF parsing, page extraction, OCR, DXF file classification, PDF vector geometry extraction |
 | `app/services/document_analyzer.py` | AI-powered analysis: extract dims, unit mix, compliance issues from docs |
 | `app/services/thin_slice_runtime.py` | `ensure_reference_data()` — seed massing templates, unit types, assumptions |
 | `app/services/simulation_runtime.py` | Parametric massing envelope; unit mix layout optimization |
 | `app/services/ckan_ingestion.py` | Toronto Open Data CKAN API client; download + parse permits & COA applications |
 | `app/services/geospatial_ingestion.py` | Ingest GeoJSON datasets (parcels, zoning, overlays, dev applications) |
-| `app/services/submission/templates.py` | `DOCUMENT_TEMPLATES`: system/user prompts + max_tokens per doc type; embeds SAFETY_PREAMBLE + _GROUNDING_INSTRUCTION |
-| `app/services/submission/context_builder.py` | Build context dict (parcel, policy, compliance, precedents, financials) for doc generation |
-| `app/services/submission/readiness.py` | `evaluate_submission_readiness()` — checklist scoring |
+| `app/services/contractor_trades.py` | Pure function mapping doc types + massing typology → Google Places trade search terms (max 4) |
+| `app/services/submission/templates.py` | `DOCUMENT_TEMPLATES`: 19 AI templates (system/user prompts + max_tokens) per doc type; embeds SAFETY_PREAMBLE + _GROUNDING_INSTRUCTION |
+| `app/services/submission/context_builder.py` | Build context dict (parcel, policy, compliance, precedents, financials, approval pathway, due diligence flags, OLT grounds, PAC requirements) for doc generation |
+| `app/services/submission/readiness.py` | `evaluate_submission_readiness()` — checklist scoring; `EXTENDED_ESSENTIAL_TYPES` for 27-doc plans (backward-compatible) |
+| `app/services/submission/document_selector.py` | `select_documents_for_project()` — deterministic selection of which docs to generate based on compliance, massing, overlays, precedents; returns doc list + `SelectionReason` audit trail |
 | `app/services/submission/review.py` | Doc review state machine: submit_for_review, approve_document, reject_document |
-| `app/services/submission/generator.py` | Main doc generation orchestrator: load template → build context → call AI → cache in SubmissionDocument |
+| `app/services/submission/generator.py` | Main doc generation orchestrator: `generate_document()` (AI), `generate_rule_based_document()` (5 deterministic renderers: as-of-right check, required studies, timeline/cost, building permit checklist, professional referral) |
 | `app/services/governance.py` | Data governance checks |
 | `app/services/validation.py` | Input validation helpers |
 | `app/services/benchmarks.py` | Market comparison logic |
 
 ---
 
-### Background Tasks (Celery)
+### Background Tasks
 
 | File | Task | Purpose |
 |------|------|---------|
-| `app/tasks/plan.py` | `run_plan_generation` | Full plan pipeline: query_parsing → parcel_lookup → policy_resolution → massing → layout → finance → entitlement → precedent → doc_generation. Updates plan.status + pipeline_progress. Pauses for clarification if confidence low. |
+| `app/tasks/plan.py` | `run_plan_generation` | Full plan pipeline: query_parsing → parcel_lookup → policy_resolution → massing → layout → finance → entitlement → precedent → doc_generation. 27 document types (12 AI, 5 rule-based, 10 core). Supports `generate_subset` for targeted doc generation. AI generation with stub fallback. |
 | `app/tasks/entitlement.py` | `run_entitlement_check` | Compliance check; returns compliant/non_compliant/variances_needed + matrix |
 | `app/tasks/entitlement.py` | `run_precedent_search` | Spatial + attribute search; scores matches via `precedent.py`; stores PrecedentMatch rows |
 | `app/tasks/massing.py` | `run_massing` | Generate 3D envelope: height, storeys, GFA, lot_coverage, FSI, 2D geom |
@@ -368,7 +372,7 @@ finance → entitlement → precedent_search → document_generation
 | `app/tasks/document_analysis.py` | `analyze_document` | DXF floor plan parsing, PDF page extraction + vector geometry, AI analysis; populate extracted_data, compliance_findings, floor_plan_data |
 | `app/tasks/ingestion.py` | `ingest_building_permits_task` | Fetch + upsert permits from Toronto CKAN |
 | `app/tasks/ingestion.py` | `ingest_coa_applications_task` | Fetch + upsert COA apps from CKAN |
-| `app/tasks/export.py` | Export task | Render to PDF; apply governance controls; generate signed URL |
+| `app/tasks/export.py` | Export task | Apply governance controls; generate signed URL |
 
 ---
 
@@ -378,7 +382,7 @@ finance → entitlement → precedent_search → document_generation
 |------|---------|
 | `app/data/toronto_zoning.py` | `ZONE_STANDARDS` dict — hardcoded By-law 569-2013 standards: R, RM, RA, CR, CL, DL, IH, IO, IE, IL. Each zone: permitted_uses, max_height, max_storeys, setbacks, lot_coverage, FSI, bylaw_section. Also: `AMENITY_SPACE`, `BICYCLE_PARKING` requirements. **Deterministic, no AI.** |
 | `app/data/ontario_policy.py` | `ONTARIO_POLICY_HIERARCHY`, `TORONTO_OP_DESIGNATIONS`, `TORONTO_ZONING_KEY_RULES`, `MINOR_VARIANCE_FOUR_TESTS`, `OREG_462_24`, `RECENT_LEGISLATION` (Bills 23/97/109/185/60). Embedded in AI system prompts as grounding context. |
-| `app/data/obc_interior_standards.py` | `OBC_INTERIOR_RULES` dict — OBC Part 9 interior standards: bedroom area/dimension, egress window, hallway width, door width, ceiling height, fire travel, fire access. `OBC_SECTIONS` section references. **Deterministic, no AI.** |
+| `app/data/obc_interior_standards.py` | `OBC_INTERIOR_RULES` dict — OBC Part 9 interior standards: bedroom area/dimension, egress window, hallway width, door width, ceiling height, fire travel, fire access. `OBC_SECTIONS` section references. `OBC_DESCRIPTIONS` human-readable policy descriptions. **Deterministic, no AI.** |
 
 ---
 
@@ -387,8 +391,8 @@ finance → entitlement → precedent_search → document_generation
 | File | Key Schemas |
 |------|------------|
 | `app/schemas/auth.py` | LoginRequest, RegisterRequest, TokenResponse, UserInfo |
-| `app/schemas/plan.py` | PlanGenerateRequest, PlanResponse, PlanListResponse, SubmissionDocumentResponse, PlanSubmissionReadinessResponse |
-| `app/schemas/assistant.py` | AssistantChatRequest, AssistantChatResponse, ProposedAction, ModelParseRequest (zone_code, lot_area_m2), ModelParseResponse (unit_width, tower_shape, warnings) |
+| `app/schemas/plan.py` | PlanGenerateRequest (generate_subset), PlanGenerateDocumentRequest (extra_context), PlanResponse, PlanListResponse, SubmissionDocumentResponse, PlanSubmissionReadinessResponse, ContractorResult, ContractorRecommendationsResponse |
+| `app/schemas/assistant.py` | AssistantChatRequest, AssistantChatResponse, ProposedAction (doc_types), ModelParseRequest (zone_code, lot_area_m2), ModelParseResponse (unit_width, tower_shape, warnings) |
 | `app/schemas/geospatial.py` | ParcelResponse, ParcelDetailResponse, ParcelSearchParams, PolicyStackResponse, ParcelOverlaysResponse |
 | `app/schemas/entitlement.py` | EntitlementRunRequest/Response, PrecedentSearchRequest/Response |
 | `app/schemas/simulation.py` | MassingRequest/Response, LayoutRunRequest/Response, UnitTypeReferenceResponse |
@@ -428,8 +432,8 @@ finance → entitlement → precedent_search → document_generation
 | File | Purpose |
 |------|---------|
 | `src/main.jsx` | React 19 mount; Auth0Provider with hardcoded domain/clientId; localstorage token cache |
-| `src/App.jsx` | Root orchestrator; routing via `currentPage` state ('landing'/'dashboard'); auth gate; multi-component layout; floorPlans + projectId state wired to ModelViewer for upload-driven floor plan viewing |
-| `src/api.js` | HTTP wrapper; base `/api/v1`; reads `localStorage['token']` for Bearer auth; all backend endpoints including design version control, getNearbyApplications for precedent spatial search |
+| `src/App.jsx` | Root orchestrator; routing via `currentPage` state ('landing'/'dashboard'); auth gate; multi-component layout; floorPlans + projectId state; activePlanId state threaded to PolicyPanel + ChatPanel |
+| `src/api.js` | HTTP wrapper; base `/api/v1`; reads `localStorage['token']` for Bearer auth; all backend endpoints including design version control, getNearbyApplications, generatePlan (with generateSubset), regeneratePlanDocument, downloadPlanDocument, exportPlan |
 
 **App.jsx key state:**
 ```
@@ -444,30 +448,39 @@ activeNav, savedParcels, showHistory, searchHistory (localStorage per user)
 | File | Purpose | Key Features |
 |------|---------|--------------|
 | `src/components/MapView.jsx` | MapLibre GL map; Toronto center | Imperative handle API: `flyTo()`, `setMarker()`, `setParcel()`, `setProposedMassing()`. Layers: osm-buildings-3d, parcel-fill, parcel-line, proposed-massing-extrusion (3D). Pitch 60° when massing shown. Shows "Model" button when parcel resolved. |
-| `src/components/ModelViewer.jsx` | Full-screen 3D building model modal | Three.js/R3F Canvas; OrbitControls; typology-dispatched floor-plate geometry (midrise, tower_on_podium, point_tower, townhouse, slab, mixed_use_midrise); floor gaps between slabs; zoning warning display in info bar. View modes (massing/interior/blueprint/floorplan), floor selector, room info panel, version control bar (branch selector, commit/discard, history panel). Floorplan mode renders FloorPlanEditor (2D Konva). Lazy-loaded. |
+| `src/components/ModelViewer.jsx` | Full-screen 3D building model modal | Three.js/R3F Canvas; OrbitControls; typology-dispatched floor-plate geometry (midrise, tower_on_podium, point_tower, townhouse, slab, mixed_use_midrise); floor gaps between slabs; architectural detail layer (window strips, balcony slabs+railings, ground-floor storefronts+canopies, roof parapet caps, floor edge lines); zoning warning display in info bar. View modes (massing/interior/blueprint/floorplan), floor selector, room info panel, version control bar (branch selector, commit/discard, history panel). Floorplan mode renders FloorPlanEditor (2D Konva). Lazy-loaded. |
 | `src/components/FloorPlanView.jsx` | 3D interior floor plan renderer | R3F component; renders rooms as extruded polygons with type-based colors (imported from floorPlanHelpers), walls as boxes; floor slab per level; click-to-select rooms with gold emissive highlight; per-floor Y spacing. |
-| `src/components/floorplan/FloorPlanEditor.jsx` | 2D Konva-based floor plan editor container | Pan/zoom Stage, tool toolbar (select/wall/room/opening/measure), undo/redo (Ctrl+Z), debounced compliance API calls, imports real layer components (WallLayer/RoomLayer/OpeningLayer/DimensionLayer) plus placeholder ComplianceBadgeLayer. |
+| `src/components/floorplan/FloorPlanEditor.jsx` | 2D Konva-based floor plan editor container | Pan/zoom Stage, minimal toolbar (select/wall/door/window/delete), undo/redo (Ctrl+Z), debounced compliance API calls, wall center drag (move entire walls), delete tool (press X), collapsible compliance panel (press C), imports real layer components (WallLayer/RoomLayer/OpeningLayer/DimensionLayer) plus ComplianceBadgeLayer. |
 | `src/components/floorplan/FloorPlanEditor.css` | Floor plan editor styles | Flex layout, toolbar (48px left), canvas (center), compliance panel (320px right), scale calibration modal. Uses design system CSS vars. |
-| `src/components/floorplan/layers/WallLayer.jsx` | Konva wall rendering layer | Renders walls as Rects with rotation; exterior (8px, #333) / interior (4px, #555); load-bearing dashed/dotted; selected gold stroke; click-to-select. |
+| `src/components/floorplan/layers/WallLayer.jsx` | Konva wall rendering layer | Renders walls as Rects with rotation; exterior (8px, #333) / interior (4px, #555); load-bearing dashed/dotted; selected gold stroke; click-to-select; hover visual feedback; center circle drag handle (move entire wall), endpoint circles (adjust wall length/angle). |
 | `src/components/floorplan/layers/RoomLayer.jsx` | Konva room rendering layer | Renders rooms as closed Line polygons with semi-transparent ROOM_COLORS fill; centroid text labels (name + area in m2/sqft); selected gold stroke. |
 | `src/components/floorplan/layers/OpeningLayer.jsx` | Konva opening rendering layer | Renders doors (Arc swing + Line leaf) and windows (parallel Lines); positioned on parent wall via wall_id + offset; click-to-select. |
 | `src/components/floorplan/layers/DimensionLayer.jsx` | Konva dimension annotation layer | Auto-generated wall dimension annotations: extension lines, dimension line with arrowheads, length labels in metres; font adjusts with zoom; muted #78716c color. |
 | `src/components/floorplan/layers/ComplianceBadgeLayer.jsx` | Konva compliance badge layer | Circle badges at element centroids: red (error), yellow (warning), green (pass); badge count for multiple violations; click-to-highlight in CompliancePanel. |
 | `src/components/floorplan/panels/CompliancePanel.jsx` | OBC compliance sidebar | Right-side panel listing all OBC rule check results; grouped by element with expandable detail (OBC section, required vs actual); click rule to highlight element on canvas. |
-| `src/components/floorplan/panels/EditorToolbar.jsx` | Editor tool palette | Vertical left toolbar: Select, Wall, Door, Window, Room Type, Measure tools; undo/redo buttons; dimension toggle; uses model-ctrl-btn CSS class. |
+| `src/components/floorplan/panels/EditorToolbar.jsx` | Editor tool palette | Compact vertical toolbar with SVG icons: Select (V), Wall (W), Door (D), Window (O), Delete (X); undo/redo buttons (Ctrl+Z/Ctrl+Y); active tool highlighted with gold accent. |
 | `src/components/floorplan/panels/ScaleCalibration.jsx` | Scale calibration modal | Manual metres_per_unit input or two-point calibration; skip option defaults to 1.0 scale; shown before editing if uncalibrated. |
 | `src/components/floorplan/panels/RoomTypeSelector.jsx` | Room type popover | Grid of room type buttons with ROOM_COLORS swatches; click to change room type and trigger compliance re-check. |
 | `src/components/floorplan/panels/WallProperties.jsx` | Wall inspector panel | Load-bearing toggle (Unknown/Yes/No), wall type (Interior/Exterior), thickness slider, delete with load-bearing safety check. |
 | `src/components/BlueprintOverlay.jsx` | Blueprint image overlay | R3F component; loads blueprint page images as textured planes at floor Y offsets; supports per-floor or all-floors display. |
 | `src/components/SearchBar.jsx` | Address search + geocoding | 350ms debounce; Nominatim OSM API scoped to Toronto; 6 suggestions max; Enter/Escape keyboard support |
-| `src/components/Sidebar.jsx` | Left nav panel | 7 nav items: Overview/Massing/Finances/Entitlements/Policies/Datasets/Precedents. History panel. Collapsed/expanded state. |
-| `src/components/PolicyPanel.jsx` | Right-side 7-tab panel | Tabs: Overview (compliance status + file upload zone), Massing (envelope), Policies (accordion), Datasets (overlays), Precedents (live nearby applications with distance/decision), Entitlements (pathway badges + export), Finances (pro forma estimates, assessed value, market comps with tenure toggle). `FileUploadZone` component with drag-drop, multi-file, polling analysis. |
-| `src/components/ChatPanel.jsx` | AI assistant + file upload | Chat with backend `/assistant/chat`. Plan generation polling (30 attempts × 3s). File upload (PDF/img/xlsx/csv, 50MB max). Upload polling (40 attempts × 3s). `parseChatCommand()` regex for special commands. Drag-and-drop. |
+| `src/components/Sidebar.jsx` | Left nav panel | 5 nav items: Overview/Finances/Policies/Datasets/Precedents. History panel. Collapsed/expanded state. Resizable via `useResizable` hook. |
+| `src/components/PolicyPanel.jsx` | Right-side 6-tab panel | Tabs: Overview (zoning summary + file upload zone), Policies (accordion), Datasets (overlays), Precedents (live nearby applications with distance/decision), Finances (pro forma estimates, assessed value, market comps with tenure toggle), Documents (gallery with grouped list, preview, regenerate). Massing/Entitlements removed — AI produces these on demand in chat. Resizable via `useResizable` hook. |
+| `src/components/DocumentGallery.jsx` | Document gallery with sidebar + viewer | Grouped doc list (5 categories: Core Submission, Variance & Compliance, Pathway & Process, Appeals & Responses, Community & Readiness). Status dots. Export All button. |
+| `src/components/DocumentViewer.jsx` | Markdown document viewer | ReactMarkdown rendering, safety preamble banner, download (md/html/docx), regenerate button, review status workflow (submit/approve/reject). |
+| `src/components/ContractorCards.jsx` | Horizontal scrollable row of gold-accent contractor recommendation cards (name, rating, phone, website, trade badge) |
+| `src/components/ChatPanel.jsx` | AI assistant + file upload | Chat with backend `/assistant/chat`. Plan generation polling (30 attempts × 3s) with contractor recommendations on completion. Smart doc generation routing: ≤3 docs from existing plan → regenerate endpoint, else → full pipeline. File upload (PDF/img/xlsx/csv, 50MB max). Upload polling (40 attempts × 3s). `parseChatCommand()` regex for special commands. Drag-and-drop. |
 | `src/components/LandingPage.jsx` | Marketing homepage | Auth0 login/logout. Typewriter effect (10 dev queries, 45ms/char). MapLibre preview. Hero → Story → Vision → Footer. |
 | `src/components/UserBubble.jsx` | Animated user bubble (bottom-right) | Hover expand (44px→260px, 0.45s). Breathing pulse. User avatar + online dot + sign out. |
 | `src/components/LoginPage.jsx` | Legacy login form | **Unused** — replaced by Auth0. Still in codebase. |
 
 ---
+
+### Hooks
+
+| File | Purpose |
+|------|---------|
+| `src/hooks/useResizable.js` | Reusable panel-resize hook: drag handles for any edge, CSS variable sync, transition suppression during drag. Used by Sidebar, PolicyPanel, ChatPanel |
 
 ### Utilities
 
@@ -504,16 +517,14 @@ activeNav, savedParcels, showHistory, searchHistory (localStorage per user)
 
 | File | Purpose |
 |------|---------|
-| `docker-compose.yml` | Services: db (PostGIS 16), redis (7), minio, api (port 8000), worker (Celery), beat (Celery Beat). Volumes: pgdata, minio_data. Health checks on all services. |
+| `docker-compose.yml` | Services: db (PostGIS 16), redis (7), minio, api (port 8000). Volumes: pgdata, minio_data. Health checks on all services. |
 | `Dockerfile` | Python 3.11-slim; geospatial libs (libgdal, libgeos, libproj, gcc); uvicorn port 8000 |
-| `Dockerfile.worker` | Same base as Dockerfile but CMD runs Celery worker instead of uvicorn |
 | `railway.toml` | Railway deploy config for the API service: Dockerfile, start command (alembic upgrade + uvicorn), healthcheck /api/v1/health |
-| `railway.worker.toml` | Railway deploy config for the Celery worker service: Dockerfile.worker, celery worker start command |
 | `.railwayignore` | Files excluded from Railway builds: data/, *.dump, *.sql, .env, frontend/node_modules, dist |
 | `.gitignore` | Git exclusions for local caches, node_modules, oversized Toronto GIS source extracts, and generated UI captures |
-| `.env.example` | Template: DATABASE_URL, REDIS_URL, MINIO settings, JWT_SECRET, AI_PROVIDER, ANTHROPIC_API_KEY, CELERY config |
+| `.env.example` | Template: DATABASE_URL, REDIS_URL, MINIO settings, JWT_SECRET, AI_PROVIDER, ANTHROPIC_API_KEY |
 | `.env` | Live localhost config; **contains real API key** |
-| `pyproject.toml` | Project: `arterial` v0.1.0, Python ≥3.11. Deps: FastAPI, SQLAlchemy, asyncpg, GeoAlchemy2, pgvector, Celery, Redis, Pydantic, ezdxf. Dev: pytest, ruff. |
+| `pyproject.toml` | Project: `arterial` v0.1.0, Python ≥3.11. Deps: FastAPI, SQLAlchemy, asyncpg, GeoAlchemy2, pgvector, Redis, Pydantic, ezdxf, python-docx, markdown. Dev: pytest, ruff. |
 | `alembic.ini` | Alembic migration config; script location `./alembic`; logging |
 | `scripts/init-extensions.sql` | PostgreSQL init: uuid-ossp, postgis, vector extensions |
 
@@ -540,6 +551,7 @@ activeNav, savedParcels, showHistory, searchHistory (localStorage per user)
 | `scripts/seed_reference_data.py` | Calls `ensure_reference_data()` to seed templates/unit-types/assumptions |
 | `scripts/seed_toronto.py` | Bulk ingests 5 Toronto Open Data datasets: parcels, zoning, height overlay, setback overlay, dev applications |
 | `scripts/ingest_toronto_tracks_1_2.py` | CLI for individual dataset ingestion: `parcel-base`, `address-linkage`, `zoning-geometry`, `dev-applications`, `overlay` |
+| `scripts/generate_sample_dxf.py` | Generates a rich 6-storey mixed-use sample DXF with structural/partition/exterior wall layers, door/window blocks with sill/head height attributes, ceiling height annotations, balcony polygons, structural columns; outputs `sample_building.dxf` |
 
 ---
 
@@ -629,7 +641,7 @@ Located in `tests/` — 19 pytest modules:
 | Plans can be created with dummy UUIDs (anonymous) | `app/routers/plans.py` | Medium — `get_optional_user` allows anon |
 | Embedding generation missing | `app/models/entitlement.py`, `policy.py` | High — pgvector columns exist, no generation code |
 | Doc review has no role-based state transition check | `app/services/submission/review.py` | Medium |
-| Celery tasks have no retry / dead-letter queue | `app/tasks/*` | Medium |
+| Background tasks have no retry / dead-letter queue | `app/tasks/*` | Medium |
 | Building permit ↔ DevelopmentApplication auto-linking missing | `app/tasks/ingestion.py` | Low |
 
 ### Frontend
@@ -654,7 +666,7 @@ Full table — all routes across all routers:
 |--------|-------|------|-------|--------|
 | POST | `/api/v1/auth/register` | No | No | ✓ |
 | POST | `/api/v1/auth/login` | No | No | ✓ |
-| POST | `/api/v1/plans/generate` | Optional | Yes (Celery) | ✓ |
+| POST | `/api/v1/plans/generate` | Optional | Yes (background) | ✓ |
 | GET | `/api/v1/plans` | Yes | No | ✓ |
 | GET | `/api/v1/plans/{id}` | Yes | No | ✓ |
 | GET | `/api/v1/plans/{id}/readiness` | Yes | No | ✓ |
@@ -664,6 +676,10 @@ Full table — all routes across all routers:
 | POST | `/api/v1/plans/{id}/documents/{doc_id}/submit-review` | Yes | No | ✓ |
 | POST | `/api/v1/plans/{id}/documents/{doc_id}/approve` | Yes | No | ✓ |
 | POST | `/api/v1/plans/{id}/documents/{doc_id}/reject` | Yes | No | ✓ |
+| POST | `/api/v1/plans/{id}/generate-document/{doc_type}` | Yes | No | ✓ |
+| GET | `/api/v1/plans/{id}/documents/{doc_id}/download?format=` | Yes | No | ✓ |
+| POST | `/api/v1/plans/{id}/export` | Yes | No | ✓ |
+| GET | `/api/v1/plans/{id}/contractors?lat=&lng=` | Yes | No | ✓ |
 | POST | `/api/v1/assistant/chat` | Yes | No | ✓ |
 | GET | `/api/v1/parcels/search` | Yes | No | ✓ |
 | GET | `/api/v1/parcels/{id}` | Yes | No | ✓ |
@@ -712,4 +728,4 @@ Full table — all routes across all routers:
 
 ---
 
-*Last updated: 2026-03-07 (Add interactive 2D floor plan editor with real-time OBC interior compliance: Konva-based editor with wall/room/opening rendering, compliance badge overlay, OBC Part 9 checking API, selection, room type editing, undo/redo, scale calibration)*
+*Last updated: 2026-03-08 (27-document catalog: AI generation wiring, compliance engine fixes (O.Reg 462/24, Bill 185), 17 new doc types, assistant doc_types routing, on-demand regeneration endpoint, document gallery/viewer UI, DOCX download/export)*

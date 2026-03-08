@@ -347,7 +347,7 @@ function ComplianceBadge({ status }) {
 // ─── Commit Modal ──────────────────────────────────────────────────────────────
 
 function CommitModal({ onCommit, onCancel, changeSummary }) {
-  const [message, setMessage] = useState('');
+  const [message, setMessage] = useState('Design update');
 
   return (
     <div className="commit-modal-overlay" onClick={onCancel}>
@@ -669,7 +669,7 @@ export default function ModelViewer({
         className="model-canvas-area"
         style={{
           position: 'fixed',
-          top: 0,
+          top: viewMode === 'floorplan' ? 68 : 0,
           left: sidebarW,
           right: panelW,
           bottom: chatH,
@@ -696,7 +696,7 @@ export default function ModelViewer({
               params={params}
               controlsRef={controlsRef}
               viewMode={viewMode}
-              floorPlans={floorPlans}
+              floorPlans={uncommittedFloorPlans || floorPlans}
               blueprintPages={blueprintPages}
               activeFloor={activeFloor}
               selectedRoom={selectedRoom}

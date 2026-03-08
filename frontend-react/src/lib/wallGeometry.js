@@ -112,3 +112,84 @@ export function updateRoomsAfterWallEdit(rooms, oldPoint, newPoint) {
     };
   });
 }
+
+// Generate a rectangular room and its 4 bounding walls
+export function generateRoomAndWalls(x, y, width, height, type, generateId) {
+  // Snapped coordinates
+  const sx = Math.round(x / SNAP_GRID) * SNAP_GRID;
+  const sy = Math.round(y / SNAP_GRID) * SNAP_GRID;
+  const sw = Math.max(SNAP_GRID, Math.round(width / SNAP_GRID) * SNAP_GRID);
+  const sh = Math.max(SNAP_GRID, Math.round(height / SNAP_GRID) * SNAP_GRID);
+
+  const polygon = [
+    [sx, sy],
+    [sx + sw, sy],
+    [sx + sw, sy + sh],
+    [sx, sy + sh],
+  ];
+
+  const roomId = generateId('r');
+  const room = {
+    id: roomId,
+    room_type: type || 'other',
+    polygon,
+    area_sqm: recalculateRoomArea(polygon),
+  };
+
+  const walls = [
+    { start: [sx, sy], end: [sx + sw, sy] },            // Top
+    { start: [sx + sw, sy], end: [sx + sw, sy + sh] },  // Right
+    { start: [sx + sw, sy + sh], end: [sx, sy + sh] },  // Bottom
+    { start: [sx, sy + sh], end: [sx, sy] },            // Left
+  ].map((w) => ({
+    id: generateId('w'),
+    start: w.start,
+    end: w.end,
+    type: 'interior',
+    load_bearing: 'unknown',
+    thickness_m: 0.15,
+  }));
+
+  return { room, walls };
+}
+
+// Check if two line segments (walls) are identical or fully overlapping
+function linesOverlap(a1, a2, b1, b2) {
+  const tol = 0.01;
+  const match = (p1, p2) => Math.abs(p1[0] - p2[0]) < tol && Math.abs(p1[1] - p2[1]) < tol;
+  
+  if ((match(a1, b1) && match(a2, b2)) || (match(a1, b2) && match(a2, b1))) {
+    return true; // Exact match (reversed or not)
+  }
+  
+  // Future enhancement: Handle partial overlaps if blocks are offset
+  return false;
+}
+
+// Merge overlapping walls to prevent Z-fighting and duplicate topology
+export function mergeOverlappingWalls(existingWalls, newWalls) {
+  const resultingWalls = [...existingWalls];
+  const wallsToAdd = [];
+
+  for (const newWall of newWalls) {
+    let isDuplicate = false;
+    for (let i = 0; i < resultingWalls.length; i++) {
+      const exWall = resultingWalls[i];
+      if (linesOverlap(newWall.start, newWall.end, exWall.start, exWall.end)) {
+        // They overlap, so we turn the existing wall into a definitive 'interior' wall 
+        // and discard the new overlapping segment
+        resultingWalls[i] = {
+          ...exWall,
+          type: 'interior'
+        };
+        isDuplicate = true;
+        break;
+      }
+    }
+    if (!isDuplicate) {
+      wallsToAdd.push(newWall);
+    }
+  }
+
+  return [...resultingWalls, ...wallsToAdd];
+}

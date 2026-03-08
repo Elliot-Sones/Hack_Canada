@@ -4,23 +4,28 @@
   height: 100%;
   position: relative;
   background: var(--bg-primary);
+  flex-direction: row;
+  min-width: 0;
+  min-height: 0;
 }
 
 .floorplan-toolbar {
-  width: 48px;
+  width: 68px;
+  flex-shrink: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: var(--space-xs);
-  padding: var(--space-sm) var(--space-xs);
+  gap: 4px;
+  padding: 8px 4px;
   background: var(--bg-secondary);
   border-right: 1px solid var(--border);
-  z-index: 2;
+  z-index: 3;
+  overflow-y: auto;
 }
 
 .floorplan-toolbar button {
-  width: 36px;
-  height: 36px;
+  width: 40px;
+  height: 40px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -31,21 +36,79 @@
   cursor: pointer;
   font-size: var(--font-sm);
   transition: var(--transition);
+  padding: 0;
 }
 
-.floorplan-toolbar button:hover {
+.floorplan-toolbar button:hover:not(:disabled) {
   background: var(--bg-tertiary);
   color: var(--text-primary);
+  border-color: var(--text-primary);
 }
 
 .floorplan-toolbar button.active {
   background: var(--accent-bg);
-  border-color: var(--border-accent);
+  border-color: var(--accent);
   color: var(--accent);
 }
 
+.toolbar-icon-btn {
+  width: 58px;
+  min-height: 48px;
+  padding: 5px 4px 4px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.toolbar-icon-btn svg {
+  width: 20px;
+  height: 20px;
+  stroke: currentColor;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  color: inherit;
+  flex-shrink: 0;
+}
+
+.toolbar-btn-label {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  line-height: 1;
+  color: inherit;
+  white-space: nowrap;
+}
+
+.toolbar-icon-btn:hover:not(:disabled) {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border-color: var(--text-primary);
+  transform: translateY(-1px);
+}
+
+.toolbar-icon-btn.active {
+  background: var(--accent-bg);
+  border-color: var(--accent);
+  color: var(--accent);
+  box-shadow: 0 0 8px rgba(200, 165, 92, 0.3);
+}
+
+.toolbar-icon-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 .floorplan-toolbar .toolbar-divider {
-  width: 28px;
+  width: 46px;
   height: 1px;
   background: var(--border);
   margin: var(--space-xs) 0;
@@ -56,6 +119,9 @@
   position: relative;
   overflow: hidden;
   cursor: grab;
+  background: var(--bg-primary);
+  min-width: 0;
+  min-height: 0;
 }
 
 .floorplan-canvas:active {
@@ -64,11 +130,39 @@
 
 .floorplan-compliance-panel {
   width: 320px;
+  flex-shrink: 0;
   background: var(--bg-secondary);
   border-left: 1px solid var(--border);
   overflow-y: auto;
   padding: var(--space-lg);
   z-index: 2;
+  position: relative;
+  min-height: 0;
+}
+
+.compliance-toggle-btn {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  width: 50px;
+  height: 50px;
+  border-radius: 50%;
+  background: var(--accent-bg);
+  border: 2px solid var(--accent);
+  color: var(--accent);
+  font-size: 24px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 20;
+  box-shadow: 0 4px 12px rgba(200, 165, 92, 0.2);
+}
+
+.compliance-toggle-btn:hover {
+  box-shadow: 0 6px 16px rgba(200, 165, 92, 0.4);
+  transform: scale(1.05);
 }
 
 .floorplan-compliance-panel h3 {
@@ -350,6 +444,17 @@
   color: var(--text-secondary);
 }
 
+.compliance-rule-description {
+  color: var(--text-secondary);
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 6px 8px;
+  background: var(--bg-secondary, rgba(255, 255, 255, 0.03));
+  border-radius: 4px;
+  border-left: 2px solid var(--accent-muted, #555);
+}
+
 .compliance-rule-note {
   color: var(--text-muted);
   margin-top: 2px;
@@ -459,15 +564,17 @@
 
 .wall-properties-panel {
   position: absolute;
-  bottom: var(--space-lg);
-  left: 64px;
+  top: 8px;
+  left: 76px;
   z-index: 15;
   background: var(--bg-secondary);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  padding: var(--space-lg);
+  padding: var(--space-md) var(--space-lg);
   box-shadow: var(--shadow-md);
-  width: 260px;
+  width: 240px;
+  max-height: calc(100% - 100px);
+  overflow-y: auto;
 }
 
 .wall-properties-title {

@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { Group, Rect, Circle } from 'react-konva';
 import { wallToRect, snapToGrid, snapToEndpoint } from '../../../lib/wallGeometry.js';
 
@@ -23,6 +23,10 @@ export default function WallLayer({
   scale = 1,
   activeTool,
   onWallEndpointDrag,
+  wallDragId,
+  onWallCenterDragStart,
+  onWallCenterDrag,
+  onWallCenterDragEnd,
 }) {
   const wallRects = useMemo(() => {
     if (!walls) return [];
@@ -36,13 +40,17 @@ export default function WallLayer({
 
   if (!walls || walls.length === 0) return <Group />;
 
-  // Walls should be clickable for select, door, and window tools
-  const listening = activeTool === 'select' || activeTool === 'door' || activeTool === 'window';
+  // Walls should be clickable for select, door, window, and delete tools
+  const listening = activeTool === 'select' || activeTool === 'door' || activeTool === 'window' || activeTool === 'delete';
+
+  const [hoveredWallId, setHoveredWallId] = useState(null);
 
   return (
     <Group listening={listening}>
       {wallRects.map(({ wall, cx, cy, length, angle, displayThickness }) => {
         const isSelected = wall.id === selectedId;
+        const isHovered = wall.id === hoveredWallId && activeTool === 'select';
+        const isDragging = wall.id === wallDragId;
         const dash = wallDash(wall, scale);
 
         return (
@@ -56,12 +64,55 @@ export default function WallLayer({
               offsetY={displayThickness / 2}
               rotation={(angle * 180) / Math.PI}
               fill={wallFill(wall)}
-              stroke={isSelected ? GOLD : undefined}
-              strokeWidth={isSelected ? 2 / scale : 0}
+              stroke={isSelected ? GOLD : (isHovered ? GOLD : undefined)}
+              strokeWidth={isSelected || isHovered ? 2 / scale : 0}
               dash={dash}
-              onClick={() => onSelect?.(wall.id)}
+              opacity={isDragging ? 0.8 : 1}
+              onMouseEnter={() => setHoveredWallId(activeTool === 'select' ? wall.id : null)}
+              onMouseLeave={() => setHoveredWallId(null)}
+              onClick={() => {
+                if (activeTool === 'delete') {
+                  onSelect?.(wall.id, 'delete');
+                } else {
+                  onSelect?.(wall.id);
+                }
+              }}
               onTap={() => onSelect?.(wall.id)}
             />
+
+            {/* Center drag handle for moving entire wall (when selected in select mode) */}
+            {isSelected && activeTool === 'select' && onWallCenterDragStart && (
+              <Circle
+                x={cx}
+                y={cy}
+                radius={6 / scale}
+                fill={GOLD}
+                stroke="#1a1a1a"
+                strokeWidth={1.5 / scale}
+                opacity={0.7}
+                draggable
+                cursor="grab"
+                onMouseEnter={(e) => {
+                  e.target.to({ opacity: 1, duration: 0.1 });
+                }}
+                onMouseLeave={(e) => {
+                  if (wall.id !== wallDragId) {
+                    e.target.to({ opacity: 0.7, duration: 0.1 });
+                  }
+                }}
+                onDragStart={(e) => {
+                  e.target.to({ opacity: 1, duration: 0 });
+                  onWallCenterDragStart(wall.id, [e.target.x(), e.target.y()]);
+                }}
+                onDragMove={(e) => {
+                  onWallCenterDrag?.(wall.id, [e.target.x(), e.target.y()]);
+                }}
+                onDragEnd={(e) => {
+                  onWallCenterDragEnd?.();
+                  e.target.to({ opacity: 0.7, duration: 0.1 });
+                }}
+              />
+            )}
 
             {/* Drag handles for selected wall endpoints */}
             {isSelected && activeTool === 'select' && onWallEndpointDrag && (
