@@ -30,7 +30,7 @@ def _resolve_parcel_snapshot_id(args: argparse.Namespace, jurisdiction_id: uuid.
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Ingest Toronto Tracks 1-2 geospatial datasets into Arterial")
+    parser = argparse.ArgumentParser(description="Ingest Toronto Tracks 1-2 geospatial datasets into CoCivil")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     parcel_parser = subparsers.add_parser("parcel-base", help="Ingest parcel polygons from GeoJSON")

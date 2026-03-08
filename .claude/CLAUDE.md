@@ -1,4 +1,4 @@
-# Hack Canada — Arterial Platform
+# Hack Canada — CoCivil Platform
 
 ## Auto-Update Rule for index.md
 

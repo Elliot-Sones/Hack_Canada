@@ -44,7 +44,7 @@ structlog.configure(
 
 def create_app() -> FastAPI:
     application = FastAPI(
-        title="Arterial",
+        title="CoCivil",
         description="Land-development due diligence platform",
         version=__version__,
     )

@@ -1,4 +1,4 @@
-# Agents — Arterial Platform
+# Agents — CoCivil Platform
 
 ## index.md Auto-Update Protocol
 

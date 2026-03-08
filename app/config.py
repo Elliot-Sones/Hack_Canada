@@ -2,14 +2,14 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    DATABASE_URL: str = "postgresql+asyncpg://arterial:arterial@localhost:5432/arterial"
-    DATABASE_URL_SYNC: str = "postgresql+psycopg2://arterial:arterial@localhost:5432/arterial"
+    DATABASE_URL: str = "postgresql+asyncpg://cocivil:cocivil@localhost:5432/cocivil"
+    DATABASE_URL_SYNC: str = "postgresql+psycopg2://cocivil:cocivil@localhost:5432/cocivil"
     REDIS_URL: str = "redis://localhost:6379/0"
 
     S3_ENDPOINT_URL: str = "http://localhost:9000"
     S3_ACCESS_KEY: str = "minioadmin"
     S3_SECRET_KEY: str = "minioadmin"
-    S3_BUCKET_NAME: str = "arterial-docs"
+    S3_BUCKET_NAME: str = "cocivil-docs"
 
     JWT_SECRET_KEY: str = "change-me-in-production"
     JWT_ALGORITHM: str = "HS256"

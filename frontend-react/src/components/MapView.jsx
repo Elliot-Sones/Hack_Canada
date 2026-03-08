@@ -21,6 +21,8 @@ const MapView = forwardRef(function MapView({ isParcelResolved, onModelOpen, isP
     const markerRef = useRef(null);
     const popupRef = useRef(null);
     const [mapLoaded, setMapLoaded] = useState(false);
+    const onInfraAssetClickRef = useRef(onInfraAssetClick);
+    useEffect(() => { onInfraAssetClickRef.current = onInfraAssetClick; }, [onInfraAssetClick]);
 
     // Store geojson safely if set before map loads
     const pendingParcelRef = useRef(null);
@@ -370,7 +372,7 @@ const MapView = forwardRef(function MapView({ isParcelResolved, onModelOpen, isP
                         </div>
                     `)
                     .addTo(map);
-                if (onInfraAssetClick) onInfraAssetClick({ type: 'pipeline', ...props });
+                if (onInfraAssetClickRef.current) onInfraAssetClickRef.current({ type: 'pipeline', ...props });
             });
 
             // Cursor styling for interactive layers

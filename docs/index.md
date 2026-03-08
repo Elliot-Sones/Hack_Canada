@@ -1,4 +1,4 @@
-# Arterial — Land Development Due Diligence Platform
+# CoCivil — Land Development Due Diligence Platform
 
 > Backend API for parcel discovery, policy resolution, building simulation, financial modeling, and entitlement assessment. Toronto MVP.
 
@@ -244,8 +244,8 @@ Local development reads `.env`. `.env.example` is a template for `.env`, not a l
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `DATABASE_URL` | `postgresql+asyncpg://arterial:arterial@localhost:5432/arterial` | Async DB connection |
-| `DATABASE_URL_SYNC` | `postgresql+psycopg2://arterial:arterial@localhost:5432/arterial` | Sync DB (Celery/Alembic) |
+| `DATABASE_URL` | `postgresql+asyncpg://cocivil:cocivil@localhost:5432/cocivil` | Async DB connection |
+| `DATABASE_URL_SYNC` | `postgresql+psycopg2://cocivil:cocivil@localhost:5432/cocivil` | Sync DB (Celery/Alembic) |
 | `REDIS_URL` | `redis://localhost:6379/0` | Cache and idempotency |
 | `S3_ENDPOINT_URL` | `http://localhost:9000` | Object storage |
 | `S3_ACCESS_KEY` / `S3_SECRET_KEY` | `minioadmin` | MinIO credentials |

@@ -58,7 +58,7 @@ export default function App() {
   }, []);
 
   const historyKey = useMemo(
-    () => (user?.sub ? `arterial_history_${user.sub}` : null),
+    () => (user?.sub ? `cocivil_history_${user.sub}` : null),
     [user?.sub]
   );
 
@@ -318,7 +318,7 @@ export default function App() {
         isChatExpanded={isChatExpanded}
         isModelOpen={isModelOpen}
         assetType={assetType}
-        onInfraAssetClick={(asset) => { setSelectedPipelineAsset(asset); setIsPanelOpen(true); }}
+        onInfraAssetClick={(asset) => { setSelectedPipelineAsset(asset); setIsPanelOpen(true); setActiveNav('overview'); }}
       />
       <InfrastructureLayerControl mapRef={mapRef} />
       <SearchBar onLocationSelected={handleLocationSelected} />

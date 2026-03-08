@@ -1,4 +1,4 @@
-// API client — for connecting to the Arterial backend
+// API client — for connecting to the CoCivil backend
 
 const API_BASE = '/api/v1';
 

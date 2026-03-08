@@ -233,7 +233,7 @@ export default function LandingPage({ onNavigate }) {
                         Zoning bylaws scattered across hundreds of pages. Official Plan
                         policies in one tab, setback tables in another, heritage overlays
                         in a third. Hours wasted before a single sketch is drawn. We built
-                        applicationAI because we lived this problem — and because we knew
+                        CoCivil because we lived this problem — and because we knew
                         AI could solve it. Our platform reads the city's rules so you
                         don't have to, turning weeks of due diligence into minutes of
                         conversation.
@@ -252,7 +252,7 @@ export default function LandingPage({ onNavigate }) {
                         Every city has rules. Most are written for lawyers, not builders.
                         We envision a future where any developer, architect, or planner
                         can instantly understand what's possible on any parcel — and make
-                        smarter decisions from day one. applicationAI is the intelligence
+                        smarter decisions from day one. CoCivil is the intelligence
                         layer between policy and design, making cities faster to build and
                         better to live in.
                     </p>
@@ -261,7 +261,7 @@ export default function LandingPage({ onNavigate }) {
 
             {/* ===== FOOTER ===== */}
             <footer className="lp-footer">
-                <span>© 2025 applicationAI</span>
+                <span>© 2025 CoCivil</span>
                 <span>Toronto, Canada</span>
             </footer>
         </div>

@@ -3,16 +3,16 @@ services:
     image: postgis/postgis:16-3.4
     platform: linux/amd64
     environment:
-      POSTGRES_USER: arterial
-      POSTGRES_PASSWORD: arterial
-      POSTGRES_DB: arterial
+      POSTGRES_USER: cocivil
+      POSTGRES_PASSWORD: cocivil
+      POSTGRES_DB: cocivil
     ports:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./scripts/init-extensions.sql:/docker-entrypoint-initdb.d/init-extensions.sql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U arterial"]
+      test: ["CMD-SHELL", "pg_isready -U cocivil"]
       interval: 5s
       timeout: 5s
       retries: 5

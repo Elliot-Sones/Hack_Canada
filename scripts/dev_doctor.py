@@ -14,7 +14,7 @@ from app.devtools import (
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Verify local Arterial infrastructure and config targets.")
+    parser = argparse.ArgumentParser(description="Verify local CoCivil infrastructure and config targets.")
     parser.add_argument(
         "--services",
         nargs="+",

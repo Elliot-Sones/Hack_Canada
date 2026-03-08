@@ -68,7 +68,7 @@ def _resolve_address_file(data_dir: Path, explicit_path: Path | None) -> Path | 
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Seed Toronto Open Data into Arterial")
+    parser = argparse.ArgumentParser(description="Seed Toronto Open Data into CoCivil")
     parser.add_argument("--data-dir", required=True, type=Path, help="Directory containing downloaded data files")
     parser.add_argument("--jurisdiction-name", default="Toronto")
     parser.add_argument("--province", default="Ontario")

@@ -1,7 +1,7 @@
-# ApplicationAI Platform — Full Codebase Index
+# CoCivil Platform — Full Codebase Index
 
 > **Auto-maintained**: This file is updated automatically after any file edit or creation. See `.claude/CLAUDE.md` for update rules.
-> **Last updated**: 2026-03-08 (water pipeline DXF support: parser, auto-detect, 3D viewer, sample generator) | **PRD**: [`.claude/docs/PRD.md`](.claude/docs/PRD.md)
+> **Last updated**: 2026-03-08 (redesign PipelineAssetPanel: status banner, specs strip, metric grid cards, gradient bars) | **PRD**: [`.claude/docs/PRD.md`](.claude/docs/PRD.md)
 
 ---
 
@@ -38,11 +38,11 @@
 
 ## Project Overview
 
-**ApplicationAI** — Land-development due diligence platform for Toronto/Ontario. Generates planning submission packages (planning rationale, compliance matrix, precedent report, etc.) from plain-English development queries.
+**CoCivil** — Land-development due diligence platform for Toronto/Ontario. Generates planning submission packages (planning rationale, compliance matrix, precedent report, etc.) from plain-English development queries.
 
 | Attribute | Value |
 |-----------|-------|
-| App Name | `applicationai` v0.1.0 |
+| App Name | `cocivil` v0.1.0 |
 | Backend | FastAPI + SQLAlchemy async + PostgreSQL + PostGIS |
 | Background Tasks | threading (in-process) |
 | Frontend | React 19 + Vite |
@@ -530,6 +530,7 @@ assetType ('building' | 'pipeline' | 'bridge')
 | `src/lib/buildingGeometry.js` | GeoJSON polygon → local metres; polygon shrink; `extractFootprint()`; `makeCircularFootprint()` for point towers; `subdivideFootprintIntoUnits()` for townhouse rows |
 | `src/lib/infrastructureGeometry.js` | Infrastructure geometry: `alignmentToLocal()` (geo/metric coords to local offsets), `generatePipeSegment()` (CylinderGeometry between points), `generateManhole()` (vertical shaft), `generateFitting()` (elbow/tee/reducer) |
 | `src/lib/bridgeGeometry.js` | Bridge geometry: `generateBridgeDeck()` (BoxGeometry), `generateGirder()` (I-beam/box ExtrudeGeometry), `generateAbutment()`, `generatePier()`, `generateBarrier()` |
+| `src/lib/watermainStandards.js` | Real Ontario/Toronto water main reference data for infrastructure sidebar tabs: `WATERMAIN_STANDARDS` (OPSS.MUNI 441/491/493, AWWA C151/C900/C906/C509/C504/C502/C600/C651, CSA B137.x, Toronto ECS supplements), `WATERMAIN_NETWORK` (6 pressure zones, pipe classification, valve isolation, hydraulic criteria), `WATERMAIN_DATASETS` (Toronto Open Data CKAN URLs, field descriptions, API examples), `WATERMAIN_INSPECTIONS` (O.Reg 170/03, CCTV, acoustic leak detection, hydrostatic test, cathodic protection), `WATERMAIN_HISTORY` (1843–2034 timeline, age demographics, break trends, capital replacement programs); exported as `INFRASTRUCTURE_SIDEBAR_TABS` array |
 | `src/lib/parcelState.test.js` | Node native test runner unit tests for parcelState |
 | `src/lib/chatCommands.test.js` | Unit tests for chatCommands |
 
@@ -565,7 +566,7 @@ assetType ('building' | 'pipeline' | 'bridge')
 | `.gitignore` | Git exclusions for local caches, node_modules, oversized Toronto GIS source extracts, and generated UI captures |
 | `.env.example` | Template: DATABASE_URL, REDIS_URL, MINIO settings, JWT_SECRET, AI_PROVIDER, ANTHROPIC_API_KEY |
 | `.env` | Live localhost config; **contains real API key** |
-| `pyproject.toml` | Project: `arterial` v0.1.0, Python ≥3.11. Deps: FastAPI, SQLAlchemy, asyncpg, GeoAlchemy2, pgvector, Redis, Pydantic, ezdxf, python-docx, markdown. Dev: pytest, ruff. |
+| `pyproject.toml` | Project: `cocivil` v0.1.0, Python ≥3.11. Deps: FastAPI, SQLAlchemy, asyncpg, GeoAlchemy2, pgvector, Redis, Pydantic, ezdxf, python-docx, markdown. Dev: pytest, ruff. |
 | `alembic.ini` | Alembic migration config; script location `./alembic`; logging |
 | `scripts/init-extensions.sql` | PostgreSQL init: uuid-ossp, postgis, vector extensions |
 
