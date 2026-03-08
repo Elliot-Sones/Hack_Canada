@@ -69,3 +69,12 @@ ENV/
 *~
 .DS_Store
 node_modules/
+
+# Local GIS datasets and generated UI captures are kept out of git.
+data/development-applications.json
+data/property-boundaries-4326.geojson
+data/test_floor_plan.dxf
+data/zoning-area-4326.geojson
+data/zoning-building-setback-overlay-4326.geojson
+data/zoning-height-overlay-4326.geojson
+output/playwright/

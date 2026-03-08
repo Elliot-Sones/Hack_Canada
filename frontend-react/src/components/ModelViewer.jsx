@@ -11,6 +11,7 @@ import {
 } from '../lib/buildingGeometry.js';
 import BlueprintOverlay from './BlueprintOverlay.jsx';
 import FloorPlanView from './FloorPlanView.jsx';
+import FloorPlanEditor from './floorplan/FloorPlanEditor.jsx';
 import {
   createBranch,
   listBranches,
@@ -559,6 +560,11 @@ export default function ModelViewer({
     }
   }, [currentBranch, floorPlans, modelParams, parcelId, uncommittedFloorPlans, uncommittedModelParams]);
 
+  const handleFloorPlansChange = useCallback((newPlans) => {
+    setUncommittedFloorPlans(newPlans);
+    setIsDirty(true);
+  }, []);
+
   const handleDiscard = useCallback(() => {
     if (!currentVersion) return;
     if (!window.confirm('Discard all uncommitted changes?')) return;
@@ -624,6 +630,9 @@ export default function ModelViewer({
     if (viewMode === 'blueprint' && !hasBlueprintPages) {
       setViewMode(hasFloorPlans ? 'interior' : 'massing');
     }
+    if (viewMode === 'floorplan' && !hasFloorPlans) {
+      setViewMode('massing');
+    }
   }, [hasBlueprintPages, hasFloorPlans, viewMode]);
 
   if (!isOpen) return null;
@@ -668,24 +677,33 @@ export default function ModelViewer({
           transition: 'left 0.3s ease, right 0.3s ease, bottom 0.3s ease',
         }}
       >
-        <Canvas
-          camera={{ position: [0, 40, 80], fov: 45 }}
-          shadows
-          style={{ width: '100%', height: '100%', background: 'transparent' }}
-          eventPrefix="client"
-        >
-          <Scene
-            parcelGeoJSON={parcelGeoJSON}
-            params={params}
-            controlsRef={controlsRef}
-            viewMode={viewMode}
-            floorPlans={floorPlans}
-            blueprintPages={blueprintPages}
+        {viewMode === 'floorplan' ? (
+          <FloorPlanEditor
+            floorPlans={uncommittedFloorPlans || floorPlans}
             activeFloor={activeFloor}
-            selectedRoom={selectedRoom}
-            onRoomClick={setSelectedRoom}
+            onFloorPlansChange={handleFloorPlansChange}
+            parcelId={parcelId}
           />
-        </Canvas>
+        ) : (
+          <Canvas
+            camera={{ position: [0, 40, 80], fov: 45 }}
+            shadows
+            style={{ width: '100%', height: '100%', background: 'transparent' }}
+            eventPrefix="client"
+          >
+            <Scene
+              parcelGeoJSON={parcelGeoJSON}
+              params={params}
+              controlsRef={controlsRef}
+              viewMode={viewMode}
+              floorPlans={floorPlans}
+              blueprintPages={blueprintPages}
+              activeFloor={activeFloor}
+              selectedRoom={selectedRoom}
+              onRoomClick={setSelectedRoom}
+            />
+          </Canvas>
+        )}
 
         {/* Room info panel */}
         <RoomInfoPanel room={selectedRoom} onClose={() => setSelectedRoom(null)} />
@@ -805,6 +823,7 @@ export default function ModelViewer({
             {[
               { key: 'massing', disabled: false, title: '' },
               { key: 'interior', disabled: !hasFloorPlans, title: 'Upload a DXF to view interior' },
+              { key: 'floorplan', disabled: !hasFloorPlans, title: 'Edit floor plan (2D)' },
             ].map((mode) => (
               <button
                 key={mode.key}

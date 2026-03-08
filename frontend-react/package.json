@@ -14,9 +14,11 @@
     "@auth0/auth0-react": "^2.15.0",
     "@react-three/drei": "^10.7.7",
     "@react-three/fiber": "^9.5.0",
+    "konva": "^10.2.0",
     "maplibre-gl": "^5.19.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
+    "react-konva": "^19.2.3",
     "three": "^0.183.2"
   },
   "devDependencies": {

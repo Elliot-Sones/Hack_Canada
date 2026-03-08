@@ -1,20 +1,6 @@
 import { useMemo } from 'react';
 import * as THREE from 'three';
-
-const ROOM_COLORS = {
-  living: '#4a7c59',
-  bedroom: '#4a6b8a',
-  kitchen: '#8a7553',
-  bathroom: '#4a8a7c',
-  hallway: '#666666',
-  dining: '#7c6b4a',
-  storage: '#5a5a5a',
-  utility: '#5a6b5a',
-  balcony: '#6b8a6b',
-  garage: '#4a4a4a',
-  office: '#6b6b8a',
-  other: '#777777',
-};
+import { ROOM_COLORS } from '../lib/floorPlanHelpers.js';
 
 const WALL_COLOR = '#333333';
 const WALL_HEIGHT = 2.8;

@@ -1,0 +1,77 @@
+[
+  {
+    "benchmark_id": "toronto-showcase-001",
+    "verification_status": "template",
+    "source_notes": "Prominent downtown showcase address drawn from the local Toronto parcel source. Promote after manually verifying the parcel linkage, full zoning string, overlay coverage, and policy stack richness.",
+    "address_input": "40 King St W, Toronto, ON",
+    "expected_parcel": {
+      "address": "40 King St W"
+    },
+    "expected_policy_stack": {
+      "required_documents": [
+        "Zoning By-law 569-2013"
+      ],
+      "required_sections": []
+    }
+  },
+  {
+    "benchmark_id": "toronto-showcase-002",
+    "verification_status": "template",
+    "source_notes": "Prominent downtown showcase address drawn from the local Toronto parcel source. Promote after manually verifying the parcel linkage, full zoning string, overlay coverage, and policy stack richness.",
+    "address_input": "66 Wellington St W, Toronto, ON",
+    "expected_parcel": {
+      "address": "66 Wellington St W"
+    },
+    "expected_policy_stack": {
+      "required_documents": [
+        "Zoning By-law 569-2013"
+      ],
+      "required_sections": []
+    }
+  },
+  {
+    "benchmark_id": "toronto-showcase-003",
+    "verification_status": "template",
+    "source_notes": "Prominent downtown showcase address drawn from the local Toronto parcel source. Promote after manually verifying the parcel linkage, full zoning string, overlay coverage, and policy stack richness.",
+    "address_input": "100 Queen St W, Toronto, ON",
+    "expected_parcel": {
+      "address": "100 Queen St W"
+    },
+    "expected_policy_stack": {
+      "required_documents": [
+        "Zoning By-law 569-2013"
+      ],
+      "required_sections": []
+    }
+  },
+  {
+    "benchmark_id": "toronto-showcase-004",
+    "verification_status": "template",
+    "source_notes": "Prominent downtown showcase address drawn from the local Toronto parcel source. Promote after manually verifying the parcel linkage, full zoning string, overlay coverage, and policy stack richness.",
+    "address_input": "200 Adelaide St W, Toronto, ON",
+    "expected_parcel": {
+      "address": "200 Adelaide St W"
+    },
+    "expected_policy_stack": {
+      "required_documents": [
+        "Zoning By-law 569-2013"
+      ],
+      "required_sections": []
+    }
+  },
+  {
+    "benchmark_id": "toronto-showcase-005",
+    "verification_status": "template",
+    "source_notes": "Prominent downtown showcase address drawn from the local Toronto parcel source. Promote after manually verifying the parcel linkage, full zoning string, overlay coverage, and policy stack richness.",
+    "address_input": "905 Bay St, Toronto, ON",
+    "expected_parcel": {
+      "address": "905 Bay St"
+    },
+    "expected_policy_stack": {
+      "required_documents": [
+        "Zoning By-law 569-2013"
+      ],
+      "required_sections": []
+    }
+  }
+]

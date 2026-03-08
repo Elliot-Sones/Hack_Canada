@@ -295,6 +295,11 @@ finance → entitlement → precedent_search → document_generation
 | POST | `/api/v1/uploads/{id}/generate-plan` | Feed upload into plan pipeline |
 | POST | `/api/v1/uploads/{id}/generate-response` | Generate response doc from findings |
 
+#### Compliance — `app/routers/compliance.py`
+| Method | Route | Purpose |
+|--------|-------|---------|
+| POST | `/api/v1/compliance/interior` | Run OBC interior compliance checks on a floor plan (deterministic, no auth required) |
+
 #### Design Versions — `app/routers/design_versions.py`
 | Method | Route | Purpose |
 |--------|-------|---------|
@@ -319,8 +324,9 @@ finance → entitlement → precedent_search → document_generation
 
 | File | Purpose |
 |------|---------|
-| `app/services/design_version_service.py` | Design version control: create/list/delete branches, commit versions with auto-compliance check against parcel zoning, change summary generation |
+| `app/services/design_version_service.py` | Design version control: create/list/delete branches, commit versions with auto-compliance check against parcel zoning + OBC interior checks, change summary generation |
 | `app/services/compliance_engine.py` | **Deterministic, no AI.** Rule-by-rule compliance matrix (lot coverage, FSI, height, setbacks, parking, amenity space). Returns `ComplianceResult` with variances needed. |
+| `app/services/interior_compliance.py` | **Deterministic, no AI.** OBC Part 9 interior compliance: bedroom area/dimension/egress, hallway width, door width, ceiling height, fire travel, ventilation warnings, load-bearing wall detection. Returns `InteriorComplianceResult`. |
 | `app/services/zoning_service.py` | `ZoningAnalysis` builder; normalize zone codes; extract params from map labels |
 | `app/services/zoning_parser.py` | Parse zone strings like `RD(f12.0; a370; d0.6)` into structured standards |
 | `app/services/overlay_service.py` | Fetch GIS overlays (heritage, flood, TRCA, railway, etc.) for a parcel |
@@ -371,6 +377,7 @@ finance → entitlement → precedent_search → document_generation
 |------|---------|
 | `app/data/toronto_zoning.py` | `ZONE_STANDARDS` dict — hardcoded By-law 569-2013 standards: R, RM, RA, CR, CL, DL, IH, IO, IE, IL. Each zone: permitted_uses, max_height, max_storeys, setbacks, lot_coverage, FSI, bylaw_section. Also: `AMENITY_SPACE`, `BICYCLE_PARKING` requirements. **Deterministic, no AI.** |
 | `app/data/ontario_policy.py` | `ONTARIO_POLICY_HIERARCHY`, `TORONTO_OP_DESIGNATIONS`, `TORONTO_ZONING_KEY_RULES`, `MINOR_VARIANCE_FOUR_TESTS`, `OREG_462_24`, `RECENT_LEGISLATION` (Bills 23/97/109/185/60). Embedded in AI system prompts as grounding context. |
+| `app/data/obc_interior_standards.py` | `OBC_INTERIOR_RULES` dict — OBC Part 9 interior standards: bedroom area/dimension, egress window, hallway width, door width, ceiling height, fire travel, fire access. `OBC_SECTIONS` section references. **Deterministic, no AI.** |
 
 ---
 
@@ -436,8 +443,20 @@ activeNav, savedParcels, showHistory, searchHistory (localStorage per user)
 | File | Purpose | Key Features |
 |------|---------|--------------|
 | `src/components/MapView.jsx` | MapLibre GL map; Toronto center | Imperative handle API: `flyTo()`, `setMarker()`, `setParcel()`, `setProposedMassing()`. Layers: osm-buildings-3d, parcel-fill, parcel-line, proposed-massing-extrusion (3D). Pitch 60° when massing shown. Shows "Model" button when parcel resolved. |
-| `src/components/ModelViewer.jsx` | Full-screen 3D building model modal | Three.js/R3F Canvas; OrbitControls; typology-dispatched floor-plate geometry (midrise, tower_on_podium, point_tower, townhouse, slab, mixed_use_midrise); floor gaps between slabs; zoning warning display in info bar. View modes (massing/interior/blueprint), floor selector, room info panel, version control bar (branch selector, commit/discard, history panel). Lazy-loaded. |
-| `src/components/FloorPlanView.jsx` | 3D interior floor plan renderer | R3F component; renders rooms as extruded polygons with type-based colors, walls as boxes; floor slab per level; click-to-select rooms with gold emissive highlight; per-floor Y spacing. |
+| `src/components/ModelViewer.jsx` | Full-screen 3D building model modal | Three.js/R3F Canvas; OrbitControls; typology-dispatched floor-plate geometry (midrise, tower_on_podium, point_tower, townhouse, slab, mixed_use_midrise); floor gaps between slabs; zoning warning display in info bar. View modes (massing/interior/blueprint/floorplan), floor selector, room info panel, version control bar (branch selector, commit/discard, history panel). Floorplan mode renders FloorPlanEditor (2D Konva). Lazy-loaded. |
+| `src/components/FloorPlanView.jsx` | 3D interior floor plan renderer | R3F component; renders rooms as extruded polygons with type-based colors (imported from floorPlanHelpers), walls as boxes; floor slab per level; click-to-select rooms with gold emissive highlight; per-floor Y spacing. |
+| `src/components/floorplan/FloorPlanEditor.jsx` | 2D Konva-based floor plan editor container | Pan/zoom Stage, tool toolbar (select/wall/room/opening/measure), undo/redo (Ctrl+Z), debounced compliance API calls, imports real layer components (WallLayer/RoomLayer/OpeningLayer/DimensionLayer) plus placeholder ComplianceBadgeLayer. |
+| `src/components/floorplan/FloorPlanEditor.css` | Floor plan editor styles | Flex layout, toolbar (48px left), canvas (center), compliance panel (320px right), scale calibration modal. Uses design system CSS vars. |
+| `src/components/floorplan/layers/WallLayer.jsx` | Konva wall rendering layer | Renders walls as Rects with rotation; exterior (8px, #333) / interior (4px, #555); load-bearing dashed/dotted; selected gold stroke; click-to-select. |
+| `src/components/floorplan/layers/RoomLayer.jsx` | Konva room rendering layer | Renders rooms as closed Line polygons with semi-transparent ROOM_COLORS fill; centroid text labels (name + area in m2/sqft); selected gold stroke. |
+| `src/components/floorplan/layers/OpeningLayer.jsx` | Konva opening rendering layer | Renders doors (Arc swing + Line leaf) and windows (parallel Lines); positioned on parent wall via wall_id + offset; click-to-select. |
+| `src/components/floorplan/layers/DimensionLayer.jsx` | Konva dimension annotation layer | Auto-generated wall dimension annotations: extension lines, dimension line with arrowheads, length labels in metres; font adjusts with zoom; muted #78716c color. |
+| `src/components/floorplan/layers/ComplianceBadgeLayer.jsx` | Konva compliance badge layer | Circle badges at element centroids: red (error), yellow (warning), green (pass); badge count for multiple violations; click-to-highlight in CompliancePanel. |
+| `src/components/floorplan/panels/CompliancePanel.jsx` | OBC compliance sidebar | Right-side panel listing all OBC rule check results; grouped by element with expandable detail (OBC section, required vs actual); click rule to highlight element on canvas. |
+| `src/components/floorplan/panels/EditorToolbar.jsx` | Editor tool palette | Vertical left toolbar: Select, Wall, Door, Window, Room Type, Measure tools; undo/redo buttons; dimension toggle; uses model-ctrl-btn CSS class. |
+| `src/components/floorplan/panels/ScaleCalibration.jsx` | Scale calibration modal | Manual metres_per_unit input or two-point calibration; skip option defaults to 1.0 scale; shown before editing if uncalibrated. |
+| `src/components/floorplan/panels/RoomTypeSelector.jsx` | Room type popover | Grid of room type buttons with ROOM_COLORS swatches; click to change room type and trigger compliance re-check. |
+| `src/components/floorplan/panels/WallProperties.jsx` | Wall inspector panel | Load-bearing toggle (Unknown/Yes/No), wall type (Interior/Exterior), thickness slider, delete with load-bearing safety check. |
 | `src/components/BlueprintOverlay.jsx` | Blueprint image overlay | R3F component; loads blueprint page images as textured planes at floor Y offsets; supports per-floor or all-floors display. |
 | `src/components/SearchBar.jsx` | Address search + geocoding | 350ms debounce; Nominatim OSM API scoped to Toronto; 6 suggestions max; Enter/Escape keyboard support |
 | `src/components/Sidebar.jsx` | Left nav panel | 7 nav items: Overview/Massing/Finances/Entitlements/Policies/Datasets/Precedents. History panel. Collapsed/expanded state. |
@@ -454,7 +473,9 @@ activeNav, savedParcels, showHistory, searchHistory (localStorage per user)
 | File | Purpose |
 |------|---------|
 | `src/lib/parcelState.js` | Parcel shape builders: `buildParcelState()`, `isResolvedParcel()`, `isUnresolvedParcel()`, `formatParcelContext()`, `normalizeZoneCode()` (extracts leading alpha prefix e.g. `"CR 4.0..."` → `"CR"`) |
-| `src/lib/chatCommands.js` | Regex command parser: `PLAN_FROM_UPLOAD_RE`, `RESPONSE_FROM_UPLOAD_RE`, `PLAN_RE`, `MODEL_RE`, `FLOOR_RE`, `VIEW_MODE_RE`, `COMMIT_RE`, `BRANCH_RE`, `HISTORY_RE` → `{type, query/floor/mode/message/name}` |
+| `src/lib/chatCommands.js` | Regex command parser: `PLAN_FROM_UPLOAD_RE`, `RESPONSE_FROM_UPLOAD_RE`, `PLAN_RE`, `EDIT_FLOOR_RE`, `MODEL_RE`, `FLOOR_RE`, `VIEW_MODE_RE`, `COMMIT_RE`, `BRANCH_RE`, `HISTORY_RE` → `{type, query/floor/mode/message/name}` |
+| `src/lib/floorPlanHelpers.js` | Shared constants (ROOM_COLORS) and utilities (generateId, computeCentroid, ensureIds) for floor plan editing |
+| `src/lib/wallGeometry.js` | Wall/room geometry utilities: snap-to-grid, wall-to-rect, shoelace area, point-in-polygon, room polygon updates |
 | `src/lib/buildingGeometry.js` | GeoJSON polygon → local metres; polygon shrink; `extractFootprint()`; `makeCircularFootprint()` for point towers; `subdivideFootprintIntoUnits()` for townhouse rows |
 | `src/lib/parcelState.test.js` | Node native test runner unit tests for parcelState |
 | `src/lib/chatCommands.test.js` | Unit tests for chatCommands |
@@ -488,6 +509,7 @@ activeNav, savedParcels, showHistory, searchHistory (localStorage per user)
 | `railway.toml` | Railway deploy config for the API service: Dockerfile, start command (alembic upgrade + uvicorn), healthcheck /api/v1/health |
 | `railway.worker.toml` | Railway deploy config for the Celery worker service: Dockerfile.worker, celery worker start command |
 | `.railwayignore` | Files excluded from Railway builds: data/, *.dump, *.sql, .env, frontend/node_modules, dist |
+| `.gitignore` | Git exclusions for local caches, node_modules, oversized Toronto GIS source extracts, and generated UI captures |
 | `.env.example` | Template: DATABASE_URL, REDIS_URL, MINIO settings, JWT_SECRET, AI_PROVIDER, ANTHROPIC_API_KEY, CELERY config |
 | `.env` | Live localhost config; **contains real API key** |
 | `pyproject.toml` | Project: `arterial` v0.1.0, Python ≥3.11. Deps: FastAPI, SQLAlchemy, asyncpg, GeoAlchemy2, pgvector, Celery, Redis, Pydantic, ezdxf. Dev: pytest, ruff. |
@@ -682,10 +704,11 @@ Full table — all routes across all routers:
 | GET | `/api/v1/designs/branches/{branch_id}/versions` | Yes | No | ✓ |
 | GET | `/api/v1/designs/branches/{branch_id}/latest` | Yes | No | ✓ |
 | GET | `/api/v1/designs/versions/{version_id}` | Yes | No | ✓ |
+| POST | `/api/v1/compliance/interior` | No | No | ✓ |
 | POST | `/api/v1/admin/ingest/building-permits` | Yes | Yes | ✓ |
 | POST | `/api/v1/admin/ingest/coa-applications` | Yes | Yes | ✓ |
 | GET | `/api/v1/admin/ingest/status` | Yes | No | ✓ |
 
 ---
 
-*Last updated: 2026-03-07 (Fix CRS bug EPSG:26917→2952, add nearby-applications + financial-summary endpoints, wire Precedents + Finances tabs, seed market comps + assessed values)*
+*Last updated: 2026-03-07 (Add interactive 2D floor plan editor with real-time OBC interior compliance: Konva-based editor with wall/room/opening rendering, compliance badge overlay, OBC Part 9 checking API, selection, room type editing, undo/redo, scale calibration)*

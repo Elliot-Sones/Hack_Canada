@@ -272,11 +272,41 @@ async def compute_compliance(
     if blocking_issues:
         overall = "blocked"
 
+    # Interior compliance check (OBC Part 9)
+    interior_compliance = None
+    if floor_plans:
+        from dataclasses import asdict
+        from app.services.interior_compliance import check_interior_compliance
+
+        floor_plan_list = floor_plans.get("floor_plans") or []
+        all_interior_results = []
+        for fp_data in floor_plan_list:
+            result = check_interior_compliance(
+                floor_plan=fp_data,
+                ceiling_height_m=model_params.get("ceiling_height_m", 2.7) if model_params else 2.7,
+            )
+            all_interior_results.append({
+                "rules": [asdict(r) for r in result.rules],
+                "errors": result.errors,
+                "warnings": result.warnings,
+                "overall_compliant": result.overall_compliant,
+                "load_bearing_warnings": result.load_bearing_warnings,
+            })
+            # Promote interior blockers to top-level blocking_issues
+            for rule in result.rules:
+                if rule.severity == "blocker" and not rule.compliant:
+                    blocking_issues.append(f"OBC {rule.obc_section}: {rule.note}")
+        interior_compliance = all_interior_results
+
+    if blocking_issues:
+        overall = "blocked"
+
     return {
         "status": overall,
         "details": details,
         "variance_items": variance_items,
         "blocking_issues": blocking_issues,
+        "interior_compliance": interior_compliance,
     }
 
 

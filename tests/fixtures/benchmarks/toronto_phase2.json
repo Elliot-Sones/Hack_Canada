@@ -1,0 +1,137 @@
+[
+  {
+    "benchmark_id": "toronto-phase2-address-001",
+    "verification_status": "verified",
+    "source_notes": "Verified against the local Toronto property-boundaries source extract on 2026-03-07 for parcel address normalization only. Zoning and policy expectations still require manual planner verification.",
+    "address_input": "694 Yonge St, Toronto, ON",
+    "expected_parcel": {
+      "address": "694 Yonge St"
+    }
+  },
+  {
+    "benchmark_id": "toronto-phase2-address-002",
+    "verification_status": "verified",
+    "source_notes": "Verified against the local Toronto property-boundaries source extract on 2026-03-07 for parcel address normalization only. Zoning and policy expectations still require manual planner verification.",
+    "address_input": "905 Bay St, Toronto, ON",
+    "expected_parcel": {
+      "address": "905 Bay St"
+    }
+  },
+  {
+    "benchmark_id": "toronto-phase2-address-003",
+    "verification_status": "verified",
+    "source_notes": "Verified against the local Toronto property-boundaries source extract on 2026-03-07 for parcel address normalization only. Zoning and policy expectations still require manual planner verification.",
+    "address_input": "67 Richmond St W, Toronto, ON",
+    "expected_parcel": {
+      "address": "67 Richmond St W"
+    }
+  },
+  {
+    "benchmark_id": "toronto-phase2-address-004",
+    "verification_status": "verified",
+    "source_notes": "Verified against the local Toronto property-boundaries source extract on 2026-03-07 for parcel address normalization only. Zoning and policy expectations still require manual planner verification.",
+    "address_input": "222 Richmond St W, Toronto, ON",
+    "expected_parcel": {
+      "address": "222 Richmond St W"
+    }
+  },
+  {
+    "benchmark_id": "toronto-phase2-address-005",
+    "verification_status": "verified",
+    "source_notes": "Verified against the local Toronto property-boundaries source extract on 2026-03-07 for parcel address normalization only. Zoning and policy expectations still require manual planner verification.",
+    "address_input": "652 Queen St W, Toronto, ON",
+    "expected_parcel": {
+      "address": "652 Queen St W"
+    }
+  },
+  {
+    "benchmark_id": "toronto-phase2-address-006",
+    "verification_status": "verified",
+    "source_notes": "Verified against the local Toronto property-boundaries source extract on 2026-03-07 for parcel address normalization only. Zoning and policy expectations still require manual planner verification.",
+    "address_input": "373 King St W, Toronto, ON",
+    "expected_parcel": {
+      "address": "373 King St W"
+    }
+  },
+  {
+    "benchmark_id": "toronto-phase2-address-007",
+    "verification_status": "verified",
+    "source_notes": "Verified against the local Toronto property-boundaries source extract on 2026-03-07 for parcel address normalization only. Zoning and policy expectations still require manual planner verification.",
+    "address_input": "833 King St W, Toronto, ON",
+    "expected_parcel": {
+      "address": "833 King St W"
+    }
+  },
+  {
+    "benchmark_id": "toronto-phase2-address-008",
+    "verification_status": "verified",
+    "source_notes": "Verified against the local Toronto property-boundaries source extract on 2026-03-07 for parcel address normalization only. Zoning and policy expectations still require manual planner verification.",
+    "address_input": "5000 Jane St, Toronto, ON",
+    "expected_parcel": {
+      "address": "5000 Jane St"
+    }
+  },
+  {
+    "benchmark_id": "toronto-phase2-address-009",
+    "verification_status": "verified",
+    "source_notes": "Verified against the local Toronto property-boundaries source extract on 2026-03-07 for parcel address normalization only. Zoning and policy expectations still require manual planner verification.",
+    "address_input": "343 Hullmar Dr, Toronto, ON",
+    "expected_parcel": {
+      "address": "343 Hullmar Dr"
+    }
+  },
+  {
+    "benchmark_id": "toronto-phase2-address-010",
+    "verification_status": "verified",
+    "source_notes": "Verified against the local Toronto property-boundaries source extract on 2026-03-07 for parcel address normalization only. Zoning and policy expectations still require manual planner verification.",
+    "address_input": "40 Millwick Dr, Toronto, ON",
+    "expected_parcel": {
+      "address": "40 Millwick Dr"
+    }
+  },
+  {
+    "benchmark_id": "toronto-phase2-address-011",
+    "verification_status": "verified",
+    "source_notes": "Verified against the local Toronto property-boundaries source extract on 2026-03-07 for parcel address normalization only. Zoning and policy expectations still require manual planner verification.",
+    "address_input": "24 Wheelwright Cres, Toronto, ON",
+    "expected_parcel": {
+      "address": "24 Wheelwright Cres"
+    }
+  },
+  {
+    "benchmark_id": "toronto-phase2-address-012",
+    "verification_status": "verified",
+    "source_notes": "Verified against the local Toronto property-boundaries source extract on 2026-03-07 for parcel address normalization only. Zoning and policy expectations still require manual planner verification.",
+    "address_input": "65 Blacksmith Cres, Toronto, ON",
+    "expected_parcel": {
+      "address": "65 Blacksmith Cres"
+    }
+  },
+  {
+    "benchmark_id": "toronto-phase2-address-013",
+    "verification_status": "verified",
+    "source_notes": "Verified against the local Toronto property-boundaries source extract on 2026-03-07 for parcel address normalization only. Zoning and policy expectations still require manual planner verification.",
+    "address_input": "4747 Steeles Ave W, Toronto, ON",
+    "expected_parcel": {
+      "address": "4747 Steeles Ave W"
+    }
+  },
+  {
+    "benchmark_id": "toronto-phase2-address-014",
+    "verification_status": "verified",
+    "source_notes": "Verified against the local Toronto property-boundaries source extract on 2026-03-07 for parcel address normalization only. Zoning and policy expectations still require manual planner verification.",
+    "address_input": "453 Signet Dr, Toronto, ON",
+    "expected_parcel": {
+      "address": "453 Signet Dr"
+    }
+  },
+  {
+    "benchmark_id": "toronto-phase2-address-015",
+    "verification_status": "verified",
+    "source_notes": "Verified against the local Toronto property-boundaries source extract on 2026-03-07 for parcel address normalization only. Zoning and policy expectations still require manual planner verification.",
+    "address_input": "66 Blacksmith Cres, Toronto, ON",
+    "expected_parcel": {
+      "address": "66 Blacksmith Cres"
+    }
+  }
+]

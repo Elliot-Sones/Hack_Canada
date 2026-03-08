@@ -24,6 +24,7 @@ from app.routers import scenarios as scenarios
 from app.routers import simulation as simulation
 from app.routers import ingestion as ingestion
 from app.routers import uploads as uploads
+from app.routers import compliance as compliance
 from app.routers import design_versions as design_versions
 
 structlog.configure(
@@ -74,6 +75,7 @@ def create_app() -> FastAPI:
     application.include_router(jobs.router, prefix=prefix, tags=["jobs"])
     application.include_router(uploads.router, prefix=prefix, tags=["uploads"])
     application.include_router(ingestion.router, prefix=prefix, tags=["ingestion"])
+    application.include_router(compliance.router, prefix=prefix, tags=["compliance"])
     application.include_router(design_versions.router, prefix=prefix, tags=["designs"])
 
     # Serve built React frontend (production only — when frontend-dist exists)
