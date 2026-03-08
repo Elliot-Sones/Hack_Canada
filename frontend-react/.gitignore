@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Large geojson data files (served from public/)
+public/data/*.geojson

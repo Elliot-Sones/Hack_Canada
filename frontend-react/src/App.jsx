@@ -5,6 +5,7 @@ import SearchBar from './components/SearchBar.jsx';
 import Sidebar from './components/Sidebar.jsx';
 import PolicyPanel from './components/PolicyPanel.jsx';
 import ChatPanel from './components/ChatPanel.jsx';
+import InfrastructureLayerControl from './components/InfrastructureLayerControl.jsx';
 import LandingPage from './components/LandingPage.jsx';
 import { searchParcels } from './api.js';
 import { buildParcelState, isResolvedParcel } from './lib/parcelState.js';
@@ -273,6 +274,7 @@ export default function App() {
         isChatExpanded={isChatExpanded}
         isModelOpen={isModelOpen}
       />
+      <InfrastructureLayerControl mapRef={mapRef} />
       <SearchBar onLocationSelected={handleLocationSelected} />
       <Sidebar
         isCollapsed={isSidebarCollapsed}
