@@ -3,10 +3,13 @@
 dockerfilePath = "Dockerfile"
 
 [deploy]
-startCommand = "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT"
+startCommand = "uvicorn app.main:app --host 0.0.0.0 --port $PORT"
 healthcheckPath = "/api/v1/health"
-healthcheckTimeout = 60
+healthcheckTimeout = 180
 restartPolicyType = "on_failure"
+
+# Runs before the healthcheck window starts
+preDeployCommand = "alembic upgrade head"
 
 # Required environment variables (set these in Railway dashboard):
 # DATABASE_URL        - Postgres connection string (Railway injects from Postgres plugin)
