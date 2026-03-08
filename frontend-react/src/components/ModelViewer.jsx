@@ -669,7 +669,7 @@ export default function ModelViewer({
         className="model-canvas-area"
         style={{
           position: 'fixed',
-          top: 0,
+          top: viewMode === 'floorplan' ? 68 : 0,
           left: sidebarW,
           right: panelW,
           bottom: chatH,

@@ -541,15 +541,17 @@
 
 .wall-properties-panel {
   position: absolute;
-  bottom: var(--space-lg);
-  left: 64px;
+  top: 8px;
+  left: 60px;
   z-index: 15;
   background: var(--bg-secondary);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  padding: var(--space-lg);
+  padding: var(--space-md) var(--space-lg);
   box-shadow: var(--shadow-md);
-  width: 260px;
+  width: 240px;
+  max-height: calc(100% - 100px);
+  overflow-y: auto;
 }
 
 .wall-properties-title {
