@@ -206,17 +206,8 @@ function DxfStatsBar({ pipelineData }) {
     </div>
   );
 }
-import {
-  generateBridgeDeck,
-  generateGirder,
-  generateAbutment,
-  generatePier,
-  generateBarrier,
-} from '../lib/bridgeGeometry.js';
 import PipeNetworkEditor from './infrastructure/PipeNetworkEditor.jsx';
-import BridgeEditor from './infrastructure/BridgeEditor.jsx';
 import ProfileView from './infrastructure/ProfileView.jsx';
-import CrossSectionView from './infrastructure/CrossSectionView.jsx';
 import InfrastructureCompliancePanel from './infrastructure/InfrastructureCompliancePanel.jsx';
 import InfrastructureCatalog from './infrastructure/InfrastructureCatalog.jsx';
 import {
@@ -233,11 +224,6 @@ const INFRA_COLORS = {
   sanitary: '#886644',
   storm: '#44aa66',
   gas: '#ddaa22',
-  deck: '#888888',
-  girder: '#666666',
-  abutment: '#aa9977',
-  pier: '#999999',
-  barrier: '#bbbbbb',
 };
 
 const COMPLIANCE_BADGES = {
@@ -342,16 +328,10 @@ function InfrastructureMesh({ alignment, infraType, params }) {
         defaultAlignment.push([i * 10, 0, 0]);
       }
       const localPts = defaultAlignment;
-      if (infraType === 'bridge') {
-        return buildBridge3D(localPts, params);
-      }
       return buildPipeline3D(localPts, params);
     }
 
     const localPts = alignmentToLocal(alignment);
-    if (infraType === 'bridge') {
-      return buildBridge3D(localPts, params);
-    }
     return buildPipeline3D(localPts, params);
   }, [alignment, infraType, params]);
 
@@ -406,68 +386,6 @@ function buildPipeline3D(localPts, params) {
   return { pieces, details };
 }
 
-function buildBridge3D(localPts, params) {
-  const pieces = [];
-  const details = [];
-
-  const first = localPts[0] || [0, 0, 0];
-  const last = localPts[localPts.length - 1] || [20, 0, 0];
-  const span = Math.sqrt((last[0] - first[0]) ** 2 + (last[1] - first[1]) ** 2 + (last[2] - first[2]) ** 2) || 20;
-
-  const deckWidth = params?.deck_width_m || 12;
-  const deckDepth = params?.deck_depth_m || 0.3;
-  const girderDepth = params?.girder_depth_m || 1.2;
-  const barrierHeight = params?.barrier_height_m || 1.1;
-  const pierCount = params?.pier_count || Math.max(0, Math.floor(span / 25) - 1);
-  const pierHeight = params?.pier_height_m || 8;
-
-  const midX = (first[0] + last[0]) / 2;
-  const midY = (first[1] + last[1]) / 2;
-  const midZ = (first[2] + last[2]) / 2;
-
-  // Deck
-  const deck = generateBridgeDeck(span, deckWidth, deckDepth);
-  pieces.push({ geometry: deck.geometry, color: INFRA_COLORS.deck, position: [midX, midY, midZ] });
-
-  // Girders
-  const gCount = params?.girder_count || Math.max(2, Math.round(deckWidth / 2.5));
-  for (let g = 0; g < gCount; g++) {
-    const transOffset = -deckWidth / 2 + (g + 0.5) * (deckWidth / gCount);
-    const gir = generateGirder(params?.girder_type || 'i_beam', span, girderDepth, transOffset);
-    pieces.push({ geometry: gir.geometry, color: INFRA_COLORS.girder, position: [midX, midY - deckDepth / 2 - girderDepth, midZ + transOffset] });
-  }
-
-  // Abutments
-  const abutW = deckWidth + 1;
-  const abutH = pierHeight;
-  for (const pt of [first, last]) {
-    const ab = generateAbutment('gravity', pt, { width: abutW, height: abutH, depth: 1.5 });
-    pieces.push({ geometry: ab.geometry, color: INFRA_COLORS.abutment, position: [pt[0], pt[1] - abutH / 2, pt[2]] });
-  }
-
-  // Piers
-  for (let p = 0; p < pierCount; p++) {
-    const t = (p + 1) / (pierCount + 1);
-    const px = first[0] + (last[0] - first[0]) * t;
-    const py = first[1] + (last[1] - first[1]) * t;
-    const pz = first[2] + (last[2] - first[2]) * t;
-    const pier = generatePier(pierHeight, deckWidth * 0.6);
-    pieces.push({ geometry: pier.geometry, color: INFRA_COLORS.pier, position: [px, py - pierHeight / 2, pz] });
-  }
-
-  // Barriers
-  const bar = generateBarrier(span, barrierHeight, params?.barrier_type || 'jersey');
-  for (const side of [-1, 1]) {
-    pieces.push({
-      geometry: bar.geometry.clone(),
-      color: INFRA_COLORS.barrier,
-      position: [midX, midY + deckDepth / 2 + barrierHeight / 2, midZ + side * deckWidth / 2],
-    });
-  }
-
-  return { pieces, details };
-}
-
 // ─── Ground plane ──────────────────────────────────────────────────────────
 function Ground() {
   return (
@@ -507,8 +425,6 @@ export default function InfrastructureViewer({
   projectId,
   network,
   onNetworkChange,
-  bridge,
-  onBridgeChange,
   // DXF pipeline network props
   pipelineData,
   onPipelineDataChange,
@@ -636,7 +552,6 @@ export default function InfrastructureViewer({
       const result = await commitVersion(currentBranch.id, {
         infraParams: params,
         network,
-        bridge,
         message,
       });
       setCurrentVersion(result);
@@ -646,7 +561,7 @@ export default function InfrastructureViewer({
     } catch (err) {
       console.error('Commit failed:', err);
     }
-  }, [currentBranch, params, network, bridge]);
+  }, [currentBranch, params, network]);
 
   const handleSelectVersion = useCallback((version) => {
     setCurrentVersion(version);
@@ -695,7 +610,6 @@ export default function InfrastructureViewer({
 
   const is2DEditor = editMode && (viewMode === 'plan' || viewMode === 'model_3d');
   const showProfile = viewMode === 'profile';
-  const showCrossSection = viewMode === 'cross_section';
 
   return (
     <>
@@ -713,20 +627,13 @@ export default function InfrastructureViewer({
           transition: 'left 0.3s ease, right 0.3s ease, bottom 0.3s ease',
         }}
       >
-        {is2DEditor && infraType === 'pipeline' ? (
+        {is2DEditor ? (
           <PipeNetworkEditor
             network={network}
             onNetworkChange={(newNet) => { onNetworkChange?.(newNet); setIsDirty(true); }}
           />
-        ) : is2DEditor && infraType === 'bridge' ? (
-          <BridgeEditor
-            bridge={bridge}
-            onBridgeChange={(newBr) => { onBridgeChange?.(newBr); setIsDirty(true); }}
-          />
         ) : showProfile ? (
           <ProfileView segments={network?.segments} alignment={alignment} />
-        ) : showCrossSection ? (
-          <CrossSectionView bridgeParams={params} />
         ) : (
           <Canvas
             camera={{ position: [0, 30, 60], fov: 45 }}
@@ -840,8 +747,7 @@ export default function InfrastructureViewer({
             {[
               { key: 'model_3d', label: '3D Model' },
               { key: 'plan', label: 'Plan' },
-              { key: 'profile', label: 'Profile', disabled: infraType !== 'pipeline' },
-              { key: 'cross_section', label: 'Cross Section', disabled: infraType !== 'bridge' },
+              { key: 'profile', label: 'Profile' },
             ].map((mode) => (
               <button
                 key={mode.key}
@@ -891,7 +797,7 @@ export default function InfrastructureViewer({
           )}
 
           <span className="infra-info">
-            {infraType === 'pipeline' ? 'Pipeline Network' : 'Bridge Structure'}
+            Pipeline Network
             {params?.pipe_type ? ` \u00b7 ${params.pipe_type}` : ''}
           </span>
         </div>

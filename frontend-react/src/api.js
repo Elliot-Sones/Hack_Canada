@@ -268,12 +268,12 @@ export async function getNearbyPipelines(lat, lng, radius = 500, pipeType = null
     }
 }
 
-export async function getNearbyBridges(lat, lng, radius = 2000, options = {}) {
+export async function getWatermainsBbox(bounds, options = {}) {
     try {
-        return await apiFetch(
-            `${API_BASE}/infrastructure/bridges/nearby?lat=${lat}&lng=${lng}&radius_m=${radius}`,
-            options
-        );
+        const sw = bounds.getSouthWest();
+        const ne = bounds.getNorthEast();
+        const url = `${API_BASE}/infrastructure/watermains/bbox?min_lng=${sw.lng}&min_lat=${sw.lat}&max_lng=${ne.lng}&max_lat=${ne.lat}`;
+        return await apiFetch(url, options);
     } catch (error) {
         if (isAbortError(error)) throw error;
         return { type: 'FeatureCollection', features: [] };
@@ -282,13 +282,6 @@ export async function getNearbyBridges(lat, lng, radius = 2000, options = {}) {
 
 export async function checkPipelineCompliance(params) {
     return apiFetch(`${API_BASE}/infrastructure/compliance/pipeline`, {
-        method: 'POST',
-        body: JSON.stringify(params),
-    });
-}
-
-export async function checkBridgeCompliance(params) {
-    return apiFetch(`${API_BASE}/infrastructure/compliance/bridge`, {
         method: 'POST',
         body: JSON.stringify(params),
     });
@@ -311,10 +304,6 @@ export async function triggerSanitarySewerIngestion() {
 
 export async function triggerStormSewerIngestion() {
     return apiFetch(`${API_BASE}/admin/ingest/storm-sewers`, { method: 'POST' });
-}
-
-export async function triggerBridgeIngestion() {
-    return apiFetch(`${API_BASE}/admin/ingest/bridges`, { method: 'POST' });
 }
 
 // ─── Design Version Control ───

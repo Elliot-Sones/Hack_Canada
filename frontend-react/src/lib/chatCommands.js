@@ -15,7 +15,6 @@ const HISTORY_RE = /^(?:show\s+)?history$/i;
 
 // Infrastructure model commands — matched before the generic MODEL_RE
 const INFRA_MODEL_RE = /^(design|create|build)\s+.*(\d+)\s*mm\s*(storm|sanitary|water|gas).*/i;
-const BRIDGE_MODEL_RE = /^(design|create|build)\s+.*bridge\s*(over|across|spanning)\s+.*/i;
 
 export function parseChatCommand(input) {
   const text = input.trim();
@@ -29,15 +28,6 @@ export function parseChatCommand(input) {
       query: text,
       diameter_mm: parseInt(infraMatch[2], 10),
       infraType: infraMatch[3].toLowerCase(),
-    };
-  }
-
-  const bridgeMatch = text.match(BRIDGE_MODEL_RE);
-  if (bridgeMatch) {
-    return {
-      type: 'bridge_model',
-      query: text,
-      crossing: bridgeMatch[2].toLowerCase(),
     };
   }
 

@@ -240,14 +240,11 @@ export default function ChatPanel({ parcelContext, onPlanComplete, onToggleExpan
         // Keep upload-specific commands as direct shortcuts
         const command = parseChatCommand(text);
 
-        if (command.type === 'infra_model' || command.type === 'bridge_model') {
+        if (command.type === 'infra_model') {
             try {
-                const infraAssetType = command.type === 'bridge_model' ? 'bridge' : 'pipeline';
-                const params = await parseInfraModel(text, modelParams, infraAssetType);
+                const params = await parseInfraModel(text, modelParams, 'pipeline');
                 onModelUpdate?.(params);
-                let infraMsg = command.type === 'bridge_model'
-                    ? `Bridge design updated: ${params.span_m || 0}m span, ${params.deck_width_m || 0}m deck width (${(params.structure_type || '').replace(/_/g, ' ')}).`
-                    : `Pipeline design updated: ${params.diameter_mm || 0}mm ${params.material || ''} ${params.infra_type || ''} pipe, ${params.length_m || 0}m length.`;
+                let infraMsg = `Pipeline design updated: ${params.diameter_mm || 0}mm ${params.material || ''} ${params.infra_type || ''} pipe, ${params.length_m || 0}m length.`;
                 if (params.warnings?.length) {
                     infraMsg += '\n-- ' + params.warnings.join('\n-- ');
                 }

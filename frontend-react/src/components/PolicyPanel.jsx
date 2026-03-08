@@ -1,7 +1,361 @@
-import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { getParcelOverlays, getParcelZoningAnalysis, getPolicyStack, getNearbyApplications, getParcelFinancialSummary, uploadDocument, getUpload, getPlanDocuments, regeneratePlanDocument } from '../api.js';
 import { isResolvedParcel, isUnresolvedParcel } from '../lib/parcelState.js';
 import useResizable from '../hooks/useResizable.js';
+
+// ─── Pipeline engineering decision panel ──────────────────────────────────────
+
+const MATERIAL_LABELS = {
+    CI: 'Cast Iron', CICL: 'Cast Iron Lined', DIP: 'Ductile Iron', DICL: 'Ductile Iron Lined',
+    PVC: 'PVC (Polyvinyl Chloride)', CPP: 'Corrugated Plastic', AC: 'Asbestos Cement',
+    COP: 'Copper', UNK: 'Unknown',
+};
+const MATERIAL_COLORS = {
+    CI: '#e67e22', CICL: '#e67e22', DIP: '#2277bb', DICL: '#2277bb',
+    PVC: '#27ae60', CPP: '#27ae60', AC: '#e74c3c', COP: '#f1c40f', UNK: '#888',
+};
+
+// ── Engineering computations ──────────────────────────────────────────────────
+
+/** Hazen-Williams C-factor adjusted for material age */
+function hwCFactor(mat, age) {
+    const a = age || 0;
+    switch (mat) {
+        case 'CI':   return Math.max(40,  130 - a * 0.55);
+        case 'CICL': return Math.max(80,  130 - a * 0.35);
+        case 'DIP':  return Math.max(100, 140 - a * 0.20);
+        case 'DICL': return Math.max(110, 140 - a * 0.15);
+        case 'PVC':  return 150;
+        case 'CPP':  return 140;
+        case 'AC':   return Math.max(80,  140 - a * 0.30);
+        case 'COP':  return 130;
+        default:     return 100;
+    }
+}
+
+/** Hazen-Williams: flow rate (L/s) for a full pipe at given slope S (m/m) */
+function hwFlow(diamMm, C, S = 0.002) {
+    const D = diamMm / 1000;
+    const R = D / 4;
+    const V = 0.8492 * C * Math.pow(R, 0.63) * Math.pow(S, 0.54);
+    const A = Math.PI * Math.pow(D / 2, 2);
+    return V * A * 1000; // L/s
+}
+
+/** Pressure drop kPa per 100 m */
+function hwPressureDrop(diamMm, C, flowLs) {
+    const D = diamMm / 1000;
+    const A = Math.PI * Math.pow(D / 2, 2);
+    const V = (flowLs / 1000) / A;
+    const R = D / 4;
+    const S = Math.pow(V / (0.8492 * C * Math.pow(R, 0.63)), 1 / 0.54);
+    return S * 9.81 * 1000 * 100; // kPa/100m
+}
+
+/** Break probability breaks/km/year */
+function breakProb(mat, age) {
+    const a = age || 0;
+    if (mat === 'AC')                   return 0.8;
+    if (mat === 'CI' || mat === 'CICL') {
+        if (a > 100) return 1.8;
+        if (a > 75)  return 0.9;
+        if (a > 50)  return 0.45;
+        return 0.18;
+    }
+    if (mat === 'DIP' || mat === 'DICL') {
+        if (a > 60)  return 0.22;
+        if (a > 30)  return 0.10;
+        return 0.05;
+    }
+    if (mat === 'PVC' || mat === 'CPP') {
+        if (a > 40)  return 0.08;
+        return 0.02;
+    }
+    return 0.3;
+}
+
+/** Expected remaining service life (years) */
+function remainingLife(mat, age) {
+    const a = age || 0;
+    const typicalLife = { CI: 100, CICL: 110, DIP: 100, DICL: 120, PVC: 80, CPP: 70, AC: 50, COP: 80, UNK: 70 };
+    const life = typicalLife[mat] || 70;
+    return Math.max(0, life - a);
+}
+
+/** Replacement cost estimate (CAD) */
+function replacementCost(diamMm, lengthM) {
+    if (!lengthM) return null;
+    const d = diamMm || 150;
+    // Open-cut cost $/m: scales roughly with diameter
+    const costPerM = d <= 150 ? 1200 : d <= 300 ? 1800 : d <= 600 ? 2600 : 3500;
+    return costPerM * lengthM;
+}
+
+/** Condition severity */
+function pipeCondition(mat, installYear) {
+    const age = installYear ? (2026 - installYear) : null;
+    if (mat === 'AC') return { label: 'Critical — Hazardous Material', color: '#e74c3c', risk: 'critical' };
+    if (!age) return { label: 'Unknown', color: '#888', risk: 'unknown' };
+    const bp = breakProb(mat, age);
+    if (bp >= 1.0)  return { label: 'Critical — End of Service Life', color: '#e74c3c', risk: 'critical' };
+    if (bp >= 0.45) return { label: 'High Risk', color: '#e67e22', risk: 'high' };
+    if (bp >= 0.15) return { label: 'Moderate Risk', color: '#f1c40f', risk: 'moderate' };
+    return { label: 'Good Condition', color: '#27ae60', risk: 'good' };
+}
+
+// ── Sub-components ────────────────────────────────────────────────────────────
+
+function Section({ title, icon, children, defaultOpen = true, accent }) {
+    const [open, setOpen] = React.useState(defaultOpen);
+    return (
+        <div style={{ marginBottom: 12, border: '1px solid #2a2a2a', borderRadius: 8, overflow: 'hidden' }}>
+            <button
+                onClick={() => setOpen(o => !o)}
+                style={{
+                    width: '100%', display: 'flex', alignItems: 'center', gap: 8,
+                    padding: '9px 14px', background: '#1e1e1e', border: 'none', cursor: 'pointer',
+                    color: '#f0ece4', fontSize: 12, fontWeight: 600, textAlign: 'left',
+                    borderBottom: open ? '1px solid #2a2a2a' : 'none',
+                }}
+            >
+                <span style={{ fontSize: 14 }}>{icon}</span>
+                <span style={{ flex: 1, letterSpacing: 0.3 }}>{title}</span>
+                {accent && <span style={{ fontSize: 11, color: accent.color, fontWeight: 700 }}>{accent.text}</span>}
+                <span style={{ color: '#555', fontSize: 10 }}>{open ? '▲' : '▼'}</span>
+            </button>
+            {open && <div style={{ background: '#161616', padding: '12px 14px' }}>{children}</div>}
+        </div>
+    );
+}
+
+function Row({ label, value, highlight, mono }) {
+    return (
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '5px 0', borderBottom: '1px solid #222' }}>
+            <span style={{ color: '#888', fontSize: 12 }}>{label}</span>
+            <span style={{ color: highlight || '#f0ece4', fontSize: 12, fontFamily: mono ? 'monospace' : undefined, textAlign: 'right', maxWidth: '60%' }}>{value}</span>
+        </div>
+    );
+}
+
+function Bar({ value, max, color }) {
+    const pct = Math.min(100, Math.round((value / max) * 100));
+    return (
+        <div style={{ background: '#2a2a2a', borderRadius: 4, height: 6, width: '100%', overflow: 'hidden' }}>
+            <div style={{ width: `${pct}%`, height: '100%', background: color, borderRadius: 4, transition: 'width 0.4s' }} />
+        </div>
+    );
+}
+
+function Pill({ text, color }) {
+    return (
+        <span style={{
+            display: 'inline-flex', alignItems: 'center', gap: 5, padding: '2px 8px',
+            background: `${color}22`, border: `1px solid ${color}55`, borderRadius: 4,
+            fontSize: 11, color, fontWeight: 600,
+        }}>{text}</span>
+    );
+}
+
+function Checklist({ items }) {
+    return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {items.map(({ done, text, sub, urgent }) => (
+                <div key={text} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                    <span style={{ fontSize: 13, marginTop: 1, color: urgent ? '#e74c3c' : done ? '#27ae60' : '#888', flexShrink: 0 }}>
+                        {urgent ? '⚠' : done ? '✓' : '○'}
+                    </span>
+                    <div>
+                        <div style={{ fontSize: 12, color: urgent ? '#e74c3c' : done ? '#ccc' : '#f0ece4' }}>{text}</div>
+                        {sub && <div style={{ fontSize: 11, color: '#666', marginTop: 2 }}>{sub}</div>}
+                    </div>
+                </div>
+            ))}
+        </div>
+    );
+}
+
+function PipelineAssetPanel({ asset }) {
+    const mat  = asset.material || 'UNK';
+    const color = MATERIAL_COLORS[mat] || '#888';
+    const matLabel = MATERIAL_LABELS[mat] || mat;
+    const age  = asset.install_year ? (2026 - asset.install_year) : null;
+    const diam = asset.diameter_mm || 150;
+    const cond = pipeCondition(mat, asset.install_year);
+
+    // Hydraulic
+    const C      = hwCFactor(mat, age);
+    const C_new  = hwCFactor(mat, 0);
+    const flowNow = hwFlow(diam, C);
+    const flowNew = hwFlow(diam, C_new);
+    const flowPct = Math.round((flowNow / flowNew) * 100);
+    const dpNow  = hwPressureDrop(diam, C, flowNow * 0.6);
+
+    // Risk
+    const bp   = breakProb(mat, age);
+    const rl   = remainingLife(mat, age);
+    const cost = replacementCost(diam, asset.length_m);
+
+    // Material replacement recommendation
+    const replaceMat = mat === 'AC' ? 'HDPE (mandatory — asbestos protocol applies)' :
+        (mat === 'CI' || mat === 'CICL') ? 'HDPE (trenchless CIPP lining) or DIP (open-cut)' :
+        mat === 'PVC' ? 'HDPE or DICL for higher pressure classes' :
+        'DIP or HDPE';
+
+    const permitItems = [
+        { done: false, text: 'Toronto Water — Watermain Construction Approval', sub: 'Submit CCTV, hydraulic model, and design drawings' },
+        { done: false, text: 'ROW Permit — Transportation Services', sub: 'Required for any excavation in road allowance; notify TTC/Metrolinx' },
+        { done: false, text: 'Ontario Reg. 170/03 — Drinking Water System Permit to Take Water', sub: 'If service area or demand changes' },
+        ...(mat === 'AC' ? [{ done: false, urgent: true, text: 'Ontario Reg. 278/05 — Designated Substance (Asbestos)', sub: 'Asbestos abatement plan required before any disturbance' }] : []),
+        { done: false, text: 'Building Permit — City of Toronto', sub: 'For appurtenances, chambers, or connections' },
+        { done: false, text: 'TRCA Permit — if within 30 m of watercourse or regulated area', sub: 'Check Toronto Greenspace Map before design' },
+        { done: false, text: 'Class Environmental Assessment', sub: 'Required if capital cost > $2M or if new trunk main (Municipal Class EA)' },
+    ];
+
+    const geoItems = [
+        { done: true,  text: `Min burial depth: 1.8 m to top of pipe (Toronto frost line)`, sub: 'OPSD 802.010 — deeper in areas with heavy traffic loading' },
+        { done: false, text: 'Bedding Class B required (granular material, compacted to 95% proctor)', sub: 'OPSD 802.030 — haunching to spring line minimum' },
+        { done: false, text: 'Ground Penetrating Radar (GPR) survey before excavation', sub: 'Identify fibre, power, gas and sewer conflicts within 3 m corridor' },
+        { done: false, text: 'Geotechnical borehole — 1 per 100 m for urban route', sub: 'Assess bearing capacity, groundwater depth, and corrosivity index' },
+        { done: false, text: 'Trench stability analysis if depth > 1.2 m', sub: 'Ontario Reg. 213/91 (Construction Projects) — shoring required' },
+        ...(mat === 'CI' || mat === 'AC' ? [{ done: false, urgent: true, text: 'Soil corrosivity assessment', sub: 'Resistivity < 2,000 Ω·cm = highly corrosive — cathodic protection required for metal pipe' }] : []),
+    ];
+
+    return (
+        <div style={{ padding: '14px 16px', fontFamily: 'Inter, sans-serif', fontSize: 13, color: '#f0ece4', overflowY: 'auto' }}>
+
+            {/* Header */}
+            <div style={{ marginBottom: 14, paddingBottom: 12, borderBottom: '1px solid #2a2a2a' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                    <span style={{ width: 10, height: 10, borderRadius: '50%', background: color, display: 'inline-block', flexShrink: 0 }} />
+                    <span style={{ fontSize: 11, color: '#888', textTransform: 'uppercase', letterSpacing: 1 }}>Water Main · {mat}</span>
+                </div>
+                <div style={{ fontSize: 16, fontWeight: 700 }}>{asset.location || 'Unnamed Segment'}</div>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 6 }}>
+                    {diam && <Pill text={`⌀ ${diam} mm`} color="#2277bb" />}
+                    {asset.install_year && <Pill text={`${asset.install_year} · ${age} yrs`} color={cond.color} />}
+                    <Pill text={cond.label} color={cond.color} />
+                </div>
+            </div>
+
+            {/* 1. Asset Identity */}
+            <Section title="Asset Identity" icon="🆔" defaultOpen={false}>
+                <Row label="Asset ID"    value={asset.asset_id || '—'} mono />
+                <Row label="Type"        value="Water Main — Transmission/Distribution" />
+                <Row label="Material"    value={`${matLabel} (${mat})`} highlight={color} />
+                <Row label="Diameter"    value={diam ? `${diam} mm (${(diam/25.4).toFixed(1)}")` : '—'} />
+                <Row label="Length"      value={asset.length_m ? `${asset.length_m} m` : '—'} />
+                <Row label="Installed"   value={asset.install_year ? `${asset.install_year} (${age} years in service)` : '—'} />
+                <Row label="Location"    value={asset.location || '—'} />
+                <Row label="Remaining Life" value={rl > 0 ? `~${rl} years` : 'Past design life'} highlight={rl > 20 ? '#27ae60' : rl > 5 ? '#f1c40f' : '#e74c3c'} />
+            </Section>
+
+            {/* 2. Hydraulic Performance */}
+            <Section title="Hydraulic Performance" icon="💧" accent={{ text: `C=${Math.round(C)}`, color: flowPct > 75 ? '#27ae60' : flowPct > 50 ? '#f1c40f' : '#e74c3c' }}>
+                <div style={{ marginBottom: 10 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                        <span style={{ fontSize: 12, color: '#888' }}>Hazen-Williams C-factor (current vs new)</span>
+                        <span style={{ fontSize: 12, color: flowPct > 75 ? '#27ae60' : '#f1c40f' }}>{Math.round(C)} / {Math.round(C_new)}</span>
+                    </div>
+                    <Bar value={C} max={C_new} color={flowPct > 75 ? '#27ae60' : flowPct > 50 ? '#f1c40f' : '#e74c3c'} />
+                    <div style={{ fontSize: 11, color: '#666', marginTop: 3 }}>Tuberculation and scaling reduce carrying capacity over time</div>
+                </div>
+                <Row label="Est. flow capacity"    value={`${flowNow.toFixed(1)} L/s (${flowPct}% of design)`} highlight={flowPct > 75 ? '#27ae60' : '#f1c40f'} />
+                <Row label="Design flow (new pipe)" value={`${flowNew.toFixed(1)} L/s`} />
+                <Row label="Pressure drop"          value={`~${dpNow.toFixed(0)} kPa / 100 m at 60% flow`} />
+                <Row label="Velocity at design flow" value={`${(flowNow / 1000 / (Math.PI * Math.pow(diam/2000, 2))).toFixed(2)} m/s`} />
+                <div style={{ marginTop: 10, padding: '8px 10px', background: '#1a1a1a', borderRadius: 6, fontSize: 11, color: '#888', lineHeight: 1.7 }}>
+                    <div style={{ fontWeight: 600, color: '#aaa', marginBottom: 3 }}>Modification impacts to model:</div>
+                    <div>• Diameter increase → recalculate downstream pressures (risk of low velocity / sediment deposit)</div>
+                    <div>• Rerouting → update hydraulic model node elevations</div>
+                    <div>• Lining → C-factor improves to ~{Math.round(C_new * 0.85)}, flow capacity partially restored</div>
+                </div>
+            </Section>
+
+            {/* 3. Structural Risk */}
+            <Section title="Structural Risk" icon="⚠️" accent={{ text: `${bp.toFixed(2)} breaks/km/yr`, color: cond.color }}>
+                <div style={{ marginBottom: 10 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                        <span style={{ fontSize: 12, color: '#888' }}>Break probability (vs 1.5 = critical threshold)</span>
+                        <span style={{ fontSize: 12, color: cond.color }}>{bp.toFixed(2)}</span>
+                    </div>
+                    <Bar value={bp} max={1.5} color={cond.color} />
+                </div>
+                <Row label="Condition rating"        value={cond.label} highlight={cond.color} />
+                <Row label="Break rate"              value={`${bp.toFixed(2)} breaks/km/year`} />
+                <Row label="Expected breaks/yr (this segment)" value={asset.length_m ? `${(bp * asset.length_m / 1000).toFixed(2)}` : '—'} />
+                <Row label="Remaining service life"  value={rl > 0 ? `~${rl} years` : 'Past design life — replacement warranted'} highlight={rl > 20 ? '#27ae60' : '#e74c3c'} />
+                {cost && <Row label="Est. replacement cost"  value={`$${(cost/1000).toFixed(0)}K–$${(cost*1.8/1000).toFixed(0)}K CAD`} highlight="#c8a55c" />}
+                <div style={{ marginTop: 10, padding: '8px 10px', background: '#1a1a1a', borderRadius: 6, fontSize: 11, color: '#888', lineHeight: 1.7 }}>
+                    {mat === 'AC' && <div style={{ color: '#e74c3c', fontWeight: 600, marginBottom: 4 }}>⚠ Asbestos Cement: ANY disturbance triggers Reg. 278/05. Designated Substance Report required before design.</div>}
+                    {(mat === 'CI' || mat === 'CICL') && age > 80 && <div style={{ color: '#e67e22', marginBottom: 4 }}>⚠ CI pipe &gt;80 yrs: CIRC Bulletin recommends replacement assessment. High tuberculation risk.</div>}
+                    <div>• Material fatigue accumulates under cyclic pressure (water hammer events)</div>
+                    <div>• Consider acoustic leak detection survey before design to identify existing failures</div>
+                </div>
+            </Section>
+
+            {/* 4. Geotechnical */}
+            <Section title="Geotechnical Requirements" icon="🏗️" defaultOpen={false}>
+                <Checklist items={geoItems} />
+                <div style={{ marginTop: 10, padding: '8px 10px', background: '#1a1a1a', borderRadius: 6, fontSize: 11, color: '#888', lineHeight: 1.7 }}>
+                    <div style={{ fontWeight: 600, color: '#aaa', marginBottom: 3 }}>Toronto-specific soil notes:</div>
+                    <div>• Lakebed clays common below ~3 m — low bearing, high corrosivity</div>
+                    <div>• Till and glaciofluvial sands near surface — generally stable</div>
+                    <div>• Former watercourse corridors: soft/organic fill possible — probe before routing</div>
+                    <div>• Groundwater at 1–2 m in lakefront wards — dewatering plan required</div>
+                </div>
+            </Section>
+
+            {/* 5. Permitting Pathway */}
+            <Section title="Permitting Pathway" icon="📋" defaultOpen={false}>
+                <Checklist items={permitItems} />
+                <div style={{ marginTop: 10, padding: '8px 10px', background: '#1a1a1a', borderRadius: 6, fontSize: 11, color: '#888', lineHeight: 1.7 }}>
+                    <div style={{ fontWeight: 600, color: '#aaa', marginBottom: 3 }}>Typical timeline (Toronto):</div>
+                    <div>• Toronto Water design approval: 3–6 months</div>
+                    <div>• ROW permit: 4–8 weeks</div>
+                    <div>• Class EA (if required): 12–18 months</div>
+                    <div>• TRCA permit: 2–4 months</div>
+                </div>
+            </Section>
+
+            {/* 6. Material Selection */}
+            <Section title="Material Selection" icon="🔩" defaultOpen={false}>
+                <div style={{ marginBottom: 8 }}>
+                    <div style={{ fontSize: 11, color: '#888', marginBottom: 6 }}>Recommended replacement:</div>
+                    <div style={{ padding: '8px 10px', background: '#1a2a1a', border: '1px solid #27ae6044', borderRadius: 6, fontSize: 12, color: '#27ae60' }}>
+                        {replaceMat}
+                    </div>
+                </div>
+                {[
+                    { mat: 'HDPE', c: 150, life: 100, cost: '$900–1,400/m', note: 'Trenchless capable (CIPP/pipe bursting). Flexible, corrosion-free. Preferred for rehab.' },
+                    { mat: 'DIP',  c: 140, life: 100, cost: '$1,100–1,800/m', note: 'High strength, joints allow deflection. Standard open-cut replacement.' },
+                    { mat: 'DICL', c: 140, life: 120, cost: '$1,200–2,000/m', note: 'Cement-mortar lined. Best for aggressive soils or high-corrosivity zones.' },
+                    { mat: 'PVC',  c: 150, life: 80,  cost: '$700–1,100/m', note: 'Lower pressure classes only. Lightweight, good for small-dia service connections.' },
+                ].map(({ mat: m, c, life, cost: co, note }) => (
+                    <div key={m} style={{ marginBottom: 8, padding: '8px 10px', background: '#1a1a1a', borderRadius: 6, border: '1px solid #2a2a2a' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
+                            <span style={{ fontWeight: 600, fontSize: 12, color: MATERIAL_COLORS[m] || '#f0ece4' }}>{m}</span>
+                            <span style={{ fontSize: 11, color: '#888' }}>C={c} · {life} yr life · {co}</span>
+                        </div>
+                        <div style={{ fontSize: 11, color: '#777', lineHeight: 1.5 }}>{note}</div>
+                    </div>
+                ))}
+            </Section>
+
+            {/* 7. Environmental */}
+            <Section title="Environmental Flags" icon="🌿" defaultOpen={false}>
+                <Checklist items={[
+                    { done: false, text: 'Check TRCA Regulated Area mapping before routing', sub: 'toronto.ca/city-government/planning-development/official-plan-guidelines/greens' },
+                    { done: false, text: 'Stage 1 Archaeological Assessment if greenspace route', sub: 'Ontario Heritage Act — required if disturbing undisturbed soil in sensitive areas' },
+                    { done: false, text: 'Species at Risk screening (MNRF Natural Heritage Tool)', sub: 'Required for any EA project class' },
+                    ...(mat === 'AC' ? [{ done: false, urgent: true, text: 'Asbestos Waste Disposal Plan', sub: 'Reg. 347 — designated waste, licensed hauler to licensed facility only' }] : []),
+                    { done: false, text: 'Construction dewatering plan and discharge permit', sub: 'If groundwater encountered: Toronto & Region Conservation — permit to take water' },
+                    { done: false, text: 'Spill Prevention and Response Plan', sub: 'Required during construction for all fuel/chemical storage on site' },
+                ]} />
+            </Section>
+
+        </div>
+    );
+}
 
 const UPLOAD_POLL_MS = 3000;
 const UPLOAD_MAX_ATTEMPTS = 40;
@@ -839,81 +1193,43 @@ const TAB_TITLES = {
     standards: 'Design Standards',
     network: 'Pipeline Network',
     inspections: 'Inspection Records',
-    load_analysis: 'Load Analysis',
-    condition: 'Condition Assessment',
 };
 
 const ZONING_TABS = new Set(['overview']);
 
-function InfraStandardsTab({ assetType }) {
-    const isPipeline = assetType === 'pipeline';
+function InfraStandardsTab() {
     return (
         <div className="tab-section">
-            <h3 className="section-heading">{isPipeline ? 'Pipeline' : 'Bridge'} Design Standards</h3>
+            <h3 className="section-heading">Pipeline Design Standards</h3>
             <div className="policy-list">
-                {isPipeline ? (
-                    <>
-                        <div className="policy-item">
-                            <span className="policy-badge">CSA</span>
-                            <div className="policy-details">
-                                <div className="policy-title">CSA Z662 — Oil and Gas Pipeline Systems</div>
-                                <div className="policy-desc">Design, construction, operation, and maintenance requirements</div>
-                            </div>
-                        </div>
-                        <div className="policy-item">
-                            <span className="policy-badge">OPSD</span>
-                            <div className="policy-details">
-                                <div className="policy-title">OPSD 802 — Storm Sewer Design</div>
-                                <div className="policy-desc">Ontario Provincial Standard Drawings for storm sewer construction</div>
-                            </div>
-                        </div>
-                        <div className="policy-item">
-                            <span className="policy-badge">OPSD</span>
-                            <div className="policy-details">
-                                <div className="policy-title">OPSD 803 — Sanitary Sewer Design</div>
-                                <div className="policy-desc">Ontario Provincial Standard Drawings for sanitary sewer construction</div>
-                            </div>
-                        </div>
-                        <div className="policy-item">
-                            <span className="policy-badge">ECA</span>
-                            <div className="policy-details">
-                                <div className="policy-title">Environmental Compliance Approval</div>
-                                <div className="policy-desc">MECP approval required for sewage works under Ontario Water Resources Act</div>
-                            </div>
-                        </div>
-                    </>
-                ) : (
-                    <>
-                        <div className="policy-item">
-                            <span className="policy-badge">CSA</span>
-                            <div className="policy-details">
-                                <div className="policy-title">CSA S6 — Canadian Highway Bridge Design Code</div>
-                                <div className="policy-desc">Design requirements for new bridges and rehabilitation of existing bridges</div>
-                            </div>
-                        </div>
-                        <div className="policy-item">
-                            <span className="policy-badge">CHBDC</span>
-                            <div className="policy-details">
-                                <div className="policy-title">CL-625 Design Loading</div>
-                                <div className="policy-desc">Standard truck loading for Ontario highway bridges</div>
-                            </div>
-                        </div>
-                        <div className="policy-item">
-                            <span className="policy-badge">OSIM</span>
-                            <div className="policy-details">
-                                <div className="policy-title">Ontario Structure Inspection Manual</div>
-                                <div className="policy-desc">Inspection procedures and condition rating methodology</div>
-                            </div>
-                        </div>
-                        <div className="policy-item">
-                            <span className="policy-badge">MTO</span>
-                            <div className="policy-details">
-                                <div className="policy-title">MTO Structural Manual</div>
-                                <div className="policy-desc">Ministry of Transportation Ontario design and construction standards</div>
-                            </div>
-                        </div>
-                    </>
-                )}
+                <div className="policy-item">
+                    <span className="policy-badge">CSA</span>
+                    <div className="policy-details">
+                        <div className="policy-title">CSA Z662 — Oil and Gas Pipeline Systems</div>
+                        <div className="policy-desc">Design, construction, operation, and maintenance requirements</div>
+                    </div>
+                </div>
+                <div className="policy-item">
+                    <span className="policy-badge">OPSD</span>
+                    <div className="policy-details">
+                        <div className="policy-title">OPSD 802 — Storm Sewer Design</div>
+                        <div className="policy-desc">Ontario Provincial Standard Drawings for storm sewer construction</div>
+                    </div>
+                </div>
+                <div className="policy-item">
+                    <span className="policy-badge">OPSD</span>
+                    <div className="policy-details">
+                        <div className="policy-title">OPSD 803 — Sanitary Sewer Design</div>
+                        <div className="policy-desc">Ontario Provincial Standard Drawings for sanitary sewer construction</div>
+                    </div>
+                </div>
+                <div className="policy-item">
+                    <span className="policy-badge">ECA</span>
+                    <div className="policy-details">
+                        <div className="policy-title">Environmental Compliance Approval</div>
+                        <div className="policy-desc">MECP approval required for sewage works under Ontario Water Resources Act</div>
+                    </div>
+                </div>
             </div>
         </div>
     );
@@ -963,31 +1279,8 @@ function InfraInspectionsTab() {
     );
 }
 
-function BridgeLoadAnalysisTab() {
-    return (
-        <div className="tab-section">
-            <h3 className="section-heading">Load Analysis</h3>
-            <p className="section-description">Structural load analysis based on CSA S6 Canadian Highway Bridge Design Code. Includes dead load, live load (CL-625), and environmental loading combinations.</p>
-            <div className="tab-empty">
-                <p>Design a bridge to view load analysis results and structural adequacy checks.</p>
-            </div>
-        </div>
-    );
-}
 
-function BridgeConditionTab() {
-    return (
-        <div className="tab-section">
-            <h3 className="section-heading">Condition Assessment</h3>
-            <p className="section-description">Bridge condition ratings based on OSIM (Ontario Structure Inspection Manual) methodology. Includes BCI (Bridge Condition Index) scoring and rehabilitation priority.</p>
-            <div className="tab-empty">
-                <p>Search for a location to view condition assessments for nearby bridges.</p>
-            </div>
-        </div>
-    );
-}
-
-export default function PolicyPanel({ parcel, isOpen, onClose, activeNav, savedParcels, onSaveParcel, onUploadAnalyzed, activePlanId, assetType }) {
+export default function PolicyPanel({ parcel, isOpen, onClose, activeNav, savedParcels, onSaveParcel, onUploadAnalyzed, activePlanId, assetType, selectedPipelineAsset }) {
     const { isResizing, handleProps: resizeHandleProps } = useResizable({
         defaultSize: 380,
         minSize: 280,
@@ -1067,11 +1360,19 @@ export default function PolicyPanel({ parcel, isOpen, onClose, activeNav, savedP
     const visibleZoningLoading = isResolvedParcel(parcel) ? loadingZoning : false;
 
     const renderTab = () => {
+        // Pipeline mode: show asset detail when a segment is clicked
+        if (assetType === 'pipeline' && selectedPipelineAsset && activeNav === 'overview') {
+            return <PipelineAssetPanel asset={selectedPipelineAsset} />;
+        }
+
         if (!parcel) {
             return (
                 <div className="tab-empty">
-                    {activeNav === 'overview' && <FileUploadZone onUploadComplete={onUploadAnalyzed} />}
-                    <p>Search for a property to view due diligence information.</p>
+                    {activeNav === 'overview' && assetType !== 'pipeline' && <FileUploadZone onUploadComplete={onUploadAnalyzed} />}
+                    <p>{assetType === 'pipeline'
+                        ? 'Click a pipeline segment on the map to view asset details.'
+                        : 'Search for a property to view due diligence information.'
+                    }</p>
                 </div>
             );
         }
@@ -1099,15 +1400,11 @@ export default function PolicyPanel({ parcel, isOpen, onClose, activeNav, savedP
             case 'documents':
                 return <DocumentsTab planId={activePlanId} />;
             case 'standards':
-                return <InfraStandardsTab assetType={assetType || 'pipeline'} />;
+                return <InfraStandardsTab />;
             case 'network':
                 return <InfraNetworkTab />;
             case 'inspections':
                 return <InfraInspectionsTab />;
-            case 'load_analysis':
-                return <BridgeLoadAnalysisTab />;
-            case 'condition':
-                return <BridgeConditionTab />;
             default:
                 return <OverviewTab parcel={parcel} zoning={zoning} onUploadComplete={onUploadAnalyzed} />;
         }
@@ -1117,7 +1414,11 @@ export default function PolicyPanel({ parcel, isOpen, onClose, activeNav, savedP
         <aside id="policy-panel" className={isOpen ? '' : 'panel-hidden'} style={{ userSelect: isResizing ? 'none' : undefined }}>
             <div {...resizeHandleProps} style={{ ...resizeHandleProps.style, left: -2 }} />
             <div id="policy-panel-header">
-                <h2 id="policy-panel-title">{TAB_TITLES[activeNav] || 'Project Information'}</h2>
+                <h2 id="policy-panel-title">
+                    {assetType === 'pipeline' && selectedPipelineAsset
+                        ? (selectedPipelineAsset.location || 'Water Main')
+                        : (TAB_TITLES[activeNav] || 'Project Information')}
+                </h2>
                 <div className="panel-header-actions">
                     {isResolvedParcel(parcel) && onSaveParcel && (
                         <button className="panel-save-btn" onClick={() => onSaveParcel(parcel)} title="Save parcel for comparison">

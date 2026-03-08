@@ -5,6 +5,8 @@ Returns GeoJSON FeatureCollections so the map can render infrastructure layers d
 
 from __future__ import annotations
 
+import json
+import pathlib
 from dataclasses import asdict
 
 from fastapi import APIRouter, Depends, Query
@@ -12,15 +14,38 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_current_user, get_db_session
-from app.models.infrastructure import BridgeAsset, PipelineAsset
-from app.schemas.infrastructure import (
-    BridgeComplianceRequest,
-    PipelineComplianceRequest,
-)
-from app.services.infrastructure_compliance import (
-    check_bridge_compliance,
-    check_pipeline_compliance,
-)
+
+# ─── File-based watermain cache ───────────────────────────────────────────────
+_WATERMAIN_CACHE: list | None = None
+_DATA_DIR = pathlib.Path(__file__).parent.parent.parent / "water-system-data"
+
+
+def _load_watermains() -> list:
+    global _WATERMAIN_CACHE
+    if _WATERMAIN_CACHE is not None:
+        return _WATERMAIN_CACHE
+    path = _DATA_DIR / "Watermain Distribution 4326.geojson"
+    with open(path, encoding="utf-8") as f:
+        fc = json.load(f)
+    _WATERMAIN_CACHE = fc.get("features", [])
+    return _WATERMAIN_CACHE
+
+
+def _geom_intersects_bbox(geom: dict, min_lng: float, min_lat: float, max_lng: float, max_lat: float) -> bool:
+    """Check if a MultiLineString / LineString geometry intersects the bbox."""
+    coords_list = geom.get("coordinates", [])
+    if geom["type"] == "MultiLineString":
+        for line in coords_list:
+            for pt in line:
+                if min_lng <= pt[0] <= max_lng and min_lat <= pt[1] <= max_lat:
+                    return True
+    elif geom["type"] == "LineString":
+        for pt in coords_list:
+            if min_lng <= pt[0] <= max_lng and min_lat <= pt[1] <= max_lat:
+                return True
+    return False
+from app.schemas.infrastructure import PipelineComplianceRequest
+from app.services.infrastructure_compliance import check_pipeline_compliance
 
 router = APIRouter()
 
@@ -82,63 +107,6 @@ async def get_nearby_pipelines(
     return {"type": "FeatureCollection", "features": features}
 
 
-@router.get("/infrastructure/bridges/nearby")
-async def get_nearby_bridges(
-    lat: float = Query(..., ge=-90, le=90),
-    lng: float = Query(..., ge=-180, le=180),
-    radius_m: float = Query(default=2000, ge=1, le=50000),
-    user: dict = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db_session),
-):
-    """Return bridge assets as a GeoJSON FeatureCollection."""
-    point_wkt = f"SRID=4326;POINT({lng} {lat})"
-    result = await db.execute(
-        text("""
-            SELECT id, asset_id, bridge_type, structure_type, span_m,
-                   deck_width_m, clearance_m, year_built, condition_rating,
-                   road_name, crossing_name, attributes_json,
-                   ST_AsGeoJSON(COALESCE(geom, ST_StartPoint(geom_line)))::json AS geometry,
-                   ST_AsGeoJSON(geom_line)::json AS line_geometry,
-                   ST_Distance(
-                       COALESCE(geom, ST_StartPoint(geom_line))::geography,
-                       ST_GeomFromEWKT(:point)::geography
-                   ) AS distance_m
-            FROM bridge_assets
-            WHERE ST_DWithin(
-                COALESCE(geom, ST_StartPoint(geom_line))::geography,
-                ST_GeomFromEWKT(:point)::geography,
-                :radius
-            )
-              AND (geom IS NOT NULL OR geom_line IS NOT NULL)
-            ORDER BY distance_m
-            LIMIT 100
-        """),
-        {"point": point_wkt, "radius": radius_m},
-    )
-    rows = result.mappings().all()
-    features = []
-    for row in rows:
-        features.append({
-            "type": "Feature",
-            "geometry": row["geometry"],
-            "properties": {
-                "id": str(row["id"]),
-                "asset_id": row["asset_id"],
-                "bridge_type": row["bridge_type"],
-                "structure_type": row["structure_type"],
-                "span_m": row["span_m"],
-                "deck_width_m": row["deck_width_m"],
-                "clearance_m": row["clearance_m"],
-                "year_built": row["year_built"],
-                "condition_rating": row["condition_rating"],
-                "road_name": row["road_name"],
-                "crossing_name": row["crossing_name"],
-                "distance_m": round(row["distance_m"], 1) if row["distance_m"] else None,
-                "line_geometry": row["line_geometry"],
-            },
-        })
-    return {"type": "FeatureCollection", "features": features}
-
 
 @router.post("/infrastructure/compliance/pipeline")
 async def check_pipeline(
@@ -156,17 +124,47 @@ async def check_pipeline(
     }
 
 
-@router.post("/infrastructure/compliance/bridge")
-async def check_bridge(
-    body: BridgeComplianceRequest,
-    user: dict = Depends(get_current_user),
+
+@router.get("/infrastructure/watermains/bbox")
+async def get_watermains_bbox(
+    min_lng: float = Query(..., ge=-180, le=180),
+    min_lat: float = Query(..., ge=-90, le=90),
+    max_lng: float = Query(..., ge=-180, le=180),
+    max_lat: float = Query(..., ge=-90, le=90),
+    limit: int = Query(default=3000, ge=1, le=10000),
 ):
-    """Run deterministic compliance check for a bridge."""
-    params = body.model_dump(exclude={"bridge_type"}, exclude_none=True)
-    result = check_bridge_compliance(body.bridge_type, params)
-    return {
-        "overall_compliant": result.overall_compliant,
-        "rules": [asdict(r) for r in result.rules],
-        "variances_needed": [asdict(r) for r in result.variances_needed],
-        "warnings": result.warnings,
-    }
+    """Return Toronto watermain segments within a map viewport bbox.
+
+    Reads directly from the committed GeoJSON dataset — no DB required.
+    Properties are normalised to match the map's pipeline layer schema.
+    """
+    features_raw = _load_watermains()
+    out = []
+    for feat in features_raw:
+        if len(out) >= limit:
+            break
+        geom = feat.get("geometry")
+        if not geom:
+            continue
+        if not _geom_intersects_bbox(geom, min_lng, min_lat, max_lng, max_lat):
+            continue
+        p = feat.get("properties", {})
+        diameter = p.get("Watermain Diameter")
+        material = p.get("Watermain Material") or "UNK"
+        year_raw = p.get("Watermain Construction Year")
+        install_year = int(year_raw) if year_raw and str(year_raw).isdigit() else None
+        out.append({
+            "type": "Feature",
+            "geometry": geom,
+            "properties": {
+                "asset_id": p.get("Watermain Asset Identification"),
+                "pipe_type": "water_main",
+                "material": material,
+                "diameter_mm": int(diameter) if diameter else None,
+                "install_year": install_year,
+                "location": p.get("Watermain Location Description"),
+                "length_m": p.get("Watermain Measured Length"),
+                "color": "#2277bb",
+            },
+        })
+    return {"type": "FeatureCollection", "features": out}

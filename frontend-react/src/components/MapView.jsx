@@ -113,16 +113,6 @@ const MapView = forwardRef(function MapView({ isParcelResolved, onModelOpen, isP
             }
             setInfraEmpty(!fc.features || fc.features.length === 0);
         },
-        /** Load bridge GeoJSON onto the map */
-        setBridges(geojson) {
-            const map = mapInstanceRef.current;
-            if (!map || !mapLoaded) return;
-            const fc = geojson || EMPTY_FC;
-            if (map.getSource('bridges')) {
-                map.getSource('bridges').setData(fc);
-            }
-            setInfraEmpty(!fc.features || fc.features.length === 0);
-        },
     }));
 
     // Track whether infra data has been loaded
@@ -133,25 +123,27 @@ const MapView = forwardRef(function MapView({ isParcelResolved, onModelOpen, isP
         const map = mapInstanceRef.current;
         if (!map || !mapLoaded) return;
 
-        const buildingLayers = ['osm-buildings-3d', 'parcel-fill', 'parcel-line', 'proposed-massing-extrusion'];
         const pipelineLayers = ['pipelines-line', 'pipelines-line-casing', 'pipelines-label'];
-        const bridgeLayers = ['bridges-circle', 'bridges-label'];
 
-        for (const id of buildingLayers) {
+        // Buildings: always visible but dimmer in pipeline mode to give 3D context
+        if (map.getLayer('osm-buildings-3d')) {
+            map.setLayoutProperty('osm-buildings-3d', 'visibility', 'visible');
+            map.setPaintProperty('osm-buildings-3d', 'fill-extrusion-opacity', assetType === 'pipeline' ? 0.25 : 0.6);
+            map.setPaintProperty('osm-buildings-3d', 'fill-extrusion-color', assetType === 'pipeline' ? '#aaaaaa' : '#e0e0e0');
+        }
+        for (const id of ['parcel-fill', 'parcel-line', 'proposed-massing-extrusion']) {
             if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', assetType === 'building' ? 'visible' : 'none');
         }
         for (const id of pipelineLayers) {
             if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', assetType === 'pipeline' ? 'visible' : 'none');
         }
-        for (const id of bridgeLayers) {
-            if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', assetType === 'bridge' ? 'visible' : 'none');
-        }
 
-        // Adjust camera for infrastructure modes
-        if (assetType !== 'building') {
-            map.easeTo({ pitch: 0, bearing: 0, duration: 800 });
-            setInfraEmpty(true); // assume empty until data loads
+        // Camera
+        if (assetType === 'pipeline') {
+            map.easeTo({ pitch: 55, bearing: -20, duration: 1200 });
+            setInfraEmpty(true);
         } else {
+            map.easeTo({ pitch: 0, bearing: 0, duration: 800 });
             setInfraEmpty(false);
         }
     }, [assetType, mapLoaded]);
@@ -283,29 +275,50 @@ const MapView = forwardRef(function MapView({ isParcelResolved, onModelOpen, isP
             // ─── Pipeline Layers ───────────────────────────
             map.addSource('pipelines', { type: 'geojson', data: EMPTY_FC });
 
-            // Dark casing line (wider, behind)
+            // Dark casing line (wider, behind) — scales with diameter like the fill
             map.addLayer({
                 id: 'pipelines-line-casing',
                 type: 'line',
                 source: 'pipelines',
                 layout: { visibility: 'none', 'line-cap': 'round', 'line-join': 'round' },
                 paint: {
-                    'line-color': '#111111',
-                    'line-width': ['interpolate', ['linear'], ['zoom'], 12, 3, 16, 7, 19, 12],
-                    'line-opacity': 0.6,
+                    'line-color': '#0a0a0a',
+                    'line-width': [
+                        'interpolate', ['linear'], ['zoom'],
+                        12, ['interpolate', ['linear'], ['coalesce', ['get', 'diameter_mm'], 150], 50, 2, 600, 5],
+                        16, ['interpolate', ['linear'], ['coalesce', ['get', 'diameter_mm'], 150], 50, 4, 600, 12],
+                        19, ['interpolate', ['linear'], ['coalesce', ['get', 'diameter_mm'], 150], 50, 7, 600, 22],
+                    ],
+                    'line-opacity': 0.55,
                 },
             });
 
-            // Colored pipe line (narrower, in front)
+            // Colored pipe line — color by material, width by diameter
             map.addLayer({
                 id: 'pipelines-line',
                 type: 'line',
                 source: 'pipelines',
                 layout: { visibility: 'none', 'line-cap': 'round', 'line-join': 'round' },
                 paint: {
-                    'line-color': ['coalesce', ['get', 'color'], '#888888'],
-                    'line-width': ['interpolate', ['linear'], ['zoom'], 12, 1.5, 16, 4, 19, 8],
-                    'line-opacity': 0.9,
+                    'line-color': [
+                        'match', ['get', 'material'],
+                        'CI',   '#e67e22',   // Cast Iron → orange (old/legacy)
+                        'CICL', '#e67e22',
+                        'DIP',  '#2277bb',   // Ductile Iron → blue (standard)
+                        'DICL', '#2277bb',
+                        'PVC',  '#27ae60',   // PVC → green (modern)
+                        'CPP',  '#27ae60',
+                        'AC',   '#e74c3c',   // Asbestos Cement → red (hazard)
+                        'COP',  '#f1c40f',   // Copper → yellow
+                        '#888888'            // Unknown
+                    ],
+                    'line-width': [
+                        'interpolate', ['linear'], ['zoom'],
+                        12, ['interpolate', ['linear'], ['coalesce', ['get', 'diameter_mm'], 150], 50, 0.8, 600, 3],
+                        16, ['interpolate', ['linear'], ['coalesce', ['get', 'diameter_mm'], 150], 50, 2, 600, 8],
+                        19, ['interpolate', ['linear'], ['coalesce', ['get', 'diameter_mm'], 150], 50, 4, 600, 16],
+                    ],
+                    'line-opacity': 0.95,
                 },
             });
 
@@ -336,43 +349,6 @@ const MapView = forwardRef(function MapView({ isParcelResolved, onModelOpen, isP
                 },
             });
 
-            // ─── Bridge Layers ─────────────────────────────
-            map.addSource('bridges', { type: 'geojson', data: EMPTY_FC });
-
-            map.addLayer({
-                id: 'bridges-circle',
-                type: 'circle',
-                source: 'bridges',
-                layout: { visibility: 'none' },
-                paint: {
-                    'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 4, 14, 8, 18, 14],
-                    'circle-color': '#dd6644',
-                    'circle-stroke-width': 2,
-                    'circle-stroke-color': '#1a1a1a',
-                    'circle-opacity': 0.9,
-                },
-            });
-
-            map.addLayer({
-                id: 'bridges-label',
-                type: 'symbol',
-                source: 'bridges',
-                minzoom: 13,
-                layout: {
-                    visibility: 'none',
-                    'text-field': ['coalesce', ['get', 'road_name'], ['get', 'bridge_type']],
-                    'text-size': 11,
-                    'text-offset': [0, 1.5],
-                    'text-anchor': 'top',
-                    'text-allow-overlap': false,
-                },
-                paint: {
-                    'text-color': '#f0ece4',
-                    'text-halo-color': '#1a1a1a',
-                    'text-halo-width': 1.5,
-                },
-            });
-
             // ─── Click handlers for infrastructure ─────────
             map.on('click', 'pipelines-line', (e) => {
                 if (!e.features?.length) return;
@@ -384,9 +360,11 @@ const MapView = forwardRef(function MapView({ isParcelResolved, onModelOpen, isP
                     .setHTML(`
                         <div style="font-family:Inter,sans-serif;font-size:12px;color:#1a1a1a">
                             <strong style="text-transform:capitalize">${label}</strong><br/>
+                            ${props.location ? `<span style="color:#555">${props.location}</span><br/>` : ''}
                             ${props.diameter_mm ? `Diameter: ${props.diameter_mm}mm<br/>` : ''}
                             ${props.material ? `Material: ${props.material}<br/>` : ''}
                             ${props.install_year ? `Installed: ${props.install_year}<br/>` : ''}
+                            ${props.length_m ? `Length: ${props.length_m}m<br/>` : ''}
                             ${props.depth_m ? `Depth: ${props.depth_m}m<br/>` : ''}
                             ${props.distance_m ? `<span style="color:#888">${props.distance_m}m away</span>` : ''}
                         </div>
@@ -395,32 +373,9 @@ const MapView = forwardRef(function MapView({ isParcelResolved, onModelOpen, isP
                 if (onInfraAssetClick) onInfraAssetClick({ type: 'pipeline', ...props });
             });
 
-            map.on('click', 'bridges-circle', (e) => {
-                if (!e.features?.length) return;
-                const props = e.features[0].properties;
-                if (popupRef.current) popupRef.current.remove();
-                popupRef.current = new maplibregl.Popup({ closeButton: true, maxWidth: '260px' })
-                    .setLngLat(e.lngLat)
-                    .setHTML(`
-                        <div style="font-family:Inter,sans-serif;font-size:12px;color:#1a1a1a">
-                            <strong>${props.road_name || 'Bridge'}</strong>
-                            ${props.crossing_name ? `<br/>Over: ${props.crossing_name}` : ''}<br/>
-                            Type: ${(props.bridge_type || '').replace(/_/g, ' ')}<br/>
-                            ${props.span_m ? `Span: ${props.span_m}m<br/>` : ''}
-                            ${props.year_built ? `Built: ${props.year_built}<br/>` : ''}
-                            ${props.condition_rating ? `Condition: ${props.condition_rating}<br/>` : ''}
-                            ${props.distance_m ? `<span style="color:#888">${props.distance_m}m away</span>` : ''}
-                        </div>
-                    `)
-                    .addTo(map);
-                if (onInfraAssetClick) onInfraAssetClick({ type: 'bridge', ...props });
-            });
-
             // Cursor styling for interactive layers
-            for (const layerId of ['pipelines-line', 'bridges-circle']) {
-                map.on('mouseenter', layerId, () => { map.getCanvas().style.cursor = 'pointer'; });
-                map.on('mouseleave', layerId, () => { map.getCanvas().style.cursor = ''; });
-            }
+            map.on('mouseenter', 'pipelines-line', () => { map.getCanvas().style.cursor = 'pointer'; });
+            map.on('mouseleave', 'pipelines-line', () => { map.getCanvas().style.cursor = ''; });
         });
 
         return () => {
@@ -429,9 +384,9 @@ const MapView = forwardRef(function MapView({ isParcelResolved, onModelOpen, isP
         };
     }, []);
 
-    const MODE_LABELS = { building: null, pipeline: 'Pipeline Network', bridge: 'Bridge Inventory' };
-    const MODE_ICONS = { pipeline: '⏣', bridge: '⌓' };
-    const MODE_COLORS = { pipeline: '#44aa66', bridge: '#dd6644' };
+    const MODE_LABELS = { building: null, pipeline: 'Pipeline Network' };
+    const MODE_ICONS = { pipeline: '⏣' };
+    const MODE_COLORS = { pipeline: '#44aa66' };
 
     return (
         <>
@@ -449,8 +404,13 @@ const MapView = forwardRef(function MapView({ isParcelResolved, onModelOpen, isP
                 }}>
                     <span style={{ fontSize: 18 }}>{MODE_ICONS[assetType]}</span>
                     <span style={{ color: MODE_COLORS[assetType], fontWeight: 600 }}>{MODE_LABELS[assetType]}</span>
-                    <span style={{ color: '#888', fontSize: 11, marginLeft: 4 }}>
-                        {assetType === 'pipeline' ? 'Water, Sanitary, Storm, Gas' : 'Road, Pedestrian, Culvert'}
+                    <span style={{ display: 'flex', gap: 10, marginLeft: 4, alignItems: 'center' }}>
+                        {[['CI/CICL', '#e67e22'], ['DIP/DICL', '#2277bb'], ['PVC', '#27ae60'], ['AC', '#e74c3c'], ['COP', '#f1c40f']].map(([label, color]) => (
+                            <span key={label} style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: 10, color: '#ccc' }}>
+                                <span style={{ width: 16, height: 3, background: color, borderRadius: 2, display: 'inline-block' }} />
+                                {label}
+                            </span>
+                        ))}
                     </span>
                 </div>
             )}
@@ -464,17 +424,12 @@ const MapView = forwardRef(function MapView({ isParcelResolved, onModelOpen, isP
                     fontFamily: 'Inter, sans-serif', color: '#f0ece4',
                     boxShadow: '0 8px 32px rgba(0,0,0,0.6)', border: '1px solid #333',
                 }}>
-                    <div style={{ fontSize: 36, marginBottom: 12, opacity: 0.6 }}>
-                        {assetType === 'pipeline' ? '⏣' : '⌓'}
-                    </div>
+                    <div style={{ fontSize: 36, marginBottom: 12, opacity: 0.6 }}>⏣</div>
                     <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 8 }}>
-                        No {assetType === 'pipeline' ? 'pipeline' : 'bridge'} data in this area
+                        No pipeline data in this area
                     </div>
                     <div style={{ fontSize: 12, color: '#888', lineHeight: 1.5 }}>
-                        Run ingestion to load Toronto Open Data:<br/>
-                        <code style={{ color: '#c8a55c', fontSize: 11 }}>
-                            POST /api/v1/admin/ingest/{assetType === 'pipeline' ? 'water-mains' : 'bridges'}
-                        </code>
+                        Pan or zoom the map to load Toronto watermain data.
                     </div>
                 </div>
             )}

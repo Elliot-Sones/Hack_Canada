@@ -7,7 +7,7 @@ import PolicyPanel from './components/PolicyPanel.jsx';
 import ChatPanel from './components/ChatPanel.jsx';
 import InfrastructureLayerControl from './components/InfrastructureLayerControl.jsx';
 import LandingPage from './components/LandingPage.jsx';
-import { searchParcels, getNearbyPipelines, getNearbyBridges } from './api.js';
+import { searchParcels, getNearbyPipelines, getWatermainsBbox } from './api.js';
 import { buildParcelState, isResolvedParcel } from './lib/parcelState.js';
 import './landing.css';
 
@@ -29,6 +29,7 @@ export default function App() {
   const [isModelOpen, setIsModelOpen] = useState(false);
   const [analyzedUploads, setAnalyzedUploads] = useState([]);
   const [floorPlans, setFloorPlans] = useState(null);
+  const [selectedPipelineAsset, setSelectedPipelineAsset] = useState(null);
   const [pipelineData, setPipelineData] = useState(null);
   const [projectId, setProjectId] = useState(null);
   const [activePlanId, setActivePlanId] = useState(null);
@@ -237,11 +238,9 @@ export default function App() {
       const lng = center.lng;
       try {
         if (assetType === 'pipeline') {
-          const data = await getNearbyPipelines(lat, lng, 2000);
+          const bounds = map.getBounds();
+          const data = await getWatermainsBbox(bounds);
           if (!cancelled && mapRef.current) mapRef.current.setPipelines(data);
-        } else if (assetType === 'bridge') {
-          const data = await getNearbyBridges(lat, lng, 5000);
-          if (!cancelled && mapRef.current) mapRef.current.setBridges(data);
         }
       } catch (err) {
         // Silently fail — infrastructure data is optional context
@@ -319,6 +318,7 @@ export default function App() {
         isChatExpanded={isChatExpanded}
         isModelOpen={isModelOpen}
         assetType={assetType}
+        onInfraAssetClick={(asset) => { setSelectedPipelineAsset(asset); setIsPanelOpen(true); }}
       />
       <InfrastructureLayerControl mapRef={mapRef} />
       <SearchBar onLocationSelected={handleLocationSelected} />
@@ -345,6 +345,7 @@ export default function App() {
         onUploadAnalyzed={handleUploadAnalyzed}
         activePlanId={activePlanId}
         assetType={assetType}
+        selectedPipelineAsset={selectedPipelineAsset}
       />
       {!isPanelOpen && (
         <button

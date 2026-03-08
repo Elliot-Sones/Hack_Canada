@@ -12,13 +12,6 @@ const FITTING_ITEMS = [
   { id: 'fit_reducer', label: 'Reducer', fitting_type: 'reducer' },
 ];
 
-const BRIDGE_ITEMS = [
-  { id: 'br_deck', label: 'Deck', component: 'deck' },
-  { id: 'br_girder', label: 'Girder', component: 'girder' },
-  { id: 'br_abutment', label: 'Abutment', component: 'abutment' },
-  { id: 'br_pier', label: 'Pier', component: 'pier' },
-  { id: 'br_barrier', label: 'Barrier', component: 'barrier' },
-];
 
 export default function InfrastructureCatalog({ mode, onDragStart }) {
   const handleDragStart = (e, item) => {
@@ -66,23 +59,6 @@ export default function InfrastructureCatalog({ mode, onDragStart }) {
         </>
       )}
 
-      {(mode === 'bridge' || !mode) && (
-        <div className="infra-catalog-section">
-          <div className="infra-catalog-section-title">Bridge</div>
-          <div className="infra-catalog-items">
-            {BRIDGE_ITEMS.map((item) => (
-              <div
-                key={item.id}
-                className="infra-catalog-item"
-                draggable
-                onDragStart={(e) => handleDragStart(e, item)}
-              >
-                {item.label}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
     </div>
   );
 }

@@ -15,13 +15,6 @@ import {
   generateManhole,
   generateFitting,
 } from '../lib/infrastructureGeometry.js';
-import {
-  generateBridgeDeck,
-  generateGirder,
-  generateAbutment,
-  generatePier,
-  generateBarrier,
-} from '../lib/bridgeGeometry.js';
 import BlueprintOverlay from './BlueprintOverlay.jsx';
 import FloorPlanView from './FloorPlanView.jsx';
 import FloorPlanEditor from './floorplan/FloorPlanEditor.jsx';
@@ -574,113 +567,8 @@ function buildPipelineNetwork(alignment, params) {
   return { pieces, details };
 }
 
-function buildBridge(alignment, params) {
-  const localPts = alignmentToLocal(alignment);
-  const pieces = [];
-  const details = [];
-
-  // Compute total span and direction
-  const first = localPts[0] || [0, 0, 0];
-  const last = localPts[localPts.length - 1] || [20, 0, 0];
-  const span = Math.sqrt(
-    (last[0] - first[0]) ** 2 + (last[1] - first[1]) ** 2 + (last[2] - first[2]) ** 2
-  ) || 20;
-
-  const deckWidth = params?.deck_width_m || 12;
-  const deckDepth = params?.deck_depth_m || 0.3;
-  const girderDepth = params?.girder_depth_m || 1.2;
-  const barrierHeight = params?.barrier_height_m || 1.1;
-  const pierCount = params?.pier_count || Math.max(0, Math.floor(span / 25) - 1);
-  const pierHeight = params?.pier_height_m || 8;
-
-  const midX = (first[0] + last[0]) / 2;
-  const midY = (first[1] + last[1]) / 2;
-  const midZ = (first[2] + last[2]) / 2;
-
-  // Direction angle for rotation
-  const angle = Math.atan2(last[2] - first[2], last[0] - first[0]);
-
-  // Deck
-  const deck = generateBridgeDeck(span, deckWidth, deckDepth);
-  pieces.push({
-    geometry: deck.geometry,
-    color: INFRA_COLORS.deck,
-    position: [midX, midY, midZ],
-    rotation: [0, angle, 0],
-    type: 'deck',
-  });
-
-  // Girders (typically 4-6 across width)
-  const girderCount = params?.girder_count || Math.max(2, Math.round(deckWidth / 2.5));
-  const girderType = params?.girder_type || 'i_beam';
-  for (let g = 0; g < girderCount; g++) {
-    const transOffset = -deckWidth / 2 + (g + 0.5) * (deckWidth / girderCount);
-    const gir = generateGirder(girderType, span, girderDepth, transOffset);
-    pieces.push({
-      geometry: gir.geometry,
-      color: INFRA_COLORS.girder,
-      position: [midX, midY - deckDepth / 2 - girderDepth, midZ + transOffset],
-      rotation: [0, angle, 0],
-      type: 'girder',
-    });
-  }
-
-  // Abutments (at each end)
-  const abutW = deckWidth + 1;
-  const abutH = pierHeight;
-  const abutD = 1.5;
-  const abutStart = generateAbutment('gravity', first, { width: abutW, height: abutH, depth: abutD });
-  pieces.push({
-    geometry: abutStart.geometry,
-    color: INFRA_COLORS.abutment,
-    position: [first[0], first[1] - abutH / 2, first[2]],
-    rotation: [0, angle, 0],
-    type: 'abutment',
-  });
-  const abutEnd = generateAbutment('gravity', last, { width: abutW, height: abutH, depth: abutD });
-  pieces.push({
-    geometry: abutEnd.geometry,
-    color: INFRA_COLORS.abutment,
-    position: [last[0], last[1] - abutH / 2, last[2]],
-    rotation: [0, angle, 0],
-    type: 'abutment',
-  });
-
-  // Piers
-  for (let p = 0; p < pierCount; p++) {
-    const t = (p + 1) / (pierCount + 1);
-    const px = first[0] + (last[0] - first[0]) * t;
-    const py = first[1] + (last[1] - first[1]) * t;
-    const pz = first[2] + (last[2] - first[2]) * t;
-    const pier = generatePier(pierHeight, deckWidth * 0.6);
-    pieces.push({
-      geometry: pier.geometry,
-      color: INFRA_COLORS.pier,
-      position: [px, py - pierHeight / 2, pz],
-      rotation: [0, angle, 0],
-      type: 'pier',
-    });
-  }
-
-  // Barriers (both sides)
-  const bar = generateBarrier(span, barrierHeight, params?.barrier_type || 'jersey');
-  for (const side of [-1, 1]) {
-    const transOffset = side * (deckWidth / 2);
-    pieces.push({
-      geometry: bar.geometry.clone(),
-      color: INFRA_COLORS.barrier,
-      position: [midX, midY + deckDepth / 2 + barrierHeight / 2, midZ + transOffset],
-      rotation: [0, angle, 0],
-      type: 'barrier',
-    });
-  }
-
-  return { pieces, details };
-}
-
 export const INFRASTRUCTURE_BUILDERS = {
   pipeline: buildPipelineNetwork,
-  bridge: buildBridge,
 };
 
 const TYPOLOGY_BUILDERS = {

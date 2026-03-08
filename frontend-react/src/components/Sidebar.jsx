@@ -18,24 +18,14 @@ const PIPELINE_NAV_ITEMS = [
     { id: 'inspections', label: 'Inspections', icon: (<><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="16" y1="13" x2="8" y2="13" /><line x1="16" y1="17" x2="8" y2="17" /></>) },
 ];
 
-const BRIDGE_NAV_ITEMS = [
-    { id: 'overview', label: 'Overview', icon: (<><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><polyline points="9 22 9 12 15 12 15 22" /></>) },
-    { id: 'standards', label: 'Standards', icon: (<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />) },
-    { id: 'load_analysis', label: 'Load Analysis', icon: (<><polyline points="22 12 18 12 15 21 9 3 6 12 2 12" /></>) },
-    { id: 'datasets', label: 'Datasets', icon: (<><ellipse cx="12" cy="5" rx="9" ry="3" /><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" /><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" /></>) },
-    { id: 'condition', label: 'Condition', icon: (<><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" /></>) },
-];
-
 const NAV_BY_ASSET_TYPE = {
     building: BUILDING_NAV_ITEMS,
     pipeline: PIPELINE_NAV_ITEMS,
-    bridge: BRIDGE_NAV_ITEMS,
 };
 
 const ASSET_TYPES = [
     { id: 'building', label: 'Buildings' },
     { id: 'pipeline', label: 'Pipelines' },
-    { id: 'bridge', label: 'Bridges' },
 ];
 
 const COLLAPSED_WIDTH = 52;

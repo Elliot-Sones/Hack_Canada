@@ -334,8 +334,9 @@ finance → entitlement → precedent_search → document_generation
 #### Infrastructure — `app/routers/infrastructure.py`
 | Method | Route | Purpose |
 |--------|-------|---------|
-| GET | `/api/v1/infrastructure/pipelines/nearby` | Find pipeline assets within radius of lat/lng |
+| GET | `/api/v1/infrastructure/pipelines/nearby` | Find pipeline assets within radius of lat/lng (DB) |
 | GET | `/api/v1/infrastructure/bridges/nearby` | Find bridge assets within radius of lat/lng |
+| GET | `/api/v1/infrastructure/watermains/bbox` | Return Toronto watermain segments within map viewport bbox — reads directly from committed GeoJSON, no DB required |
 | POST | `/api/v1/infrastructure/compliance/pipeline` | Deterministic pipeline compliance check |
 | POST | `/api/v1/infrastructure/compliance/bridge` | Deterministic bridge compliance check |
 
