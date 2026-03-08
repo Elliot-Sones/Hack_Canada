@@ -3,7 +3,9 @@
 dockerfilePath = "Dockerfile"
 
 [deploy]
-startCommand = "echo PORT=$PORT && python -c 'import uvicorn; print(\"uvicorn version:\", uvicorn.__version__)' && exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --log-level debug"
+startCommand = "uvicorn app.main:app --host 0.0.0.0 --port 8000"
+healthcheckPath = "/api/v1/health"
+healthcheckTimeout = 120
 restartPolicyType = "on_failure"
 
 # Required environment variables (set these in Railway dashboard):
