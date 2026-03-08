@@ -55,13 +55,11 @@ const MeasureIcon = () => (
 );
 
 const TOOLS = [
-  { id: 'select', title: 'Select Tool (V)', icon: SelectIcon, enabled: true },
-  { id: 'wall', title: 'Draw Wall (W)', icon: WallIcon, enabled: true },
-  { id: 'door', title: 'Place Door (D)', icon: DoorIcon, enabled: true },
-  { id: 'window', title: 'Place Window (O)', icon: WindowIcon, enabled: true },
-  { id: 'room', title: 'Room Type (R)', icon: RoomIcon, enabled: true },
-  { id: 'delete', title: 'Delete Walls (X)', icon: DeleteIcon, enabled: true },
-  { id: 'measure', title: 'Measure (M)', icon: MeasureIcon, enabled: true },
+  { id: 'select', title: 'Select (V)', icon: SelectIcon, enabled: true },
+  { id: 'wall', title: 'Wall (W)', icon: WallIcon, enabled: true },
+  { id: 'door', title: 'Door (D)', icon: DoorIcon, enabled: true },
+  { id: 'window', title: 'Window (O)', icon: WindowIcon, enabled: true },
+  { id: 'delete', title: 'Delete (X)', icon: DeleteIcon, enabled: true },
 ];
 
 export default function EditorToolbar({

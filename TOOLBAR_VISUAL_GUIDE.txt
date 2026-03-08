@@ -1,0 +1,177 @@
+═══════════════════════════════════════════════════════════════════════════════
+                        FLOOR PLAN EDITOR TOOLBAR GUIDE
+═══════════════════════════════════════════════════════════════════════════════
+
+LAYOUT:
+┌─────────────────────────────────────────────────────────────────┐
+│ CATALOG                    TOOLBAR    CANVAS                COMPLIANCE │
+│ (Rooms,                    (Tools)    (Floor Plan           (Rules &    │
+│  Openings)                              Editor)              Violations) │
+│                                                                           │
+│ [Room]  │  ┌──┐  │   Canvas with walls, rooms, doors, windows      │ Wall 1  │
+│ [Door]  │  │S │  │   - Pan with mouse drag                        │ Area    │
+│ [Window]│  ├──┤  │   - Zoom with mouse wheel                      │ Thick   │
+│         │  │W │  │   - Click to select elements                   │ Type    │
+│         │  ├──┤  │   - Golden handles for editing                 │         │
+│         │  │D │  │                                                │ ✓ PASS  │
+│         │  ├──┤  │                                                │ ⚠ WARN  │
+│         │  │O │  │                                                │ ✗ ERROR │
+│         │  ├──┤  │                                                │         │
+│         │  │R │  │                                                │         │
+│         │  ├──┤  │                                                │         │
+│         │  │✕ │  │                                                │         │
+│         │  ├──┤  │                                                │         │
+│         │  │M │  │                                                │         │
+│         │  ├──┤  │                                                │         │
+│         │  │↶ │  │                                                │         │
+│         │  │↷ │  │                                                │         │
+│         │  └──┘  │                                                │         │
+└─────────────────────────────────────────────────────────────────┘
+
+TOOLBAR BUTTONS (Left to Right):
+┌────────────────────────────────────────────────────────────┐
+│  S     │ Select Tool        - Select/move elements        │
+│        │                                                    │
+│  ─     │ Wall Tool          - Draw walls                   │
+│        │                                                    │
+│  🚪    │ Door Tool          - Place doors                  │
+│        │                                                    │
+│  🪟    │ Window Tool        - Place windows                │
+│        │                                                    │
+│  ┼     │ Room Tool          - Assign room types            │
+│        │                                                    │
+│  🗑    │ Delete Tool        - Erase walls (Press X)       │
+│        │                                                    │
+│  📏    │ Measure Tool       - Measure distances            │
+│        │                                                    │
+│  ──── (divider line) ─────────────────                     │
+│        │                                                    │
+│  ↶     │ Undo               - Undo last action             │
+│        │                                                    │
+│  ↷     │ Redo               - Redo last action             │
+│        │                                                    │
+└────────────────────────────────────────────────────────────┘
+
+INTERACTIVE ELEMENTS ON CANVAS:
+
+1. SELECTED WALL:
+   ┌─────────────────────────────────┐
+   │                                 │
+   │    ○ ─────────────────────── ○  │  ← Endpoint circles (drag to adjust)
+   │      ││                    ││    │
+   │      ││     Wall (gold)    ││    │
+   │      ││  [Gold Center ●]   ││    │
+   │      ││     (drag to move)  ││    │
+   │    ○ ─────────────────────── ○  │  ← Endpoint circles
+   │                                 │
+   └─────────────────────────────────┘
+
+2. UNSELECTED WALL (HOVER):
+   ┌─────────────────────────────────┐
+   │                                 │
+   │    ────────────────────────────  │  ← Highlights with gold outline
+   │         Wall (highlighted)       │
+   │                                 │
+   └─────────────────────────────────┘
+
+3. ROOM WITH TYPE ASSIGNED:
+   ┌─────────────────────────────────┐
+   │                                 │
+   │    ░░░░░░░░░░░░░░░░░░░░░░░░░░  │  ← Colored fill based on type
+   │    ░ BEDROOM          ░          │  ← Room name and area
+   │    ░ 12.0 m² (129 ft²) ░        │
+   │    ░░░░░░░░░░░░░░░░░░░░░░░░░░  │
+   │                                 │
+   └─────────────────────────────────┘
+
+4. DOOR ON WALL:
+   ┌─────────────────────────────────┐
+   │                                 │
+   │    ────┐  Door  ├────────────    │  ← Door symbol with swing indicator
+   │                                 │
+   └─────────────────────────────────┘
+
+5. WINDOW ON WALL:
+   ┌─────────────────────────────────┐
+   │                                 │
+   │    ────╪╪  Window  ╪╪─────────   │  ← Window symbol (lines)
+   │                                 │
+   └─────────────────────────────────┘
+
+KEYBOARD SHORTCUTS:
+┌────────────────────────────────────────────┐
+│ V              Select Tool                 │
+│ W              Wall Drawing                │
+│ D              Door Placement              │
+│ O              Window Placement            │
+│ R              Room Type Assignment        │
+│ X              Delete/Eraser Tool          │
+│ M              Measure Tool                │
+│ Ctrl+Z         Undo                        │
+│ Ctrl+Y         Redo                        │
+│ Escape         Cancel/Deselect             │
+│ Delete         Delete Selected Element     │
+│ Backspace      Delete Selected Element     │
+└────────────────────────────────────────────┘
+
+TOOLBAR STATES:
+
+NORMAL (Inactive):
+  ┌──┐
+  │S │  Dark background, light text
+  └──┘
+
+HOVER (Inactive):
+  ┌──┐
+  │S │  Lighter background, darker border
+  └──┘
+  ↑↑ Slight upward lift animation
+
+ACTIVE (Selected Tool):
+  ┌──┐
+  │S │  Gold background, gold text, glow effect
+  └──┘
+  ↑ Clearly visible selection
+
+DISABLED:
+  ┌──┐
+  │S │  Faded (40% opacity), not clickable
+  └──┘
+
+═══════════════════════════════════════════════════════════════════════════════
+
+WORKFLOW EXAMPLE:
+
+1. Draw a rectangle:
+   - Press W (wall tool)
+   - Click top-left corner → Click top-right corner
+   - Click top-right corner → Click bottom-right corner
+   - Click bottom-right corner → Click bottom-left corner
+   - Click bottom-left corner → Click top-left corner to close
+
+2. Assign room type:
+   - Press R (room tool)
+   - Click inside the rectangle
+   - Select room type from popup (Bedroom, Kitchen, etc.)
+
+3. Add door:
+   - Press D (door tool)
+   - Click on a wall to place door
+   - Drag if you want to reposition it
+
+4. Move a wall:
+   - Click the wall to select it
+   - Grab the gold circle in the middle
+   - Drag to new position
+   - Release to place
+
+5. Delete a wall:
+   - Press X (delete tool)
+   - Click the wall you want to remove
+   - Wall is instantly deleted
+
+6. Undo a mistake:
+   - Press Ctrl+Z to undo
+   - Press Ctrl+Y to redo
+
+═══════════════════════════════════════════════════════════════════════════════

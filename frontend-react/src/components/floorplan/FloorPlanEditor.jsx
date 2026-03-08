@@ -53,6 +53,7 @@ export default function FloorPlanEditor({
   // Compliance
   const [complianceResult, setComplianceResult] = useState(null);
   const [complianceLoading, setComplianceLoading] = useState(false);
+  const [showCompliance, setShowCompliance] = useState(false);
   const complianceTimerRef = useRef(null);
 
   // Drag and Drop state
@@ -505,11 +506,10 @@ export default function FloorPlanEditor({
         switch (e.key) {
           case 'v': case 'V': setActiveTool('select'); return;
           case 'w': setActiveTool('wall'); return;
-          case 'r': setActiveTool('room'); return;
           case 'd': setActiveTool('door'); return;
           case 'o': setActiveTool('window'); return;
           case 'x': case 'X': setActiveTool('delete'); return;
-          case 'm': setActiveTool('measure'); return;
+          case 'c': case 'C': setShowCompliance(!showCompliance); return;
           case 'Escape':
             if (wallDrawStart) {
               setWallDrawStart(null);
@@ -698,10 +698,7 @@ export default function FloorPlanEditor({
   return (
     <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
       <div className="floorplan-editor">
-        {/* Left Drag/Drop Catalog */}
-        <DragDropCatalog />
-
-        {/* Toolbar */}
+        {/* Toolbar - No Catalog */}
         <EditorToolbar
           activeTool={activeTool}
           onToolChange={setActiveTool}
@@ -848,16 +845,30 @@ export default function FloorPlanEditor({
           )}
         </div>
 
-        {/* Right compliance panel */}
-        <CompliancePanel
-          complianceResult={complianceResult}
-          selectedElementId={selectedElementId}
-          onRuleClick={(elementId) => {
-            setSelectedElementId(elementId);
-            setSelectedElementType(null);
-          }}
-          loading={complianceLoading}
-        />
+        {/* Right compliance panel - Collapsible */}
+        {showCompliance && (
+          <CompliancePanel
+            complianceResult={complianceResult}
+            selectedElementId={selectedElementId}
+            onRuleClick={(elementId) => {
+              setSelectedElementId(elementId);
+              setSelectedElementType(null);
+            }}
+            loading={complianceLoading}
+            onClose={() => setShowCompliance(false)}
+          />
+        )}
+
+        {/* Compliance toggle button */}
+        {!showCompliance && (
+          <button
+            className="compliance-toggle-btn"
+            onClick={() => setShowCompliance(true)}
+            title="Show Compliance Panel (C)"
+          >
+            ⚠️
+          </button>
+        )}
       </div>
 
       <DragOverlay dropAnimation={{ duration: 250, easing: 'cubic-bezier(0.18, 0.67, 0.6, 1.22)' }}>

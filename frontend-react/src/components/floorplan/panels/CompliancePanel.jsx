@@ -15,13 +15,17 @@ export default function CompliancePanel({
   selectedElementId,
   onRuleClick,
   loading,
+  onClose,
 }) {
   const [expandedRule, setExpandedRule] = useState(null);
 
   if (!complianceResult) {
     return (
       <div className="floorplan-compliance-panel">
-        <h3>OBC Compliance</h3>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-md)' }}>
+          <h3 style={{ margin: 0 }}>OBC Compliance</h3>
+          {onClose && <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '18px', color: 'var(--text-secondary)' }}>✕</button>}
+        </div>
         <div className="compliance-empty-state">
           Upload a DXF floor plan to check interior compliance
         </div>
@@ -53,10 +57,13 @@ export default function CompliancePanel({
 
   return (
     <div className="floorplan-compliance-panel">
-      <h3>
-        OBC Compliance
-        {loading && <span className="compliance-loading-dot" />}
-      </h3>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-md)' }}>
+        <h3 style={{ margin: 0 }}>
+          OBC Compliance
+          {loading && <span className="compliance-loading-dot" />}
+        </h3>
+        {onClose && <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '18px', color: 'var(--text-secondary)' }}>✕</button>}
+      </div>
 
       {/* Overall status */}
       <div className={`compliance-status ${allPass ? 'pass' : 'fail'}`}>
