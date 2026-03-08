@@ -9,7 +9,14 @@ from app.worker import celery_app
 logger = structlog.get_logger()
 
 
-@celery_app.task(bind=True, name="app.tasks.export.run_export")
+@celery_app.task(
+    bind=True,
+    name="app.tasks.export.run_export",
+    autoretry_for=(ConnectionError, TimeoutError),
+    retry_backoff=True,
+    retry_jitter=True,
+    retry_kwargs={"max_retries": 3},
+)
 def run_export(self, job_id: str, project_id: str, params: dict | None = None):
     """Generate an export package (PDF, CSV, spreadsheet, 3D).
 

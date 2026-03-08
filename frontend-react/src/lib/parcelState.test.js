@@ -19,6 +19,7 @@ test('buildParcelState returns a resolved parcel when the backend returns a matc
   assert.equal(parcel.status, 'resolved');
   assert.equal(parcel.id, 'parcel-1');
   assert.equal(parcel.zoning, 'CR');
+  assert.equal(parcel.zoneCode, 'cr');
   assert.equal(parcel.lotArea, 412.5);
   assert.equal(isResolvedParcel(parcel), true);
   assert.equal(isUnresolvedParcel(parcel), false);
@@ -33,6 +34,7 @@ test('buildParcelState returns an unresolved parcel when there is no backend mat
   assert.equal(parcel.status, 'unresolved');
   assert.equal(parcel.id, null);
   assert.equal(parcel.zoning, null);
+  assert.equal(parcel.zoneCode, null);
   assert.match(parcel.message, /No backend parcel match/i);
   assert.equal(isResolvedParcel(parcel), false);
   assert.equal(isUnresolvedParcel(parcel), true);

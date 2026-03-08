@@ -38,8 +38,9 @@ ADDRESS_TEXT_FIELDS = ("address_text", "ADDRESS_FULL", "full_address", "ADDRESS"
 ADDRESS_PIN_FIELDS = ("pin", "PIN", "parcel_pin", "parcel_id")
 ADDRESS_LAT_FIELDS = ("lat", "LAT", "latitude", "LATITUDE", "y", "Y")
 ADDRESS_LON_FIELDS = ("lon", "LON", "longitude", "LONGITUDE", "x", "X")
+ADDRESS_GEOMETRY_FIELDS = ("geometry", "GEOMETRY", "geom", "GEOM", "wkt", "WKT")
 
-ZONING_CODE_FIELDS = ("zone_code", "ZONE_CODE", "zone", "ZONE", "label", "LABEL", "ZN_ZONE", "ZN_STRING", "GEN_ZONE")
+ZONING_CODE_FIELDS = ("ZN_STRING", "zone_code", "ZONE_CODE", "zone", "ZONE", "label", "LABEL", "ZN_ZONE", "GEN_ZONE")
 
 
 @dataclass
@@ -83,6 +84,96 @@ def _pick(properties: dict[str, Any], aliases: Iterable[str]) -> Any:
     for alias in aliases:
         if alias in properties and properties[alias] not in (None, ""):
             return properties[alias]
+    return None
+
+
+def _normalize_text_value(value: Any) -> str | None:
+    if value in (None, ""):
+        return None
+    text = str(value).strip()
+    if not text or text.lower() in {"none", "null", "nan"}:
+        return None
+    return text
+
+
+def _pick_zone_code(properties: dict[str, Any]) -> str | None:
+    zone_code = _pick(properties, ZONING_CODE_FIELDS)
+    if zone_code in (None, ""):
+        return None
+    return str(zone_code).strip()
+
+
+def _compose_address_text(properties: dict[str, Any]) -> str | None:
+    address_text = _normalize_text_value(_pick(properties, ADDRESS_TEXT_FIELDS))
+    if address_text:
+        return address_text
+
+    address_number = _normalize_text_value(_pick(properties, ("ADDRESS_NUMBER", "address_number", "STREET_NUM")))
+    street_full = _normalize_text_value(
+        _pick(properties, ("LINEAR_NAME_FULL", "linear_name_full", "STREET_NAME_FULL", "street_name_full"))
+    )
+    if address_number and street_full:
+        return f"{address_number} {street_full}"
+
+    street_name = _normalize_text_value(_pick(properties, ("STREET_NAME", "street_name", "LINEAR_NAME")))
+    street_type = _normalize_text_value(_pick(properties, ("STREET_TYPE", "street_type", "LINEAR_NAME_TYPE")))
+    street_dir = _normalize_text_value(_pick(properties, ("STREET_DIRECTION", "street_direction", "LINEAR_NAME_DIR")))
+    parts = [part for part in (address_number, street_name, street_type, street_dir) if part]
+    if parts:
+        return " ".join(parts)
+
+    return None
+
+
+def _parse_geometry_value(value: Any) -> str | None:
+    if value in (None, ""):
+        return None
+
+    if isinstance(value, dict):
+        return geojson_to_wkt(value)
+
+    text = str(value).strip()
+    if not text or text.lower() in {"none", "null", "nan"}:
+        return None
+
+    if text.upper().startswith("SRID=") and ";" in text:
+        text = text.split(";", 1)[1].strip()
+
+    upper_text = text.upper()
+    if upper_text.startswith(("POINT", "MULTIPOINT", "LINESTRING", "POLYGON", "MULTIPOLYGON")):
+        return text
+
+    if text.startswith("{"):
+        try:
+            payload = json.loads(text)
+        except json.JSONDecodeError:
+            return None
+        if isinstance(payload, dict) and payload.get("type"):
+            return geojson_to_wkt(payload)
+
+    return None
+
+
+def _normalize_decision(value: Any) -> str | None:
+    if value in (None, "", "null"):
+        return None
+
+    normalized = re.sub(r"\s+", " ", str(value).strip()).lower()
+    if not normalized:
+        return None
+
+    if "conditional" in normalized and "approved" in normalized:
+        return "conditionally approved"
+    if "approved" in normalized:
+        return "approved"
+    if "refused" in normalized or "denied" in normalized:
+        return "refused"
+    if "withdrawn" in normalized or "abandoned" in normalized:
+        return "withdrawn"
+    if "appeal" in normalized:
+        return "appealed"
+    if any(token in normalized for token in ("pending", "active", "circulated", "review")):
+        return "pending"
     return None
 
 
@@ -350,8 +441,12 @@ def link_address_file(
         for index, row in enumerate(rows):
             properties = row.get("properties") if isinstance(row, dict) and "properties" in row else row
             geometry = row.get("geometry") if isinstance(row, dict) and "geometry" in row else None
-            source_record_id = str(row.get("id") or _pick(properties, ("id", "ID", "OBJECTID")) or index)
-            address_text = _pick(properties, ADDRESS_TEXT_FIELDS)
+            source_record_id = str(
+                row.get("id")
+                or _pick(properties, ("id", "ID", "OBJECTID", "ADDRESS_POINT_ID", "ADDRESS_ID"))
+                or index
+            )
+            address_text = _compose_address_text(properties)
             if not address_text:
                 summary.failed += 1
                 summary.issues.append(
@@ -379,10 +474,14 @@ def link_address_file(
                 if geometry:
                     point_geom = WKTElement(geojson_to_wkt(geometry), srid=4326)
                 else:
-                    lat = _coerce_float(_pick(properties, ADDRESS_LAT_FIELDS))
-                    lon = _coerce_float(_pick(properties, ADDRESS_LON_FIELDS))
-                    if lat is not None and lon is not None:
-                        point_geom = WKTElement(f"POINT ({lon} {lat})", srid=4326)
+                    geometry_wkt = _parse_geometry_value(_pick(properties, ADDRESS_GEOMETRY_FIELDS))
+                    if geometry_wkt is not None:
+                        point_geom = WKTElement(geometry_wkt, srid=4326)
+                    else:
+                        lat = _coerce_float(_pick(properties, ADDRESS_LAT_FIELDS))
+                        lon = _coerce_float(_pick(properties, ADDRESS_LON_FIELDS))
+                        if lat is not None and lon is not None:
+                            point_geom = WKTElement(f"POINT ({lon} {lat})", srid=4326)
 
                 if point_geom is not None:
                     parcels = db.execute(
@@ -514,17 +613,22 @@ def ingest_zoning_geojson(
         for index, feature in enumerate(features):
             properties = feature.get("properties") or {}
             geometry = feature.get("geometry") or {}
-            zone_code = _pick(properties, ZONING_CODE_FIELDS)
+            zone_code = _pick_zone_code(properties)
             if not zone_code:
                 summary.failed += 1
                 summary.issues.append({"row": index, "reason": "missing_zone_code"})
                 continue
 
+            base_zone_code = _pick(properties, ("ZN_ZONE", "GEN_ZONE", "zone", "ZONE"))
+            attributes_json = {**properties, "zone_code": str(zone_code)}
+            if base_zone_code not in (None, ""):
+                attributes_json["base_zone_code"] = str(base_zone_code).strip()
+
             dataset_feature = DatasetFeature(
                 dataset_layer_id=layer.id,
                 source_record_id=str(feature.get("id") or _pick(properties, ("id", "ID", "OBJECTID")) or index),
                 geom=WKTElement(geojson_to_wkt(geometry), srid=4326),
-                attributes_json={**properties, "zone_code": str(zone_code)},
+                attributes_json=attributes_json,
             )
             db.add(dataset_feature)
             summary.processed += 1
@@ -743,7 +847,7 @@ def ingest_development_applications(
 ) -> tuple[SourceSnapshot, IngestionJob]:
     from pyproj import Transformer
 
-    transformer = Transformer.from_crs("EPSG:26917", "EPSG:4326", always_xy=True)
+    transformer = Transformer.from_crs("EPSG:2952", "EPSG:4326", always_xy=True)
 
     records: list[dict[str, Any]] = json.loads(json_path.read_text())
     snapshot = create_snapshot(
@@ -773,6 +877,7 @@ def ingest_development_applications(
                 summary.failed += 1
                 summary.issues.append({"row": index, "reason": "missing_app_number"})
                 continue
+            app_number = str(app_number).strip()
             if app_number in seen_app_numbers:
                 summary.failed += 1
                 summary.issues.append({"row": index, "reason": "duplicate_app_number", "app_number": app_number})
@@ -820,17 +925,11 @@ def ingest_development_applications(
                 if matched:
                     parcel_id = matched.id
 
-            # Parse decision from STATUS or explicit DECISION field
-            decision = record.get("DECISION")
+            # Normalize decision from explicit field or status fallback
+            decision = _normalize_decision(record.get("DECISION"))
+            status_value = str(record.get("STATUS") or "unknown").strip() or "unknown"
             if not decision:
-                status_val = record.get("STATUS") or ""
-                status_lower = status_val.lower()
-                if "approved" in status_lower:
-                    decision = "Approved"
-                elif "refused" in status_lower or "denied" in status_lower:
-                    decision = "Refused"
-                elif "withdrawn" in status_lower:
-                    decision = "Withdrawn"
+                decision = _normalize_decision(status_value)
 
             # Parse dates
             submitted_at = None
@@ -859,28 +958,56 @@ def ingest_development_applications(
                 }
             }
 
-            dev_app = DevelopmentApplication(
-                jurisdiction_id=jurisdiction_id,
-                app_number=app_number,
-                source_system="toronto_open_data",
-                source_url=record.get("APPLICATION_URL"),
-                address=address,
-                parcel_id=parcel_id,
-                geom=point_geom,
-                app_type=record.get("APPLICATION_TYPE") or "unknown",
-                status=record.get("STATUS") or "unknown",
-                decision=decision,
-                submitted_at=submitted_at,
-                decision_date=decision_date,
-                ward=ward,
-                proposed_units=proposed_units,
-                proposed_height_m=float(proposed_storeys * 3) if proposed_storeys else None,
-                publisher=publisher,
-                acquired_at=_now(),
-                source_schema_version="toronto-open-data-json",
-                metadata_json=metadata,
-            )
-            db.add(dev_app)
+            existing = db.execute(
+                select(DevelopmentApplication).where(
+                    DevelopmentApplication.jurisdiction_id == jurisdiction_id,
+                    DevelopmentApplication.app_number == app_number,
+                )
+            ).scalar_one_or_none()
+
+            if existing:
+                existing.source_system = "toronto_open_data"
+                existing.source_url = record.get("APPLICATION_URL") or existing.source_url
+                existing.address = address or existing.address
+                existing.parcel_id = parcel_id or existing.parcel_id
+                existing.geom = point_geom or existing.geom
+                existing.app_type = record.get("APPLICATION_TYPE") or existing.app_type or "unknown"
+                existing.status = status_value
+                existing.decision = decision or existing.decision
+                existing.submitted_at = submitted_at or existing.submitted_at
+                existing.decision_date = decision_date or existing.decision_date
+                existing.ward = ward or existing.ward
+                existing.proposed_units = proposed_units if proposed_units is not None else existing.proposed_units
+                existing.proposed_height_m = (
+                    float(proposed_storeys * 3) if proposed_storeys else existing.proposed_height_m
+                )
+                existing.publisher = publisher or existing.publisher
+                existing.acquired_at = _now()
+                existing.source_schema_version = "toronto-open-data-json"
+                existing.metadata_json = metadata
+            else:
+                dev_app = DevelopmentApplication(
+                    jurisdiction_id=jurisdiction_id,
+                    app_number=app_number,
+                    source_system="toronto_open_data",
+                    source_url=record.get("APPLICATION_URL"),
+                    address=address,
+                    parcel_id=parcel_id,
+                    geom=point_geom,
+                    app_type=record.get("APPLICATION_TYPE") or "unknown",
+                    status=status_value,
+                    decision=decision,
+                    submitted_at=submitted_at,
+                    decision_date=decision_date,
+                    ward=ward,
+                    proposed_units=proposed_units,
+                    proposed_height_m=float(proposed_storeys * 3) if proposed_storeys else None,
+                    publisher=publisher,
+                    acquired_at=_now(),
+                    source_schema_version="toronto-open-data-json",
+                    metadata_json=metadata,
+                )
+                db.add(dev_app)
             summary.processed += 1
 
         publish_snapshot(db, snapshot, validation_summary=summary.as_json())

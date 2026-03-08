@@ -135,6 +135,32 @@ def parse_zone_string(zone_string: str) -> ZoneComponents:
     )
 
 
+def extract_zone_category(zone_string: str | None) -> str | None:
+    """Return the normalized base zone category for a zone string when possible."""
+    if not zone_string or not zone_string.strip():
+        return None
+
+    raw = zone_string.strip()
+    try:
+        return parse_zone_string(raw).category
+    except ValueError:
+        match = _CATEGORY_RE.match(raw)
+        return match.group(1).upper() if match else None
+
+
+def build_zone_matching_tokens(zone_string: str | None) -> list[str]:
+    """Return exact and normalized tokens that can be used for zone matching."""
+    if not zone_string or not zone_string.strip():
+        return []
+
+    raw = zone_string.strip()
+    tokens = [raw]
+    category = extract_zone_category(raw)
+    if category and category not in tokens:
+        tokens.append(category)
+    return tokens
+
+
 def get_zone_standards(components: ZoneComponents) -> ZoneStandards:
     """Look up deterministic standards for parsed zone components.
 

@@ -12,6 +12,7 @@ class UploadResponse(BaseModel):
     content_type: str
     file_size_bytes: int
     location: str = Field(description="URL to poll for upload status")
+    extracted_data: dict | None = None
 
 
 class UploadDetail(BaseModel):

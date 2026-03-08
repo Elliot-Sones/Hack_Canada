@@ -24,7 +24,13 @@ def upgrade() -> None:
     # =========================================================================
     op.execute('CREATE EXTENSION IF NOT EXISTS "uuid-ossp"')
     op.execute('CREATE EXTENSION IF NOT EXISTS "postgis"')
-    op.execute('CREATE EXTENSION IF NOT EXISTS "vector"')
+    op.execute("""
+        DO $$ BEGIN
+            CREATE EXTENSION IF NOT EXISTS "vector";
+        EXCEPTION WHEN OTHERS THEN
+            RAISE NOTICE 'pgvector not available, skipping';
+        END $$;
+    """)
 
     # =========================================================================
     # 1. TENANT AND PROJECT MODEL
@@ -268,17 +274,26 @@ def upgrade() -> None:
         "ALTER TABLE policy_clauses ADD CONSTRAINT chk_policy_clauses_confidence "
         "CHECK (confidence >= 0.0 AND confidence <= 1.0)"
     )
-    # Add vector column via raw SQL
-    op.execute("ALTER TABLE policy_clauses ADD COLUMN embedding vector(384)")
+    # Add vector column via raw SQL (skip if pgvector unavailable)
+    op.execute("""
+        DO $$ BEGIN
+            ALTER TABLE policy_clauses ADD COLUMN embedding vector(384);
+        EXCEPTION WHEN OTHERS THEN
+            RAISE NOTICE 'pgvector not available, skipping embedding column on policy_clauses';
+        END $$;
+    """)
     op.create_index("idx_policy_clauses_version", "policy_clauses", ["policy_version_id"])
     op.create_index("idx_policy_clauses_type", "policy_clauses", ["normalized_type"])
     op.execute(
         "CREATE INDEX idx_policy_clauses_review ON policy_clauses (needs_review) WHERE needs_review = true"
     )
-    op.execute(
-        "CREATE INDEX idx_policy_clauses_embedding ON policy_clauses "
-        "USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100)"
-    )
+    op.execute("""
+        DO $$ BEGIN
+            EXECUTE 'CREATE INDEX idx_policy_clauses_embedding ON policy_clauses USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100)';
+        EXCEPTION WHEN OTHERS THEN
+            RAISE NOTICE 'skipping embedding index on policy_clauses';
+        END $$;
+    """)
     op.execute(
         "CREATE INDEX idx_policy_clauses_text ON policy_clauses "
         "USING GIN (to_tsvector('english', raw_text))"
@@ -434,13 +449,22 @@ def upgrade() -> None:
         "ALTER TABLE application_documents ADD CONSTRAINT chk_app_docs_doc_type "
         "CHECK (doc_type IN ('staff_report', 'planning_rationale', 'drawings', 'data_sheet', 'decision_letter', 'other'))"
     )
-    # Add vector column via raw SQL
-    op.execute("ALTER TABLE application_documents ADD COLUMN embedding vector(384)")
+    # Add vector column via raw SQL (skip if pgvector unavailable)
+    op.execute("""
+        DO $$ BEGIN
+            ALTER TABLE application_documents ADD COLUMN embedding vector(384);
+        EXCEPTION WHEN OTHERS THEN
+            RAISE NOTICE 'pgvector not available, skipping embedding column on application_documents';
+        END $$;
+    """)
     op.create_index("idx_app_docs_application", "application_documents", ["application_id"])
-    op.execute(
-        "CREATE INDEX idx_app_docs_embedding ON application_documents "
-        "USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100)"
-    )
+    op.execute("""
+        DO $$ BEGIN
+            EXECUTE 'CREATE INDEX idx_app_docs_embedding ON application_documents USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100)';
+        EXCEPTION WHEN OTHERS THEN
+            RAISE NOTICE 'skipping embedding index on application_documents';
+        END $$;
+    """)
 
     op.create_table(
         "rationale_extracts",
@@ -459,13 +483,22 @@ def upgrade() -> None:
         "ALTER TABLE rationale_extracts ADD CONSTRAINT chk_rationale_extracts_confidence "
         "CHECK (confidence >= 0.0 AND confidence <= 1.0)"
     )
-    # Add vector column via raw SQL
-    op.execute("ALTER TABLE rationale_extracts ADD COLUMN embedding vector(384)")
+    # Add vector column via raw SQL (skip if pgvector unavailable)
+    op.execute("""
+        DO $$ BEGIN
+            ALTER TABLE rationale_extracts ADD COLUMN embedding vector(384);
+        EXCEPTION WHEN OTHERS THEN
+            RAISE NOTICE 'pgvector not available, skipping embedding column on rationale_extracts';
+        END $$;
+    """)
     op.create_index("idx_rationale_doc", "rationale_extracts", ["application_document_id"])
-    op.execute(
-        "CREATE INDEX idx_rationale_embedding ON rationale_extracts "
-        "USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100)"
-    )
+    op.execute("""
+        DO $$ BEGIN
+            EXECUTE 'CREATE INDEX idx_rationale_embedding ON rationale_extracts USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100)';
+        EXCEPTION WHEN OTHERS THEN
+            RAISE NOTICE 'skipping embedding index on rationale_extracts';
+        END $$;
+    """)
 
     # =========================================================================
     # 6. SIMULATION, MASSING, AND LAYOUT

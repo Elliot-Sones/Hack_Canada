@@ -9,8 +9,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from sqlalchemy.orm import Session
-
 from app.data.toronto_zoning import BICYCLE_PARKING, PARKING_STANDARDS, AMENITY_SPACE
 from app.models.geospatial import Parcel
 from app.services.zoning_parser import ZoneComponents, ZoneStandards, get_zone_standards, parse_zone_string
@@ -33,11 +31,11 @@ class ZoningAnalysis:
     warnings: list[str] = field(default_factory=list)
 
 
-def get_zoning_analysis_sync(
-    db: Session,
+def build_zoning_analysis(
     parcel: Parcel,
     parking_policy_area: str = "PA3",
     overlay_data: list[dict] | None = None,
+    zoning_assignment_count: int | None = None,
 ) -> ZoningAnalysis:
     """Build a complete deterministic zoning analysis for a parcel.
 
@@ -58,6 +56,11 @@ def get_zoning_analysis_sync(
     else:
         warnings.append("Parcel has no zone_code — zoning standards unavailable")
 
+    if zoning_assignment_count and zoning_assignment_count > 1:
+        warnings.append(
+            "Multiple zoning areas intersect this parcel — verify the parcel map and by-law schedule before relying on a single primary zone"
+        )
+
     if standards and standards.exception_number:
         warnings.append(
             f"Site-specific exception (x{standards.exception_number}) may modify standards — "
@@ -67,6 +70,11 @@ def get_zoning_analysis_sync(
     if standards and standards.has_site_specific_height:
         warnings.append(
             "Site-specific height provision detected — actual height limit may differ from base zone"
+        )
+
+    if parcel.lot_frontage_m is None or parcel.lot_depth_m is None:
+        warnings.append(
+            "Parcel frontage/depth data is missing — setback and envelope guidance may be incomplete"
         )
 
     # Parking standards
@@ -91,6 +99,12 @@ def get_zoning_analysis_sync(
             elif layer_type == "environmental":
                 constraint["impact"] = "Environmental constraint — ESA/ANSI review required"
                 constraint["affects"] = ["setbacks", "lot_coverage", "grading"]
+            elif layer_type == "height_overlay":
+                constraint["impact"] = "Height Overlay applies — verify mapped height provisions before relying on base zoning"
+                constraint["affects"] = ["height", "massing"]
+            elif layer_type == "setback_overlay":
+                constraint["impact"] = "Building Setback Overlay applies — verify overlay-specific setback schedules"
+                constraint["affects"] = ["setbacks", "building_envelope"]
 
             overlay_constraints.append(constraint)
 
@@ -106,4 +120,21 @@ def get_zoning_analysis_sync(
         amenity_space=dict(AMENITY_SPACE),
         overlay_constraints=overlay_constraints,
         warnings=warnings,
+    )
+
+
+def get_zoning_analysis_sync(
+    db,
+    parcel: Parcel,
+    parking_policy_area: str = "PA3",
+    overlay_data: list[dict] | None = None,
+    zoning_assignment_count: int | None = None,
+) -> ZoningAnalysis:
+    """Sync compatibility wrapper for existing task code."""
+    del db
+    return build_zoning_analysis(
+        parcel,
+        parking_policy_area=parking_policy_area,
+        overlay_data=overlay_data,
+        zoning_assignment_count=zoning_assignment_count,
     )

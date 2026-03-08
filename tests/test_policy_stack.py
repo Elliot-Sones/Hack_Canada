@@ -5,7 +5,7 @@ import pytest
 
 from app.dependencies import get_db_session
 from app.main import app
-from app.services.policy_stack import PolicyStackRecord, build_policy_stack_response
+from app.services.policy_stack import PolicyStackRecord, build_policy_stack_response, get_policy_zone_tokens
 
 
 def test_build_policy_stack_response_orders_by_precedence_and_deduplicates_snapshots():
@@ -67,13 +67,19 @@ def test_build_policy_stack_response_orders_by_precedence_and_deduplicates_snaps
 
 
 @pytest.mark.anyio
-async def test_parcel_policy_stack_returns_404_when_parcel_missing(client):
-    class MissingParcelSession:
-        async def get(self, model, key):
-            return None
-
+async def test_parcel_policy_stack_returns_404_when_parcel_missing(client, monkeypatch):
     async def override_db():
-        yield MissingParcelSession()
+        yield object()
+
+    async def fake_list_active_snapshot_ids(_db, _snapshot_type):
+        return []
+
+    async def fake_get_active_parcel_by_id(_db, _parcel_id, active_snapshot_ids=None):
+        assert active_snapshot_ids == []
+        return None
+
+    monkeypatch.setattr("app.routers.parcels.list_active_snapshot_ids", fake_list_active_snapshot_ids)
+    monkeypatch.setattr("app.routers.parcels.get_active_parcel_by_id", fake_get_active_parcel_by_id)
 
     app.dependency_overrides[get_db_session] = override_db
     try:
@@ -83,3 +89,10 @@ async def test_parcel_policy_stack_returns_404_when_parcel_missing(client):
 
     assert response.status_code == 404
     assert response.json()["detail"] == "Parcel not found"
+
+
+def test_get_policy_zone_tokens_include_full_string_and_base_category():
+    tokens = get_policy_zone_tokens("CR 3.0 (c2.0; r2.5) SS2 (x345)")
+
+    assert tokens[0] == "CR 3.0 (c2.0; r2.5) SS2 (x345)"
+    assert "CR" in tokens

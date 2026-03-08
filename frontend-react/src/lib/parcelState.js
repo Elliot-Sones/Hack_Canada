@@ -5,8 +5,8 @@ function getDisplayAddress(location) {
   return location?.shortAddress || location?.address || 'Selected location';
 }
 
-// Toronto zone codes are stored as full bylaw strings like "CR 4.0 (c3.0; r4.0) SS1 (x2315)".
-// Extract the leading alphabetic prefix ("CR", "R", "RM", etc.) for ZONING_DATA lookup.
+// Preserve the full zone string when we have it, but also expose a short category label
+// for compact chips and UI affordances.
 function normalizeZoneCode(zoneCode) {
   if (typeof zoneCode !== 'string') return null;
   const match = zoneCode.trim().match(/^([A-Za-z]+)/);
@@ -14,12 +14,14 @@ function normalizeZoneCode(zoneCode) {
 }
 
 export function createResolvedParcel(location, parcelMatch) {
+  const zoneCode = parcelMatch?.zone_code ?? parcelMatch?.zoning ?? null;
   return {
     status: 'resolved',
     id: parcelMatch.id,
     address: getDisplayAddress(location),
     fullAddress: location?.address || getDisplayAddress(location),
-    zoning: normalizeZoneCode(parcelMatch?.zone_code ?? parcelMatch?.zoning),
+    zoning: normalizeZoneCode(zoneCode),
+    zoneCode,
     lotArea: Number.isFinite(parcelMatch?.lot_area_m2) ? parcelMatch.lot_area_m2 : null,
     geom: parcelMatch?.geom || null,
   };
@@ -32,6 +34,7 @@ export function createUnresolvedParcel(location, message = DEFAULT_UNRESOLVED_ME
     address: getDisplayAddress(location),
     fullAddress: location?.address || getDisplayAddress(location),
     zoning: null,
+    zoneCode: null,
     lotArea: null,
     message,
   };
@@ -57,7 +60,7 @@ export function formatParcelContext(parcel) {
   if (!isResolvedParcel(parcel)) return null;
 
   const parts = [`Current parcel: ${parcel.address}`];
-  if (parcel.zoning) parts.push(`Zoning: ${parcel.zoning}`);
+  if (parcel.zoneCode || parcel.zoning) parts.push(`Zoning: ${parcel.zoneCode || parcel.zoning}`);
   if (Number.isFinite(parcel.lotArea)) parts.push(`Lot Area: ${parcel.lotArea}m²`);
   return parts.join(', ');
 }

@@ -1,5 +1,16 @@
 # Hack Canada — Arterial Platform
 
+## Auto-Update Rule for index.md
+
+**After every file edit, creation, or deletion**, update `index.md` at the project root to reflect the change. The update should:
+- Add new files with their path and a 1-line purpose description in the appropriate section
+- Update the entry for modified files if their purpose or API surface changed
+- Remove entries for deleted files
+- Keep the "Last updated" date current
+- Do NOT rewrite the whole file — only edit the relevant section(s)
+
+This rule applies to all agents and Claude sessions working on this codebase.
+
 Land-development due diligence platform for Toronto / Ontario.
 Generates planning submission packages (planning rationale, compliance matrix, precedent report, etc.) from a plain-English development query.
 

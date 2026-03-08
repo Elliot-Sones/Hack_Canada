@@ -94,6 +94,18 @@ async def get_current_user(
     }
 
 
+async def get_optional_user(
+    authorization: str | None = Header(None),
+    db: AsyncSession = Depends(get_db_session),
+) -> dict | None:
+    if not authorization:
+        return None
+    try:
+        return await get_current_user(authorization, db)
+    except HTTPException:
+        return None
+
+
 async def get_optional_idempotency_key(
     idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
 ) -> str | None:

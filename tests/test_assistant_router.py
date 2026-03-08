@@ -45,9 +45,13 @@ async def test_assistant_chat_uses_backend_provider(client, monkeypatch):
     )
 
     assert response.status_code == 200
-    assert response.json() == {"message": "Server-side answer"}
+    assert response.json() == {
+        "message": "Server-side answer",
+        "model_update": None,
+        "proposed_action": None,
+    }
     assert len(fake_provider.calls) == 1
-    assert "Parcel context:\nCurrent parcel: 123 King St W, Zoning: CR 3.0" in fake_provider.calls[0]["prompt"]
+    assert "Current site context:\nCurrent parcel: 123 King St W, Zoning: CR 3.0" in fake_provider.calls[0]["prompt"]
     assert "User: What setbacks apply?" in fake_provider.calls[0]["prompt"]
     assert fake_provider.calls[0]["system"] == assistant_router.SYSTEM_PROMPT
-    assert fake_provider.calls[0]["max_tokens"] == 1024
+    assert fake_provider.calls[0]["max_tokens"] == 1500

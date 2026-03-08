@@ -9,13 +9,14 @@ import {
   makeCircularFootprint,
   subdivideFootprintIntoUnits,
 } from '../lib/buildingGeometry.js';
+import BlueprintOverlay from './BlueprintOverlay.jsx';
 import FloorPlanView from './FloorPlanView.jsx';
 import {
   createBranch,
   listBranches,
   commitVersion,
   listVersions,
-  getLatestVersion,
+  getUploadPages,
 } from '../api.js';
 import '../ModelViewer.css';
 
@@ -274,7 +275,17 @@ function Ground() {
 
 // ─── Scene wrapper ─────────────────────────────────────────────────────────────
 
-function Scene({ parcelGeoJSON, params, controlsRef, viewMode, floorPlans, activeFloor, selectedRoom, onRoomClick }) {
+function Scene({
+  parcelGeoJSON,
+  params,
+  controlsRef,
+  viewMode,
+  floorPlans,
+  blueprintPages,
+  activeFloor,
+  selectedRoom,
+  onRoomClick,
+}) {
   return (
     <>
       <ambientLight intensity={0.4} />
@@ -305,6 +316,12 @@ function Scene({ parcelGeoJSON, params, controlsRef, viewMode, floorPlans, activ
             activeFloor={activeFloor}
             selectedRoom={selectedRoom}
             onRoomClick={onRoomClick}
+          />
+        )}
+        {viewMode === 'blueprint' && blueprintPages?.length > 0 && (
+          <BlueprintOverlay
+            pages={blueprintPages}
+            activeFloor={activeFloor}
           />
         )}
       </Suspense>
@@ -429,7 +446,7 @@ function RoomInfoPanel({ room, onClose }) {
 
 export default function ModelViewer({
   isOpen, onClose, parcelGeoJSON, modelParams, isPanelOpen, isSidebarCollapsed, isChatExpanded,
-  floorPlans, projectId, parcelId,
+  floorPlans, blueprintPages: blueprintPagesProp, projectId, parcelId,
 }) {
   const controlsRef = useRef(null);
   const params = modelParams || DEFAULT_PARAMS;
@@ -453,6 +470,14 @@ export default function ModelViewer({
   // Track uncommitted changes
   const [uncommittedFloorPlans, setUncommittedFloorPlans] = useState(null);
   const [uncommittedModelParams, setUncommittedModelParams] = useState(null);
+  const [blueprintPages, setBlueprintPages] = useState(blueprintPagesProp || []);
+
+  const embeddedBlueprintPages = useMemo(() => {
+    if (blueprintPagesProp?.length) return blueprintPagesProp;
+    if (floorPlans?.blueprint_pages?.length) return floorPlans.blueprint_pages;
+    if (floorPlans?.pages?.length) return floorPlans.pages;
+    return [];
+  }, [blueprintPagesProp, floorPlans]);
 
   // Load branches when projectId changes
   useEffect(() => {
@@ -464,6 +489,31 @@ export default function ModelViewer({
       }
     }).catch(() => {});
   }, [projectId, isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return undefined;
+    if (embeddedBlueprintPages.length > 0) {
+      setBlueprintPages(embeddedBlueprintPages);
+      return undefined;
+    }
+    if (!projectId) {
+      setBlueprintPages([]);
+      return undefined;
+    }
+
+    let isCancelled = false;
+    getUploadPages(projectId)
+      .then((pages) => {
+        if (!isCancelled) setBlueprintPages(pages || []);
+      })
+      .catch(() => {
+        if (!isCancelled) setBlueprintPages([]);
+      });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [embeddedBlueprintPages, isOpen, projectId]);
 
   // Load versions when branch changes
   useEffect(() => {
@@ -540,12 +590,6 @@ export default function ModelViewer({
     setShowHistory(false);
   }, []);
 
-  // Floor count for selector
-  const floorCount = useMemo(() => {
-    if (floorPlans?.floor_plans) return floorPlans.floor_plans.length;
-    return params.storeys || 0;
-  }, [floorPlans, params]);
-
   // Change summary for commit modal
   const changeSummary = useMemo(() => {
     if (!currentVersion || !modelParams) return null;
@@ -559,6 +603,28 @@ export default function ModelViewer({
     }
     return changes.length > 0 ? changes.join('; ') : null;
   }, [currentVersion, modelParams]);
+
+  const hasFloorPlans = floorPlans?.floor_plans?.length > 0;
+  const hasBlueprintPages = blueprintPages.length > 0;
+  const selectableFloors = useMemo(() => {
+    if (floorPlans?.floor_plans?.length) {
+      return floorPlans.floor_plans.map((fp) => fp.floor_number);
+    }
+    if (blueprintPages.length > 0) {
+      return blueprintPages.map((_, idx) => idx + 1);
+    }
+    return [];
+  }, [blueprintPages, floorPlans]);
+
+  useEffect(() => {
+    if (viewMode === 'interior' && !hasFloorPlans) {
+      setViewMode(hasBlueprintPages ? 'blueprint' : 'massing');
+      setSelectedRoom(null);
+    }
+    if (viewMode === 'blueprint' && !hasBlueprintPages) {
+      setViewMode(hasFloorPlans ? 'interior' : 'massing');
+    }
+  }, [hasBlueprintPages, hasFloorPlans, viewMode]);
 
   if (!isOpen) return null;
 
@@ -585,8 +651,6 @@ export default function ModelViewer({
   const sidebarW = isSidebarCollapsed ? 52 : 160;
   const panelW = isPanelOpen ? 380 : 0;
   const chatH = isChatExpanded ? 328 : 48;
-
-  const hasFloorPlans = floorPlans?.floor_plans?.length > 0;
 
   return (
     <>
@@ -616,6 +680,7 @@ export default function ModelViewer({
             controlsRef={controlsRef}
             viewMode={viewMode}
             floorPlans={floorPlans}
+            blueprintPages={blueprintPages}
             activeFloor={activeFloor}
             selectedRoom={selectedRoom}
             onRoomClick={setSelectedRoom}
@@ -737,21 +802,27 @@ export default function ModelViewer({
         <div className="model-controls-row">
           {/* View mode toggles */}
           <div className="view-mode-toggle">
-            {['massing', 'interior', 'blueprint'].map((mode) => (
+            {[
+              { key: 'massing', disabled: false, title: '' },
+              { key: 'interior', disabled: !hasFloorPlans, title: 'Upload a DXF to view interior' },
+            ].map((mode) => (
               <button
-                key={mode}
-                className={`model-ctrl-btn ${viewMode === mode ? 'active' : ''}`}
-                onClick={() => setViewMode(mode)}
-                disabled={mode === 'interior' && !hasFloorPlans}
-                title={mode === 'interior' && !hasFloorPlans ? 'Upload a DXF to view interior' : ''}
+                key={mode.key}
+                className={`model-ctrl-btn ${viewMode === mode.key ? 'active' : ''}`}
+                onClick={() => {
+                  setViewMode(mode.key);
+                  if (mode.key !== 'interior') setSelectedRoom(null);
+                }}
+                disabled={mode.disabled}
+                title={mode.disabled ? mode.title : ''}
               >
-                {mode.charAt(0).toUpperCase() + mode.slice(1)}
+                {mode.key.charAt(0).toUpperCase() + mode.key.slice(1)}
               </button>
             ))}
           </div>
 
           {/* Floor selector */}
-          {hasFloorPlans && viewMode !== 'massing' && (
+          {selectableFloors.length > 0 && viewMode !== 'massing' && (
             <div className="floor-selector">
               <button
                 className={`model-ctrl-btn floor-btn ${activeFloor === null ? 'active' : ''}`}
@@ -759,13 +830,13 @@ export default function ModelViewer({
               >
                 All
               </button>
-              {floorPlans.floor_plans.map((fp) => (
+              {selectableFloors.map((floorNumber) => (
                 <button
-                  key={fp.floor_number}
-                  className={`model-ctrl-btn floor-btn ${activeFloor === fp.floor_number ? 'active' : ''}`}
-                  onClick={() => setActiveFloor(fp.floor_number)}
+                  key={floorNumber}
+                  className={`model-ctrl-btn floor-btn ${activeFloor === floorNumber ? 'active' : ''}`}
+                  onClick={() => setActiveFloor(floorNumber)}
                 >
-                  F{fp.floor_number}
+                  F{floorNumber}
                 </button>
               ))}
             </div>

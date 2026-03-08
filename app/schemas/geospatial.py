@@ -122,3 +122,72 @@ class ParcelOverlaysResponse(BaseModel):
     overlays: list[OverlayFeatureResponse] = Field(default_factory=list)
     parcel_metrics: list[ParcelMetricResponse] = Field(default_factory=list)
     snapshots: list[SnapshotReferenceResponse] = Field(default_factory=list)
+
+
+class NearbyApplicationResponse(BaseModel):
+    id: uuid.UUID
+    app_number: str
+    address: str | None = None
+    app_type: str | None = None
+    status: str | None = None
+    decision: str | None = None
+    proposed_height_m: float | None = None
+    proposed_units: int | None = None
+    distance_m: float | None = None
+
+
+class NearbyApplicationsResponse(BaseModel):
+    parcel_id: uuid.UUID
+    applications: list[NearbyApplicationResponse] = Field(default_factory=list)
+    total: int = 0
+
+
+class ZoningComponentsResponse(BaseModel):
+    raw: str
+    category: str
+    density: float | None = None
+    commercial_density: float | None = None
+    residential_density: float | None = None
+    height_suffix: str | None = None
+    exception_number: int | None = None
+
+
+class ZoningStandardsResponse(BaseModel):
+    category: str
+    label: str
+    permitted_uses: list[str] = Field(default_factory=list)
+    max_height_m: float | None = None
+    max_storeys: int | None = None
+    max_fsi: float | None = None
+    min_front_setback_m: float
+    min_rear_setback_m: float
+    min_interior_side_setback_m: float
+    min_exterior_side_setback_m: float
+    max_lot_coverage_pct: float
+    min_landscaping_pct: float
+    bylaw_section: str
+    exception_number: int | None = None
+    has_site_specific_height: bool = False
+    commercial_fsi: float | None = None
+    residential_fsi: float | None = None
+
+
+class ZoningConstraintResponse(BaseModel):
+    layer_type: str | None = None
+    layer_name: str | None = None
+    impact: str | None = None
+    affects: list[str] = Field(default_factory=list)
+
+
+class ZoningAnalysisResponse(BaseModel):
+    parcel_id: uuid.UUID
+    address: str | None = None
+    zone_string: str | None = None
+    components: ZoningComponentsResponse | None = None
+    standards: ZoningStandardsResponse | None = None
+    parking_policy_area: str
+    parking_standards: dict = Field(default_factory=dict)
+    bicycle_parking: dict = Field(default_factory=dict)
+    amenity_space: dict = Field(default_factory=dict)
+    overlay_constraints: list[ZoningConstraintResponse] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)

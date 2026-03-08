@@ -1,18 +1,12 @@
 [
   {
-    "benchmark_id": "toronto-core-template-001",
+    "benchmark_id": "toronto-lowrise-001",
     "verification_status": "template",
-    "source_notes": "Candidate benchmark seed for address-to-parcel and zoning verification. Requires manual verification against Toronto parcel/address and zoning sources before counting toward QA metrics.",
-    "address_input": "100 Queen St W, Toronto, ON",
+    "source_notes": "Low-rise residential candidate seeded from the repo-local Toronto parcel source. Promote only after manual verification of parcel linkage, full zoning string, and frontage/depth coverage.",
+    "address_input": "22 Langside Ave, Toronto, ON",
     "expected_parcel": {
-      "address": "100 Queen St W, Toronto, ON"
-    }
-  },
-  {
-    "benchmark_id": "toronto-core-template-002",
-    "verification_status": "template",
-    "source_notes": "Candidate benchmark seed for parcel-to-policy-stack verification. Requires manually checked citations before promotion to verified.",
-    "address_input": "483 Bay St, Toronto, ON",
+      "address": "22 Langside Ave"
+    },
     "expected_policy_stack": {
       "required_documents": [
         "Zoning By-law 569-2013"
@@ -21,14 +15,213 @@
     }
   },
   {
-    "benchmark_id": "toronto-core-template-003",
+    "benchmark_id": "toronto-lowrise-002",
     "verification_status": "template",
-    "source_notes": "Candidate benchmark seed for scenario validation. Requires planner-reviewed expected constraints and metrics before promotion to verified.",
-    "address_input": "111 Richmond St W, Toronto, ON",
-    "expected_scenario": {
-      "scenario_type": "base",
-      "expected_constraints": [],
-      "expected_metrics": {}
+    "source_notes": "Neighbourhood residential candidate for address-to-parcel and deterministic zoning checks. Confirm the full zone string and any site-specific exceptions before promotion.",
+    "address_input": "36 Tunbridge Cres, Toronto, ON",
+    "expected_parcel": {
+      "address": "36 Tunbridge Cres"
+    },
+    "expected_policy_stack": {
+      "required_documents": [
+        "Zoning By-law 569-2013"
+      ],
+      "required_sections": []
+    }
+  },
+  {
+    "benchmark_id": "toronto-lowrise-003",
+    "verification_status": "template",
+    "source_notes": "Low-rise candidate intended to catch address normalization and parcel lookup regressions. Verify dimensions and active zoning assignment count before treating as a release benchmark.",
+    "address_input": "25 Wanless Ave, Toronto, ON",
+    "expected_parcel": {
+      "address": "25 Wanless Ave"
+    },
+    "expected_policy_stack": {
+      "required_documents": [
+        "Zoning By-law 569-2013"
+      ],
+      "required_sections": []
+    }
+  },
+  {
+    "benchmark_id": "toronto-lowrise-004",
+    "verification_status": "template",
+    "source_notes": "Low-rise parcel candidate sampled from the Toronto property-boundaries seed file. Manually verify the parcel address, base zone category, and any missing parcel metrics before promotion.",
+    "address_input": "112 Spruce St, Toronto, ON",
+    "expected_parcel": {
+      "address": "112 Spruce St"
+    },
+    "expected_policy_stack": {
+      "required_documents": [
+        "Zoning By-law 569-2013"
+      ],
+      "required_sections": []
+    }
+  },
+  {
+    "benchmark_id": "toronto-apartment-001",
+    "verification_status": "template",
+    "source_notes": "Apartment-neighbourhood candidate intended for parcel-to-zoning analysis and review-warning checks. Confirm the full zone string, height permissions, and any overlay warnings before promotion.",
+    "address_input": "12 Doncliffe Dr, Toronto, ON",
+    "expected_parcel": {
+      "address": "12 Doncliffe Dr"
+    },
+    "expected_policy_stack": {
+      "required_documents": [
+        "Zoning By-law 569-2013"
+      ],
+      "required_sections": []
+    }
+  },
+  {
+    "benchmark_id": "toronto-apartment-002",
+    "verification_status": "template",
+    "source_notes": "Apartment / multi-unit area candidate for zoning and policy-stack resolution. Promote only after a manual check of the governing by-law sections and any review-trigger warnings.",
+    "address_input": "59 Shoreham Dr, Toronto, ON",
+    "expected_parcel": {
+      "address": "59 Shoreham Dr"
+    },
+    "expected_policy_stack": {
+      "required_documents": [
+        "Zoning By-law 569-2013"
+      ],
+      "required_sections": []
+    }
+  },
+  {
+    "benchmark_id": "toronto-apartment-003",
+    "verification_status": "template",
+    "source_notes": "Residential parcel candidate sampled for broader benchmark coverage outside the downtown core. Verify parcel linkage, zone assignment count, and any parcel-data gaps before promotion.",
+    "address_input": "154 Meandering Trl, Toronto, ON",
+    "expected_parcel": {
+      "address": "154 Meandering Trl"
+    },
+    "expected_policy_stack": {
+      "required_documents": [
+        "Zoning By-law 569-2013"
+      ],
+      "required_sections": []
+    }
+  },
+  {
+    "benchmark_id": "toronto-corridor-001",
+    "verification_status": "template",
+    "source_notes": "Main-street corridor candidate for mixed-use zoning and policy-stack validation. Confirm the full zoning string, any commercial/residential density split, and overlay presence before promotion.",
+    "address_input": "538 Danforth Ave, Toronto, ON",
+    "expected_parcel": {
+      "address": "538 Danforth Ave"
+    },
+    "expected_policy_stack": {
+      "required_documents": [
+        "Zoning By-law 569-2013"
+      ],
+      "required_sections": []
+    }
+  },
+  {
+    "benchmark_id": "toronto-corridor-002",
+    "verification_status": "template",
+    "source_notes": "Avenue corridor candidate intended to exercise address lookup, zoning parsing, and parcel-level policy retrieval on a likely mixed-use frontage.",
+    "address_input": "888 Avenue Rd, Toronto, ON",
+    "expected_parcel": {
+      "address": "888 Avenue Rd"
+    },
+    "expected_policy_stack": {
+      "required_documents": [
+        "Zoning By-law 569-2013"
+      ],
+      "required_sections": []
+    }
+  },
+  {
+    "benchmark_id": "toronto-corridor-003",
+    "verification_status": "template",
+    "source_notes": "Avenue / corridor candidate for future verified checks of main-street zoning and document applicability. Confirm parcel linkage and zone detail against the Toronto zoning source before promotion.",
+    "address_input": "1393 Davenport Rd, Toronto, ON",
+    "expected_parcel": {
+      "address": "1393 Davenport Rd"
+    },
+    "expected_policy_stack": {
+      "required_documents": [
+        "Zoning By-law 569-2013"
+      ],
+      "required_sections": []
+    }
+  },
+  {
+    "benchmark_id": "toronto-downtown-001",
+    "verification_status": "template",
+    "source_notes": "Downtown parcel candidate intended to surface richer zoning strings, policy coverage, and review-needed warnings once manually verified.",
+    "address_input": "258 John St, Toronto, ON",
+    "expected_parcel": {
+      "address": "258 John St"
+    },
+    "expected_policy_stack": {
+      "required_documents": [
+        "Zoning By-law 569-2013"
+      ],
+      "required_sections": []
+    }
+  },
+  {
+    "benchmark_id": "toronto-central-001",
+    "verification_status": "template",
+    "source_notes": "Central-city candidate for future parcel-to-zoning and policy-stack verification. Promote only after confirming the parcel address, zoning string, and any exception or overlay conditions.",
+    "address_input": "46 Chillery Ave, Toronto, ON",
+    "expected_parcel": {
+      "address": "46 Chillery Ave"
+    },
+    "expected_policy_stack": {
+      "required_documents": [
+        "Zoning By-law 569-2013"
+      ],
+      "required_sections": []
+    }
+  },
+  {
+    "benchmark_id": "toronto-employment-001",
+    "verification_status": "template",
+    "source_notes": "Employment-area candidate sampled from the parcel source to keep the benchmark set from being entirely residential. Verify the parcel linkage, zone family, and policy coverage before promotion.",
+    "address_input": "5000 Jane St, Toronto, ON",
+    "expected_parcel": {
+      "address": "5000 Jane St"
+    },
+    "expected_policy_stack": {
+      "required_documents": [
+        "Zoning By-law 569-2013"
+      ],
+      "required_sections": []
+    }
+  },
+  {
+    "benchmark_id": "toronto-employment-002",
+    "verification_status": "template",
+    "source_notes": "Employment / edge-area candidate intended to catch differences in parcel resolution and zoning coverage outside the central city. Confirm the governing zoning and any overlay constraints before promotion.",
+    "address_input": "42 Futura Dr, Toronto, ON",
+    "expected_parcel": {
+      "address": "42 Futura Dr"
+    },
+    "expected_policy_stack": {
+      "required_documents": [
+        "Zoning By-law 569-2013"
+      ],
+      "required_sections": []
+    }
+  },
+  {
+    "benchmark_id": "toronto-employment-003",
+    "verification_status": "template",
+    "source_notes": "Outer-area parcel candidate for broader address and zoning coverage. Promote only after manual verification of parcel linkage, active zoning assignment, and any policy applicability.",
+    "address_input": "343 Hullmar Dr, Toronto, ON",
+    "expected_parcel": {
+      "address": "343 Hullmar Dr"
+    },
+    "expected_policy_stack": {
+      "required_documents": [
+        "Zoning By-law 569-2013"
+      ],
+      "required_sections": []
     }
   }
 ]

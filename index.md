@@ -238,6 +238,9 @@ finance → entitlement → precedent_search → document_generation
 | GET | `/api/v1/parcels/{parcel_id}` | Single parcel details |
 | GET | `/api/v1/parcels/{parcel_id}/policy-stack` | Policy hierarchy for parcel |
 | GET | `/api/v1/parcels/{parcel_id}/overlays` | GIS overlays (heritage, flood, etc.) |
+| GET | `/api/v1/parcels/{parcel_id}/nearby-applications` | Spatial search for development applications within radius (default 2km) |
+| GET | `/api/v1/parcels/{parcel_id}/zoning-analysis` | Full zoning analysis with standards, parking, amenity |
+| GET | `/api/v1/parcels/{parcel_id}/financial-summary` | Quick pro forma estimate (rental + condo) with nearby market comps |
 
 #### Projects — `app/routers/projects.py`
 | Method | Route | Purpose |
@@ -418,7 +421,7 @@ finance → entitlement → precedent_search → document_generation
 |------|---------|
 | `src/main.jsx` | React 19 mount; Auth0Provider with hardcoded domain/clientId; localstorage token cache |
 | `src/App.jsx` | Root orchestrator; routing via `currentPage` state ('landing'/'dashboard'); auth gate; multi-component layout; floorPlans + projectId state wired to ModelViewer for upload-driven floor plan viewing |
-| `src/api.js` | HTTP wrapper; base `/api/v1`; reads `localStorage['token']` for Bearer auth; all backend endpoints including design version control (createBranch, listBranches, commitVersion, listVersions, getVersion, getLatestVersion) |
+| `src/api.js` | HTTP wrapper; base `/api/v1`; reads `localStorage['token']` for Bearer auth; all backend endpoints including design version control, getNearbyApplications for precedent spatial search |
 
 **App.jsx key state:**
 ```
@@ -438,7 +441,7 @@ activeNav, savedParcels, showHistory, searchHistory (localStorage per user)
 | `src/components/BlueprintOverlay.jsx` | Blueprint image overlay | R3F component; loads blueprint page images as textured planes at floor Y offsets; supports per-floor or all-floors display. |
 | `src/components/SearchBar.jsx` | Address search + geocoding | 350ms debounce; Nominatim OSM API scoped to Toronto; 6 suggestions max; Enter/Escape keyboard support |
 | `src/components/Sidebar.jsx` | Left nav panel | 7 nav items: Overview/Massing/Finances/Entitlements/Policies/Datasets/Precedents. History panel. Collapsed/expanded state. |
-| `src/components/PolicyPanel.jsx` | Right-side 7-tab panel | Tabs: Overview (compliance status + file upload zone for blueprints/drawings/reports), Massing (envelope), Policies (accordion), Datasets (overlays), Precedents (stub), Entitlements (pathway badges + export), Finances (stub). `FileUploadZone` component with drag-drop, multi-file, polling analysis. `complianceStatus()` logic: ok/variance(≤+15%)/rezone(>+15%). Export to HTML. |
+| `src/components/PolicyPanel.jsx` | Right-side 7-tab panel | Tabs: Overview (compliance status + file upload zone), Massing (envelope), Policies (accordion), Datasets (overlays), Precedents (live nearby applications with distance/decision), Entitlements (pathway badges + export), Finances (pro forma estimates, assessed value, market comps with tenure toggle). `FileUploadZone` component with drag-drop, multi-file, polling analysis. |
 | `src/components/ChatPanel.jsx` | AI assistant + file upload | Chat with backend `/assistant/chat`. Plan generation polling (30 attempts × 3s). File upload (PDF/img/xlsx/csv, 50MB max). Upload polling (40 attempts × 3s). `parseChatCommand()` regex for special commands. Drag-and-drop. |
 | `src/components/LandingPage.jsx` | Marketing homepage | Auth0 login/logout. Typewriter effect (10 dev queries, 45ms/char). MapLibre preview. Hero → Story → Vision → Footer. |
 | `src/components/UserBubble.jsx` | Animated user bubble (bottom-right) | Hover expand (44px→260px, 0.45s). Breathing pulse. User avatar + online dot + sign out. |
@@ -481,6 +484,10 @@ activeNav, savedParcels, showHistory, searchHistory (localStorage per user)
 |------|---------|
 | `docker-compose.yml` | Services: db (PostGIS 16), redis (7), minio, api (port 8000), worker (Celery), beat (Celery Beat). Volumes: pgdata, minio_data. Health checks on all services. |
 | `Dockerfile` | Python 3.11-slim; geospatial libs (libgdal, libgeos, libproj, gcc); uvicorn port 8000 |
+| `Dockerfile.worker` | Same base as Dockerfile but CMD runs Celery worker instead of uvicorn |
+| `railway.toml` | Railway deploy config for the API service: Dockerfile, start command (alembic upgrade + uvicorn), healthcheck /api/v1/health |
+| `railway.worker.toml` | Railway deploy config for the Celery worker service: Dockerfile.worker, celery worker start command |
+| `.railwayignore` | Files excluded from Railway builds: data/, *.dump, *.sql, .env, frontend/node_modules, dist |
 | `.env.example` | Template: DATABASE_URL, REDIS_URL, MINIO settings, JWT_SECRET, AI_PROVIDER, ANTHROPIC_API_KEY, CELERY config |
 | `.env` | Live localhost config; **contains real API key** |
 | `pyproject.toml` | Project: `arterial` v0.1.0, Python ≥3.11. Deps: FastAPI, SQLAlchemy, asyncpg, GeoAlchemy2, pgvector, Celery, Redis, Pydantic, ezdxf. Dev: pytest, ruff. |
@@ -607,8 +614,8 @@ Located in `tests/` — 19 pytest modules:
 |-------|---------|----------|
 | Auth0 credentials hardcoded | `src/main.jsx` | High — should use env vars |
 | `LoginPage.jsx` unused but still in codebase | `src/components/LoginPage.jsx` | Low — dead code |
-| Finances tab not wired to backend | `src/components/PolicyPanel.jsx` | High — stub |
-| Precedents tab requires scenario creation | `src/components/PolicyPanel.jsx` | Medium — stub |
+| ~~Finances tab not wired to backend~~ | `src/components/PolicyPanel.jsx` | Fixed — shows pro forma, assessed value, market comps |
+| ~~Precedents tab requires scenario creation~~ | `src/components/PolicyPanel.jsx` | Fixed — now fetches from `/nearby-applications` |
 | Poll loops not cancellable (memory leak risk) | `src/components/ChatPanel.jsx` | Medium |
 | ZONING_DATA duplicated from backend | `src/components/PolicyPanel.jsx` | Medium — sync drift risk |
 | Silent `searchParcels` error suppression | `src/api.js` | Medium — no user feedback |
@@ -681,4 +688,4 @@ Full table — all routes across all routers:
 
 ---
 
-*Last updated: 2026-03-07 (Phase 3+4: enhanced 3D viewer with floor plans, view modes, version control UI, design API wiring)*
+*Last updated: 2026-03-07 (Fix CRS bug EPSG:26917→2952, add nearby-applications + financial-summary endpoints, wire Precedents + Finances tabs, seed market comps + assessed values)*

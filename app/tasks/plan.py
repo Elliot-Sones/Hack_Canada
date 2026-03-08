@@ -277,6 +277,8 @@ def _build_context_and_generate_docs(
     compliance_result,
     precedents,
     parsed,
+    policy_stack=None,
+    overlays=None,
 ) -> list[SubmissionDocument]:
     """Build document context and generate all submission documents."""
     from app.services.compliance_engine import render_compliance_matrix_markdown
@@ -304,8 +306,8 @@ def _build_context_and_generate_docs(
         finance=financial_output,
         compliance=compliance_result,
         precedents=precedents,
-        policy_stack=None,  # Would come from async policy stack query
-        overlays=None,
+        policy_stack=policy_stack.model_dump() if policy_stack else None,
+        overlays=overlays.model_dump() if overlays else None,
         project_name=parsed.get("project_name", ""),
         organization_name="",
         parsed_parameters=parsed,
@@ -534,11 +536,20 @@ def run_plan_generation(self, plan_id: str, query: str, auto_run: bool = True):
 
         # --- Step 3: Policy Resolution + Zoning Analysis ---
         zoning = None
+        policy_stack = None
+        overlays = None
         if parcel:
             try:
+                from app.services.overlay_service import get_parcel_overlays_response_sync
+                from app.services.policy_stack import get_policy_stack_response_sync
+
                 zoning = _run_zoning_analysis(db, parcel)
+                policy_stack = get_policy_stack_response_sync(db, parcel)
+                overlays = get_parcel_overlays_response_sync(db, parcel)
                 logger.info("plan.policy_resolution.completed", plan_id=plan_id,
-                           zone=zoning.zone_string, category=zoning.standards.category if zoning.standards else None)
+                           zone=zoning.zone_string, category=zoning.standards.category if zoning.standards else None,
+                           policy_clauses=len(policy_stack.applicable_policies),
+                           overlays=len(overlays.overlays))
             except Exception as e:
                 logger.warning("plan.policy_resolution.failed", plan_id=plan_id, error=str(e))
                 return _fail_plan(db, plan, "policy_resolution", f"Policy resolution failed: {e}")
@@ -649,6 +660,8 @@ def run_plan_generation(self, plan_id: str, query: str, auto_run: bool = True):
             db, plan, parcel, zoning,
             massing_summary, layout_result, financial_output,
             compliance_result, precedents, parsed,
+            policy_stack=policy_stack,
+            overlays=overlays,
         )
 
         # Store summary results

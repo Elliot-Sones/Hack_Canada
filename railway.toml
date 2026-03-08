@@ -1,3 +1,4 @@
+# Railway config for the API service (uses Dockerfile at project root)
 [build]
 dockerfilePath = "Dockerfile"
 
@@ -6,3 +7,16 @@ startCommand = "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --po
 healthcheckPath = "/api/v1/health"
 healthcheckTimeout = 60
 restartPolicyType = "on_failure"
+
+# Required environment variables (set these in Railway dashboard):
+# DATABASE_URL        - Postgres connection string (Railway injects from Postgres plugin)
+# DATABASE_URL_SYNC   - Sync Postgres URL for Alembic (psycopg2 driver)
+# REDIS_URL           - Redis connection string (Railway injects from Redis plugin)
+# CELERY_BROKER_URL   - Redis URL for Celery broker  (e.g. $REDIS_URL)
+# CELERY_RESULT_BACKEND - Redis URL for Celery results
+# JWT_SECRET_KEY      - Long random string for JWT signing
+# AI_PROVIDER         - "claude" or "openai"
+# AI_API_KEY          - Anthropic or OpenAI API key
+# S3_ENDPOINT_URL     - S3-compatible storage endpoint (or leave empty for no-op)
+# AUTH0_DOMAIN        - Auth0 domain (frontend auth)
+# AUTH0_CLIENT_ID     - Auth0 client ID (frontend auth)

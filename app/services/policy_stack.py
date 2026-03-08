@@ -15,6 +15,7 @@ from app.schemas.geospatial import (
     PolicyStackResponse,
     SnapshotReferenceResponse,
 )
+from app.services.zoning_parser import build_zone_matching_tokens
 
 
 @dataclass(frozen=True)
@@ -38,6 +39,10 @@ class PolicyStackRecord:
     snapshot_type: str | None
     snapshot_label: str | None
     snapshot_published_at: datetime | None
+
+
+def get_policy_zone_tokens(zone_code: str | None) -> list[str]:
+    return build_zone_matching_tokens(zone_code)
 
 
 def build_policy_stack_response(parcel_id: uuid.UUID, records: list[PolicyStackRecord]) -> PolicyStackResponse:
@@ -108,8 +113,8 @@ async def get_policy_stack_response(db: AsyncSession, parcel: Parcel) -> PolicyS
     parcel_geom = select(Parcel.geom).where(Parcel.id == parcel.id).scalar_subquery()
 
     zone_match = func.coalesce(func.cardinality(PolicyApplicabilityRule.zone_filter), 0) == 0
-    if parcel.zone_code:
-        zone_match = or_(zone_match, PolicyApplicabilityRule.zone_filter.any(parcel.zone_code))
+    for token in get_policy_zone_tokens(parcel.zone_code):
+        zone_match = or_(zone_match, PolicyApplicabilityRule.zone_filter.any(token))
 
     use_match = func.coalesce(func.cardinality(PolicyApplicabilityRule.use_filter), 0) == 0
     if parcel.current_use:
@@ -174,8 +179,8 @@ def get_policy_stack_response_sync(db: Session, parcel: Parcel) -> PolicyStackRe
     parcel_geom = select(Parcel.geom).where(Parcel.id == parcel.id).scalar_subquery()
 
     zone_match = func.coalesce(func.cardinality(PolicyApplicabilityRule.zone_filter), 0) == 0
-    if parcel.zone_code:
-        zone_match = or_(zone_match, PolicyApplicabilityRule.zone_filter.any(parcel.zone_code))
+    for token in get_policy_zone_tokens(parcel.zone_code):
+        zone_match = or_(zone_match, PolicyApplicabilityRule.zone_filter.any(token))
 
     use_match = func.coalesce(func.cardinality(PolicyApplicabilityRule.use_filter), 0) == 0
     if parcel.current_use:

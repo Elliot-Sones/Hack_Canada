@@ -100,6 +100,24 @@ export async function getParcelZoningAnalysis(parcelId, options = {}) {
     }
 }
 
+export async function getNearbyApplications(parcelId, options = {}) {
+    try {
+        return await apiFetch(`${API_BASE}/parcels/${parcelId}/nearby-applications`, options);
+    } catch (error) {
+        if (isAbortError(error)) throw error;
+        return { parcel_id: parcelId, applications: [], total: 0 };
+    }
+}
+
+export async function getParcelFinancialSummary(parcelId, options = {}) {
+    try {
+        return await apiFetch(`${API_BASE}/parcels/${parcelId}/financial-summary`, options);
+    } catch (error) {
+        if (isAbortError(error)) throw error;
+        return null;
+    }
+}
+
 // ─── Assistant ───
 
 export async function parseModel(text, currentParams = null, zoneCode = null, lotAreaM2 = null) {
