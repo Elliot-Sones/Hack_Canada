@@ -383,6 +383,13 @@ def render_compliance_matrix_markdown(result: ComplianceResult) -> str:
                  f"{variance_count} variance(s) required.")
 
     if result.variances_needed:
+        lines.append("")
+        lines.append("**Variances needed:**")
+        for v in result.variances_needed:
+            pct_str = f" ({v.variance_pct:+.1f}%)" if v.variance_pct is not None else ""
+            lines.append(f"- {v.parameter}{pct_str}")
+
+    if result.variances_needed:
         if result.minor_variance_applicable:
             lines.append(
                 "\n*All requested variances may be eligible for minor variance "
@@ -401,7 +408,7 @@ def _format_value(value: float | None, unit: str) -> str:
     """Format a numeric value with its unit for display."""
     if value is None:
         return "[TBD]"
-    if unit == "%" :
+    if unit == "%":
         return f"{value:.1f}%"
     if unit == "m²":
         return f"{value:,.1f} m²"
