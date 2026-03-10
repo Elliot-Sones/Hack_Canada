@@ -1,5 +1,6 @@
 const PLAN_FROM_UPLOAD_RE = /^(generate|create|build)\s+(?:a\s+)?plan\s+from\s+upload\s*$/i;
 const RESPONSE_FROM_UPLOAD_RE = /^(generate|create|build)\s+(?:a\s+)?response\s+from\s+upload\s*$/i;
+const REPORT_RE = /^(generate|create|build)\s+(?:a\s+)?report\s*$/i;
 const PLAN_RE = /^(generate|create|build)\s+(?:a\s+)?plan\s+(?:for\s+)?(.+)$/i;
 const EDIT_FLOOR_RE = /^edit\s+floor\s*(?:plan)?$/i;
 
@@ -51,6 +52,7 @@ export function parseChatCommand(input) {
 
   if (PLAN_FROM_UPLOAD_RE.test(text)) return { type: 'plan_from_upload' };
   if (RESPONSE_FROM_UPLOAD_RE.test(text)) return { type: 'response_from_upload' };
+  if (REPORT_RE.test(text)) return { type: 'generate_report' };
 
   const planMatch = text.match(PLAN_RE);
   if (planMatch) {

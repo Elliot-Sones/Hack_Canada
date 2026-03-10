@@ -1,5 +1,6 @@
 import { useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 const SAFETY_PREFIX = 'DRAFT — FOR PROFESSIONAL REVIEW ONLY';
 
@@ -68,7 +69,7 @@ export default function DocumentViewer({ document, planId, onRegenerate, onStatu
             )}
 
             <div className="doc-viewer-content">
-                <ReactMarkdown>{content}</ReactMarkdown>
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
             </div>
 
             <div className="doc-viewer-status">

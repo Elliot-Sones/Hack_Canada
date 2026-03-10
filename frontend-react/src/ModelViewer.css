@@ -4,7 +4,7 @@
   position: fixed;
   inset: 0;
   z-index: 5;          /* above map (0), below all panels (10+) */
-  background: #111;
+  background: #f5f0eb;
 }
 
 .model-canvas-area {

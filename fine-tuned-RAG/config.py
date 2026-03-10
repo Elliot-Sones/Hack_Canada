@@ -5,10 +5,9 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
-load_dotenv()
-
-# Resolve DOCS_DIR relative to this file's directory
+# Resolve paths relative to this file's directory (works regardless of working dir)
 _rag_dir = Path(__file__).resolve().parent
+load_dotenv(_rag_dir / ".env")
 _docs_raw = os.getenv("DOCS_DIR", "../../SDG/Hack Canada")
 DOCS_DIR = str((_rag_dir / _docs_raw).resolve())
 
@@ -23,7 +22,8 @@ EXTRA_DOCS_DIRS = [
 # All document directories combined
 ALL_DOCS_DIRS = [DOCS_DIR] + EXTRA_DOCS_DIRS
 
-CHROMA_DIR = os.getenv("CHROMA_DIR", "./chroma_db")
+_chroma_raw = os.getenv("CHROMA_DIR", "./chroma_db")
+CHROMA_DIR = str((_rag_dir / _chroma_raw).resolve())
 CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", "1000"))
 CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "200"))
 COLLECTION_NAME = os.getenv("COLLECTION_NAME", "hack_canada")

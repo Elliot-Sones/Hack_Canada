@@ -1,4 +1,6 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { getParcelOverlays, getParcelZoningAnalysis, getPolicyStack, getNearbyApplications, getParcelFinancialSummary, uploadDocument, getUpload, getPlanDocuments, regeneratePlanDocument } from '../api.js';
 import { isResolvedParcel, isUnresolvedParcel } from '../lib/parcelState.js';
 import useResizable from '../hooks/useResizable.js';
@@ -742,7 +744,9 @@ function PoliciesTab({ policies, loading }) {
                                 {doc.sections.length > 0 ? doc.sections.map((section, sectionIndex) => (
                                     <div key={sectionIndex} className="extract-block">
                                         <div className="extract-title">{section.title}</div>
-                                        <p className="extract-text">{section.text}</p>
+                                        <div className="extract-text extract-markdown">
+                                            <ReactMarkdown remarkPlugins={[remarkGfm]}>{section.text}</ReactMarkdown>
+                                        </div>
                                     </div>
                                 )) : (
                                     <p className="extract-text" style={{ opacity: 0.5 }}>No clause extracts available for this document.</p>
@@ -1054,8 +1058,10 @@ function mapPolicyStack(data) {
     for (const entry of entries) {
         const key = entry.document_id || entry.document_title;
         if (!byDoc[key]) {
+            const rawName = entry.document_title || entry.doc_type || 'Policy Document';
+            const fileName = rawName.includes('/') ? rawName.split('/').pop() : rawName;
             byDoc[key] = {
-                name: entry.document_title || entry.doc_type || 'Policy Document',
+                name: fileName,
                 sections: [],
             };
         }

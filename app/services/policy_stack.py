@@ -1,242 +1,140 @@
-import uuid
-from dataclasses import dataclass
-from datetime import date, datetime
+"""
+policy_stack.py – RAG-backed policy retrieval.
 
-from sqlalchemy import func, or_, select
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import Session, defer
+Replaces the former DB-backed query with ChromaDB vector search
+from the fine-tuned-RAG system.
+"""
+import os
+import sys
+import uuid
+from pathlib import Path
 
 from app.models.geospatial import Parcel
-from app.models.ingestion import SourceSnapshot
-from app.models.policy import PolicyApplicabilityRule, PolicyClause, PolicyDocument, PolicyVersion
 from app.schemas.geospatial import (
     PolicyCitationResponse,
     PolicyEntryResponse,
     PolicyStackResponse,
-    SnapshotReferenceResponse,
 )
-from app.services.zoning_parser import build_zone_matching_tokens
+
+# ---------------------------------------------------------------------------
+# RAG retriever setup
+# ---------------------------------------------------------------------------
+
+_RAG_DIR = str(Path(__file__).resolve().parents[2] / "fine-tuned-RAG")
+if _RAG_DIR not in sys.path:
+    sys.path.insert(0, _RAG_DIR)
+
+# Lazy-loaded to avoid import errors when chroma_db is missing at import time
+_retriever_search = None
 
 
-@dataclass(frozen=True)
-class PolicyStackRecord:
-    clause_id: uuid.UUID
-    policy_version_id: uuid.UUID
-    document_id: uuid.UUID
-    document_title: str
-    doc_type: str
-    override_level: int
-    section_ref: str
-    page_ref: str | None
-    raw_text: str
-    normalized_type: str
-    normalized_json: dict
-    applicability_json: dict
-    confidence: float
-    effective_date: date | None
-    source_url: str | None
-    snapshot_id: uuid.UUID | None
-    snapshot_type: str | None
-    snapshot_label: str | None
-    snapshot_published_at: datetime | None
+def _get_search():
+    global _retriever_search
+    if _retriever_search is None:
+        from retriever import search  # noqa: E402 – lives in fine-tuned-RAG/
+        _retriever_search = search
+    return _retriever_search
 
 
-def get_policy_zone_tokens(zone_code: str | None) -> list[str]:
-    return build_zone_matching_tokens(zone_code)
+# Deterministic namespace for generating stable UUIDs from source strings
+_NS = uuid.UUID("a1b2c3d4-e5f6-7890-abcd-ef1234567890")
 
 
-def build_policy_stack_response(parcel_id: uuid.UUID, records: list[PolicyStackRecord]) -> PolicyStackResponse:
-    ordered = sorted(
-        records,
-        key=lambda record: (record.override_level, record.document_title.lower(), record.section_ref),
-    )
+def _make_id(text: str) -> uuid.UUID:
+    return uuid.uuid5(_NS, text)
 
-    snapshots: dict[uuid.UUID, SnapshotReferenceResponse] = {}
-    citations: dict[uuid.UUID, PolicyCitationResponse] = {}
+
+# ---------------------------------------------------------------------------
+# Build response from RAG results
+# ---------------------------------------------------------------------------
+
+def _rag_results_to_response(
+    parcel_id: uuid.UUID,
+    results: list[dict],
+) -> PolicyStackResponse:
     entries: list[PolicyEntryResponse] = []
+    citations: list[PolicyCitationResponse] = []
 
-    for record in ordered:
-        snapshot = None
-        if record.snapshot_id:
-            snapshot = snapshots.setdefault(
-                record.snapshot_id,
-                SnapshotReferenceResponse(
-                    id=record.snapshot_id,
-                    snapshot_type=record.snapshot_type,
-                    version_label=record.snapshot_label,
-                    published_at=record.snapshot_published_at,
-                ),
-            )
+    for i, r in enumerate(results):
+        meta = r.get("metadata", {})
+        source = meta.get("source", "Unknown Document")
+        source_type = meta.get("source_type", "policy")
+        page = meta.get("page")
+        content = r.get("content", "")
+        score = r.get("score")
 
-        citations.setdefault(
-            record.clause_id,
-            PolicyCitationResponse(
-                clause_id=record.clause_id,
-                document_title=record.document_title,
-                doc_type=record.doc_type,
-                section_ref=record.section_ref,
-                page_ref=record.page_ref,
-                source_url=record.source_url,
-                effective_date=record.effective_date,
-            ),
-        )
+        clause_id = _make_id(f"{source}:{page}:{i}")
+        doc_id = _make_id(source)
+        version_id = _make_id(f"{source}:v1")
+
+        section_ref = f"Page {page}" if page else f"Extract {i + 1}"
+
         entries.append(
             PolicyEntryResponse(
-                clause_id=record.clause_id,
-                policy_version_id=record.policy_version_id,
-                document_id=record.document_id,
-                document_title=record.document_title,
-                doc_type=record.doc_type,
-                override_level=record.override_level,
-                section_ref=record.section_ref,
-                page_ref=record.page_ref,
-                raw_text=record.raw_text,
-                normalized_type=record.normalized_type,
-                normalized_json=record.normalized_json,
-                applicability_json=record.applicability_json,
-                confidence=record.confidence,
-                effective_date=record.effective_date,
-                source_url=record.source_url,
-                snapshot=snapshot,
+                clause_id=clause_id,
+                policy_version_id=version_id,
+                document_id=doc_id,
+                document_title=source,
+                doc_type=source_type,
+                override_level=i,
+                section_ref=section_ref,
+                page_ref=str(page) if page else None,
+                raw_text=content,
+                normalized_type="rag_extract",
+                normalized_json={},
+                applicability_json={},
+                confidence=score if score is not None else 0.0,
+                effective_date=None,
+                source_url=None,
+                snapshot=None,
+            )
+        )
+        citations.append(
+            PolicyCitationResponse(
+                clause_id=clause_id,
+                document_title=source,
+                doc_type=source_type,
+                section_ref=section_ref,
+                page_ref=str(page) if page else None,
+                source_url=None,
+                effective_date=None,
             )
         )
 
     return PolicyStackResponse(
         parcel_id=parcel_id,
         applicable_policies=entries,
-        citations=list(citations.values()),
-        snapshots=list(snapshots.values()),
+        citations=citations,
+        snapshots=[],
     )
 
 
-async def get_policy_stack_response(db: AsyncSession, parcel: Parcel) -> PolicyStackResponse:
-    parcel_geom = select(Parcel.geom).where(Parcel.id == parcel.id).scalar_subquery()
+# ---------------------------------------------------------------------------
+# Public API (async kept for router signature compat, but search is sync)
+# ---------------------------------------------------------------------------
 
-    zone_match = func.coalesce(func.cardinality(PolicyApplicabilityRule.zone_filter), 0) == 0
-    for token in get_policy_zone_tokens(parcel.zone_code):
-        zone_match = or_(zone_match, PolicyApplicabilityRule.zone_filter.any(token))
-
-    use_match = func.coalesce(func.cardinality(PolicyApplicabilityRule.use_filter), 0) == 0
+def _build_query(parcel: Parcel) -> str:
+    parts = []
+    if parcel.zone_code:
+        parts.append(f"zoning {parcel.zone_code}")
+    if parcel.address:
+        parts.append(parcel.address)
     if parcel.current_use:
-        use_match = or_(use_match, PolicyApplicabilityRule.use_filter.any(parcel.current_use))
-
-    query = (
-        select(
-            PolicyApplicabilityRule,
-            PolicyClause,
-            PolicyVersion,
-            PolicyDocument,
-            SourceSnapshot,
-        )
-        .join(PolicyClause, PolicyApplicabilityRule.policy_clause_id == PolicyClause.id)
-        .join(PolicyVersion, PolicyClause.policy_version_id == PolicyVersion.id)
-        .join(PolicyDocument, PolicyVersion.document_id == PolicyDocument.id)
-        .outerjoin(SourceSnapshot, PolicyVersion.source_snapshot_id == SourceSnapshot.id)
-        .options(defer(PolicyClause.embedding))
-        .where(PolicyApplicabilityRule.jurisdiction_id == parcel.jurisdiction_id)
-        .where(PolicyVersion.is_active.is_(True))
-        .where(or_(PolicyDocument.effective_date.is_(None), PolicyDocument.effective_date <= func.current_date()))
-        .where(or_(PolicyDocument.expiry_date.is_(None), PolicyDocument.expiry_date >= func.current_date()))
-        .where(zone_match)
-        .where(use_match)
-        .where(
-            or_(
-                PolicyApplicabilityRule.geometry_filter.is_(None),
-                func.ST_Intersects(PolicyApplicabilityRule.geometry_filter, parcel_geom),
-            )
-        )
-    )
-
-    rows = (await db.execute(query)).all()
-    records = [
-        PolicyStackRecord(
-            clause_id=clause.id,
-            policy_version_id=version.id,
-            document_id=document.id,
-            document_title=document.title,
-            doc_type=document.doc_type,
-            override_level=applicability.override_level,
-            section_ref=clause.section_ref,
-            page_ref=clause.page_ref,
-            raw_text=clause.raw_text,
-            normalized_type=clause.normalized_type,
-            normalized_json=clause.normalized_json,
-            applicability_json=applicability.applicability_json,
-            confidence=clause.confidence,
-            effective_date=document.effective_date,
-            source_url=document.source_url,
-            snapshot_id=snapshot.id if snapshot else None,
-            snapshot_type=snapshot.snapshot_type if snapshot else None,
-            snapshot_label=snapshot.version_label if snapshot else None,
-            snapshot_published_at=snapshot.published_at if snapshot else None,
-        )
-        for applicability, clause, version, document, snapshot in rows
-    ]
-    return build_policy_stack_response(parcel.id, records)
+        parts.append(parcel.current_use)
+    return "Ontario planning policy for " + ", ".join(parts) if parts else "Ontario planning and zoning policy"
 
 
-def get_policy_stack_response_sync(db: Session, parcel: Parcel) -> PolicyStackResponse:
-    """Sync version for use in background tasks."""
-    parcel_geom = select(Parcel.geom).where(Parcel.id == parcel.id).scalar_subquery()
+async def get_policy_stack_response(db, parcel: Parcel) -> PolicyStackResponse:
+    """Called by the parcels router (async endpoint)."""
+    search = _get_search()
+    query = _build_query(parcel)
+    results = search(query, k=8)
+    return _rag_results_to_response(parcel.id, results)
 
-    zone_match = func.coalesce(func.cardinality(PolicyApplicabilityRule.zone_filter), 0) == 0
-    for token in get_policy_zone_tokens(parcel.zone_code):
-        zone_match = or_(zone_match, PolicyApplicabilityRule.zone_filter.any(token))
 
-    use_match = func.coalesce(func.cardinality(PolicyApplicabilityRule.use_filter), 0) == 0
-    if parcel.current_use:
-        use_match = or_(use_match, PolicyApplicabilityRule.use_filter.any(parcel.current_use))
-
-    query = (
-        select(
-            PolicyApplicabilityRule,
-            PolicyClause,
-            PolicyVersion,
-            PolicyDocument,
-            SourceSnapshot,
-        )
-        .join(PolicyClause, PolicyApplicabilityRule.policy_clause_id == PolicyClause.id)
-        .join(PolicyVersion, PolicyClause.policy_version_id == PolicyVersion.id)
-        .join(PolicyDocument, PolicyVersion.document_id == PolicyDocument.id)
-        .outerjoin(SourceSnapshot, PolicyVersion.source_snapshot_id == SourceSnapshot.id)
-        .options(defer(PolicyClause.embedding))
-        .where(PolicyApplicabilityRule.jurisdiction_id == parcel.jurisdiction_id)
-        .where(PolicyVersion.is_active.is_(True))
-        .where(or_(PolicyDocument.effective_date.is_(None), PolicyDocument.effective_date <= func.current_date()))
-        .where(or_(PolicyDocument.expiry_date.is_(None), PolicyDocument.expiry_date >= func.current_date()))
-        .where(zone_match)
-        .where(use_match)
-        .where(
-            or_(
-                PolicyApplicabilityRule.geometry_filter.is_(None),
-                func.ST_Intersects(PolicyApplicabilityRule.geometry_filter, parcel_geom),
-            )
-        )
-    )
-
-    rows = db.execute(query).all()
-    records = [
-        PolicyStackRecord(
-            clause_id=clause.id,
-            policy_version_id=version.id,
-            document_id=document.id,
-            document_title=document.title,
-            doc_type=document.doc_type,
-            override_level=applicability.override_level,
-            section_ref=clause.section_ref,
-            page_ref=clause.page_ref,
-            raw_text=clause.raw_text,
-            normalized_type=clause.normalized_type,
-            normalized_json=clause.normalized_json,
-            applicability_json=applicability.applicability_json,
-            confidence=clause.confidence,
-            effective_date=document.effective_date,
-            source_url=document.source_url,
-            snapshot_id=snapshot.id if snapshot else None,
-            snapshot_type=snapshot.snapshot_type if snapshot else None,
-            snapshot_label=snapshot.version_label if snapshot else None,
-            snapshot_published_at=snapshot.published_at if snapshot else None,
-        )
-        for applicability, clause, version, document, snapshot in rows
-    ]
-    return build_policy_stack_response(parcel.id, records)
+def get_policy_stack_response_sync(db, parcel: Parcel) -> PolicyStackResponse:
+    """Called by plan tasks (sync background thread)."""
+    search = _get_search()
+    query = _build_query(parcel)
+    results = search(query, k=8)
+    return _rag_results_to_response(parcel.id, results)

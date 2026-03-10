@@ -111,11 +111,13 @@ const edgeMaterial = new THREE.LineBasicMaterial({ color: '#333333' });
 // ─── Detail geometry helpers ────────────────────────────────────────────────────
 
 function getFacesFromFootprint(pts) {
+  // Footprint points are [x, z] but after Shape + rotateX(-π/2),
+  // 3D positions are (x, y, -z). Negate Z so face coordinates match 3D space.
   const faces = [];
   for (let i = 0; i < pts.length; i++) {
     const a = pts[i];
     const b = pts[(i + 1) % pts.length];
-    faces.push({ start: a, end: b });
+    faces.push({ start: [a[0], -a[1]], end: [b[0], -b[1]] });
   }
   return faces;
 }
@@ -143,7 +145,7 @@ function generateWindowsForFace(start, end, floorY, floorH, isStorefront = false
     const cx = start[0] + dx * t + nx * 0.02;
     const cz = start[1] + dz * t + nz * 0.02;
     const cy = floorY + (isStorefront ? windowH / 2 + 0.5 : floorH / 2);
-    const angle = Math.atan2(dx, dz);
+    const angle = Math.atan2(-dz, dx);
 
     results.push({
       type: 'window',
@@ -166,7 +168,7 @@ function generateBalcony(start, end, floorY) {
   const depth = 1.2;
   const mx = (start[0] + end[0]) / 2 + nx * depth / 2;
   const mz = (start[1] + end[1]) / 2 + nz * depth / 2;
-  const angle = Math.atan2(dx, dz);
+  const angle = Math.atan2(-dz, dx);
 
   return [
     {
@@ -197,7 +199,7 @@ function generateCanopy(footprintPts, groundFloorTop) {
     const nz = dx / faceLen;
     const mx = (start[0] + end[0]) / 2 + nx * 0.5;
     const mz = (start[1] + end[1]) / 2 + nz * 0.5;
-    const angle = Math.atan2(dx, dz);
+    const angle = Math.atan2(-dz, dx);
 
     results.push({
       type: 'canopy',
@@ -671,7 +673,7 @@ function Ground() {
   return (
     <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.05, 0]} receiveShadow>
       <planeGeometry args={[600, 600]} />
-      <meshStandardMaterial color="#1a1a1a" roughness={1} />
+      <meshStandardMaterial color="#e8e3de" roughness={1} />
     </mesh>
   );
 }
