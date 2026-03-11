@@ -11,6 +11,10 @@ export const auth = betterAuth({
         connectionString: process.env.DATABASE_URL
     }),
     emailAndPassword: {
-        enabled: true
+        enabled: true,
+        async sendResetPassword(data, request) {
+            console.log("Reset password data:", data);
+            // Example: send an email with the data.url here
+        }
     }
 });
