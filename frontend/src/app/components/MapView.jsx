@@ -1,7 +1,7 @@
 import { useEffect, useRef, useImperativeHandle, forwardRef, useState } from 'react';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import '../ModelViewer.css';
+import '../styles/ModelViewer.css';
 
 const DEFAULT_CENTER = [-79.3832, 43.6532];
 const DEFAULT_ZOOM = 13;
@@ -304,14 +304,14 @@ const MapView = forwardRef(function MapView({ isParcelResolved, onModelOpen, isP
                 paint: {
                     'line-color': [
                         'match', ['get', 'material'],
-                        'CI',   '#e67e22',   // Cast Iron → orange (old/legacy)
+                        'CI', '#e67e22',   // Cast Iron → orange (old/legacy)
                         'CICL', '#e67e22',
-                        'DIP',  '#2277bb',   // Ductile Iron → blue (standard)
+                        'DIP', '#2277bb',   // Ductile Iron → blue (standard)
                         'DICL', '#2277bb',
-                        'PVC',  '#27ae60',   // PVC → green (modern)
-                        'CPP',  '#27ae60',
-                        'AC',   '#e74c3c',   // Asbestos Cement → red (hazard)
-                        'COP',  '#f1c40f',   // Copper → yellow
+                        'PVC', '#27ae60',   // PVC → green (modern)
+                        'CPP', '#27ae60',
+                        'AC', '#e74c3c',   // Asbestos Cement → red (hazard)
+                        'COP', '#f1c40f',   // Copper → yellow
                         '#888888'            // Unknown
                     ],
                     'line-width': [

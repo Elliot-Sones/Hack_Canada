@@ -11,7 +11,7 @@ import InfrastructureLayerControl from './components/InfrastructureLayerControl.
 import LandingPage from './components/LandingPage.jsx';
 import { searchParcels, getNearbyPipelines, getWatermainsBbox } from './api.js';
 import { buildParcelState, isResolvedParcel } from './lib/parcelState.js';
-import './landing.css';
+import './styles/landing.css';
 
 const ModelViewer = lazy(() => import('./components/ModelViewer.jsx'));
 const InfrastructureViewer = lazy(() => import('./components/InfrastructureViewer.jsx').catch(() => ({ default: () => null })));
@@ -279,7 +279,7 @@ export default function App() {
       const styles = getComputedStyle(document.documentElement);
       const left = parseInt(styles.getPropertyValue('--sidebar-width')) || 160;
       const right = isPanelOpen ? (parseInt(styles.getPropertyValue('--panel-width')) || 380) : 0;
-      const bottom = isChatExpanded ? ((parseInt(styles.getPropertyValue('--chat-height')) || 280) + 48) : 48;
+      const bottom = isChatExpanded ? ((parseInt(styles.getPropertyValue('--chat-height')) || 280) + 49) : 49;
       mapRef.current.getMap().easeTo({
         padding: { left, right, top: 0, bottom },
         duration: 300,

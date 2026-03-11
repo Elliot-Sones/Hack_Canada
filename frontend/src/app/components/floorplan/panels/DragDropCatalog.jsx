@@ -1,5 +1,5 @@
 import { useDraggable } from '@dnd-kit/core';
-import './DragDropCatalog.css';
+import '../../../styles/DragDropCatalog.css';
 
 const ROOM_TEMPLATES = [
     { id: 'tpl-bed-3x3', type: 'room', roomType: 'bedroom', width: 3, height: 3, label: 'Bedroom', dims: '3x3m', color: '#4a6b8a' },

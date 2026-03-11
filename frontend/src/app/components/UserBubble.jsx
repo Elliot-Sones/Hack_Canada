@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useSession, signOut } from '../lib/auth-client.js';
-import '../UserBubble.css';
+import '../styles/UserBubble.css';
 
 export default function UserBubble() {
     const { data: session } = useSession();

@@ -14,7 +14,7 @@ import ScaleCalibration from './panels/ScaleCalibration.jsx';
 import RoomTypeSelector from './panels/RoomTypeSelector.jsx';
 import WallProperties from './panels/WallProperties.jsx';
 import DragDropCatalog from './panels/DragDropCatalog.jsx';
-import './FloorPlanEditor.css';
+import '../../styles/FloorPlanEditor.css';
 
 const MAX_HISTORY = 50;
 

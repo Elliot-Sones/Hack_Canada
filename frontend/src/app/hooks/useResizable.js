@@ -45,7 +45,7 @@ export default function useResizable({
       const style = document.createElement('style');
       style.id = id;
       style.textContent = `
-        #sidebar, #search-container, #chat-panel, #policy-panel, .panel-reopen-tab {
+        #sidebar, #search-container, #chat-panel, #policy-panel, .panel-reopen-tab, .model-canvas-area, .model-controls, .model-close-btn, .infra-controls, .infra-canvas-area {
           transition: none !important;
         }
       `;

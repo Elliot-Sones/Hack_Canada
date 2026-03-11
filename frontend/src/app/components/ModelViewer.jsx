@@ -25,7 +25,7 @@ import {
   listVersions,
   getUploadPages,
 } from '../api.js';
-import '../ModelViewer.css';
+import '../styles/ModelViewer.css';
 
 const DEFAULT_PARAMS = {
   storeys: 10,
@@ -901,7 +901,7 @@ export default function ModelViewer({
           console.error('Failed to auto-create main branch:', e);
         }
       }
-    }).catch(() => {});
+    }).catch(() => { });
   }, [projectId, isOpen]);
 
   useEffect(() => {
@@ -937,7 +937,7 @@ export default function ModelViewer({
       if (data?.length > 0) {
         setCurrentVersion(data[0]);
       }
-    }).catch(() => {});
+    }).catch(() => { });
   }, [currentBranch]);
 
   // Detect dirty state
@@ -1059,6 +1059,10 @@ export default function ModelViewer({
   const storeys = params.storeys || 0;
   const warnings = params.warnings || [];
 
+  const sidebarW = isSidebarCollapsed ? 52 : 'var(--sidebar-width, 160px)';
+  const panelW = isPanelOpen ? 'var(--panel-width, 380px)' : 0;
+  const chatH = isChatExpanded ? 'calc(var(--chat-height, 280px) + 49px)' : 49;
+
   const closeBtn = createPortal(
     <button
       className="model-close-btn"
@@ -1067,17 +1071,13 @@ export default function ModelViewer({
       style={{
         position: 'fixed',
         top: 12,
-        right: (isPanelOpen ? 380 : 0) + 16,
+        right: isPanelOpen ? 'calc(var(--panel-width, 380px) + 16px)' : 16,
         zIndex: 99999,
         transition: 'right 0.3s ease',
       }}
     >✕</button>,
     document.body
   );
-
-  const sidebarW = isSidebarCollapsed ? 52 : 160;
-  const panelW = isPanelOpen ? 380 : 0;
-  const chatH = isChatExpanded ? 328 : 48;
 
   return (
     <>

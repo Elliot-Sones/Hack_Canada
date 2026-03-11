@@ -1,0 +1,162 @@
+/* ========================================
+   COCIVIL — Map & Search
+   ======================================== */
+
+/* --- Map (full viewport) --- */
+#map {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+}
+
+/* Maplibre overrides */
+.maplibregl-ctrl-bottom-left,
+.maplibregl-ctrl-bottom-right {
+    display: none !important;
+}
+
+.maplibregl-ctrl-top-right {
+    top: 70px !important;
+    right: 12px !important;
+}
+
+.maplibregl-ctrl-group {
+    background: var(--bg-glass) !important;
+    backdrop-filter: var(--blur) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: var(--radius-md) !important;
+    box-shadow: var(--shadow-md) !important;
+}
+
+.maplibregl-ctrl-group button {
+    width: 36px !important;
+    height: 36px !important;
+}
+
+.maplibregl-ctrl-group button+button {
+    border-top: 1px solid var(--border) !important;
+}
+
+.maplibregl-ctrl-icon {
+    filter: invert(1) brightness(0.85);
+}
+
+/* --- Search Bar --- */
+#search-container {
+    position: fixed;
+    top: var(--space-lg);
+    left: calc(var(--sidebar-width) + var(--space-lg));
+    right: var(--space-lg);
+    z-index: 10;
+    display: flex;
+    justify-content: flex-start;
+    transition: left var(--transition);
+}
+
+body.sidebar-collapsed #search-container {
+    left: calc(var(--sidebar-collapsed) + var(--space-lg));
+}
+
+#search-bar {
+    position: relative;
+    width: 420px;
+    max-width: 100%;
+    display: flex;
+    align-items: center;
+    background: var(--bg-glass);
+    backdrop-filter: var(--blur);
+    -webkit-backdrop-filter: var(--blur);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 0 var(--space-lg);
+    box-shadow: var(--shadow-lg);
+    transition: all var(--transition);
+}
+
+#search-bar:focus-within {
+    border-color: var(--border-accent);
+    box-shadow: var(--shadow-lg), 0 0 0 1px var(--accent-dim);
+}
+
+#search-icon {
+    width: 18px;
+    height: 18px;
+    color: var(--text-muted);
+    flex-shrink: 0;
+}
+
+#search-input {
+    flex: 1;
+    height: var(--search-height);
+    padding: 0 var(--space-md);
+    font-size: var(--font-base);
+    color: var(--text-primary);
+}
+
+#search-input::placeholder {
+    color: var(--text-muted);
+}
+
+/* --- Search Suggestions Dropdown --- */
+#search-suggestions {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    right: 0;
+    background: var(--bg-glass-light);
+    backdrop-filter: var(--blur);
+    -webkit-backdrop-filter: var(--blur);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-lg);
+    max-height: 320px;
+    overflow-y: auto;
+    display: none;
+    z-index: 12;
+}
+
+#search-suggestions.visible {
+    display: block;
+    animation: slideDown 0.2s ease-out;
+}
+
+.suggestion-item {
+    padding: var(--space-md) var(--space-lg);
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-md);
+    cursor: pointer;
+    transition: background var(--transition);
+    border-bottom: 1px solid var(--border);
+}
+
+.suggestion-item:last-child {
+    border-bottom: none;
+}
+
+.suggestion-item:hover {
+    background: var(--accent-bg);
+}
+
+.suggestion-item svg {
+    width: 16px;
+    height: 16px;
+    color: var(--accent);
+    flex-shrink: 0;
+    margin-top: 2px;
+}
+
+.suggestion-text {
+    font-size: var(--font-sm);
+    line-height: 1.4;
+}
+
+.suggestion-main {
+    color: var(--text-primary);
+    font-weight: 500;
+}
+
+.suggestion-sub {
+    color: var(--text-muted);
+    font-size: var(--font-xs);
+}

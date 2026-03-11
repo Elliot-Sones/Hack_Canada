@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Stage, Layer, Line, Circle, Arrow, Text, Group } from 'react-konva';
 import PipeProperties from './PipeProperties.jsx';
 import InfrastructureCompliancePanel from './InfrastructureCompliancePanel.jsx';
-import './PipeNetworkEditor.css';
+import '../../styles/PipeNetworkEditor.css';
 
 const MAX_HISTORY = 50;
 const SNAP_GRID = 1; // 1m grid

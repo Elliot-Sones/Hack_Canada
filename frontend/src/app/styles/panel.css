@@ -1,0 +1,322 @@
+/* ========================================
+   COCIVIL — Policy Panel
+   ======================================== */
+
+#policy-panel {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: var(--panel-width);
+    z-index: 15;
+    background: var(--bg-glass);
+    backdrop-filter: var(--blur);
+    -webkit-backdrop-filter: var(--blur);
+    border-left: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    transition: transform var(--transition), opacity var(--transition);
+    overflow: hidden;
+}
+
+#policy-panel.panel-hidden {
+    transform: translateX(100%);
+    opacity: 0;
+    pointer-events: none;
+}
+
+.panel-reopen-tab {
+    position: fixed;
+    top: 50%;
+    right: 0;
+    transform: translateY(-50%);
+    z-index: 16;
+    width: 28px;
+    height: 56px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg-glass);
+    backdrop-filter: var(--blur);
+    -webkit-backdrop-filter: var(--blur);
+    border: 1px solid var(--border);
+    border-right: none;
+    border-radius: var(--radius-md) 0 0 var(--radius-md);
+    cursor: pointer;
+    transition: all var(--transition);
+    box-shadow: var(--shadow-md);
+}
+
+.panel-reopen-tab:hover {
+    width: 34px;
+    background: var(--accent-bg);
+    border-color: var(--border-accent);
+}
+
+.panel-reopen-tab svg {
+    width: 16px;
+    height: 16px;
+    color: var(--text-secondary);
+    transition: color var(--transition);
+}
+
+.panel-reopen-tab:hover svg {
+    color: var(--accent);
+}
+
+#policy-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--space-lg) var(--space-xl);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+}
+
+#policy-panel-title {
+    font-size: var(--font-lg);
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+#policy-panel-close {
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--radius-sm);
+    color: var(--text-muted);
+    transition: all var(--transition);
+}
+
+#policy-panel-close:hover {
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--text-primary);
+}
+
+#policy-panel-close svg {
+    width: 16px;
+    height: 16px;
+}
+
+#policy-panel-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: var(--space-lg) var(--space-xl);
+}
+
+#policy-panel-content::-webkit-scrollbar {
+    width: 5px;
+}
+
+#policy-panel-content::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+#policy-panel-content::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 4px;
+}
+
+/* Panel header actions */
+.panel-header-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
+}
+
+.panel-save-btn {
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--radius-sm);
+    color: var(--text-muted);
+    transition: all var(--transition);
+}
+
+.panel-save-btn:hover {
+    background: var(--accent-bg);
+    color: var(--accent);
+}
+
+.panel-save-btn svg {
+    width: 16px;
+    height: 16px;
+}
+
+/* Policy sections */
+.policy-section {
+    margin-bottom: var(--space-xl);
+}
+
+.policy-section.hidden {
+    display: none;
+}
+
+#policy-address-text {
+    font-size: var(--font-md);
+    font-weight: 500;
+    color: var(--text-primary);
+    line-height: 1.5;
+}
+
+.info-card {
+    padding: var(--space-lg) 0;
+    border-bottom: 1px solid var(--border);
+}
+
+.info-card:last-child {
+    border-bottom: none;
+}
+
+.info-card h3 {
+    font-size: var(--font-base);
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: var(--space-xs);
+}
+
+.info-card .info-description {
+    font-size: var(--font-sm);
+    color: var(--text-secondary);
+    line-height: 1.5;
+    margin-bottom: var(--space-sm);
+}
+
+.info-value {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    font-size: var(--font-base);
+    color: var(--text-primary);
+}
+
+.info-icon {
+    color: var(--accent);
+    font-weight: 700;
+}
+
+.tag-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-sm);
+    margin-top: var(--space-sm);
+}
+
+.tag {
+    padding: var(--space-xs) var(--space-md);
+    background: var(--accent-bg);
+    border: 1px solid var(--border-accent);
+    border-radius: var(--radius-sm);
+    font-size: var(--font-xs);
+    font-weight: 500;
+    color: var(--accent-light);
+}
+
+/* Section headers */
+.section-header {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    font-size: var(--font-lg);
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: var(--space-xs);
+}
+
+.section-icon {
+    width: 18px;
+    height: 18px;
+    color: var(--accent);
+}
+
+.section-description {
+    font-size: var(--font-sm);
+    color: var(--text-secondary);
+    margin-bottom: var(--space-lg);
+}
+
+/* Policy / Dataset items */
+.policy-item,
+.dataset-item {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    padding: var(--space-md) 0;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    transition: background var(--transition);
+}
+
+.policy-item:hover,
+.dataset-item:hover {
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.policy-item:last-child,
+.dataset-item:last-child {
+    border-bottom: none;
+}
+
+.item-icon {
+    width: 16px;
+    height: 16px;
+    color: var(--accent);
+    flex-shrink: 0;
+    margin-top: 2px;
+    margin-right: var(--space-sm);
+}
+
+.item-left {
+    display: flex;
+    align-items: flex-start;
+    flex: 1;
+}
+
+.item-name {
+    font-size: var(--font-sm);
+    font-weight: 500;
+    color: var(--text-primary);
+    line-height: 1.4;
+}
+
+.item-description {
+    font-size: var(--font-xs);
+    color: var(--text-muted);
+    margin-top: 2px;
+    line-height: 1.4;
+}
+
+.item-meta {
+    font-size: var(--font-xs);
+    color: var(--text-muted);
+    white-space: nowrap;
+    margin-left: var(--space-md);
+}
+
+/* Tab section */
+.tab-section-header {
+    margin-bottom: var(--space-lg);
+}
+
+.tab-section-header h3 {
+    font-size: var(--font-lg);
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 4px;
+}
+
+.tab-section-desc {
+    font-size: var(--font-sm);
+    color: var(--text-secondary);
+    line-height: 1.5;
+}
+
+.tab-empty {
+    padding: var(--space-xl) 0;
+    text-align: center;
+    color: var(--text-muted);
+}

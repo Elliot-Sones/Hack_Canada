@@ -1,0 +1,142 @@
+/* ========================================
+   COCIVIL — Upload Zones
+   ======================================== */
+
+/* Overview Tab Upload Zone */
+.upload-zone-wrapper {
+    margin-bottom: var(--space-md);
+}
+
+.upload-dropzone {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-sm);
+    padding: var(--space-xl) var(--space-lg);
+    border: 1.5px dashed var(--border-accent);
+    border-radius: 10px;
+    background: var(--accent-bg);
+    cursor: pointer;
+    transition: border-color 0.2s, background 0.2s;
+}
+
+.upload-dropzone:hover,
+.upload-dropzone-active {
+    border-color: var(--accent);
+    background: rgba(200, 165, 92, 0.18);
+}
+
+.upload-dropzone-icon {
+    width: 28px;
+    height: 28px;
+    color: var(--accent);
+    opacity: 0.7;
+}
+
+.upload-dropzone-text {
+    font-size: var(--font-sm);
+    color: var(--text-primary);
+    font-weight: 500;
+}
+
+.upload-dropzone-hint {
+    font-size: var(--font-xs);
+    color: var(--text-muted);
+}
+
+/* File list */
+.upload-file-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-xs);
+    margin-top: var(--space-sm);
+}
+
+.upload-file-row {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--space-sm);
+    padding: var(--space-sm) var(--space-md);
+    border-radius: 8px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+}
+
+.upload-file-row.upload-status-ok {
+    border-color: rgba(74, 222, 128, 0.2);
+}
+
+.upload-file-row.upload-status-error {
+    border-color: rgba(248, 113, 113, 0.2);
+}
+
+.upload-file-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.upload-file-name {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: var(--font-sm);
+    font-weight: 500;
+    color: var(--text-primary);
+    word-break: break-word;
+}
+
+.upload-file-spinner {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border: 1.5px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    flex-shrink: 0;
+}
+
+.upload-file-check {
+    color: var(--success);
+    flex-shrink: 0;
+}
+
+.upload-file-x {
+    color: var(--error);
+    flex-shrink: 0;
+}
+
+.upload-file-status {
+    font-size: var(--font-xs);
+    color: var(--text-muted);
+    margin-top: 2px;
+}
+
+.upload-file-summary {
+    font-size: var(--font-xs);
+    color: var(--text-secondary);
+    margin-top: 2px;
+}
+
+.upload-file-issues {
+    font-size: var(--font-xs);
+    color: var(--warning);
+    margin-top: 2px;
+}
+
+.upload-file-remove {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 2px;
+    border-radius: 4px;
+    flex-shrink: 0;
+    transition: color 0.15s;
+}
+
+.upload-file-remove:hover {
+    color: var(--error);
+}

@@ -12,10 +12,10 @@ import {
 
 // ── DXF pipeline network colour map ────────────────────────────────────────
 const DXF_PIPE_COLORS = {
-  water_main:     '#2196f3',
+  water_main: '#2196f3',
   sanitary_sewer: '#795548',
-  storm_sewer:    '#4caf50',
-  gas_line:       '#ff9800',
+  storm_sewer: '#4caf50',
+  gas_line: '#ff9800',
 };
 
 // ── DXF network 3D mesh components ─────────────────────────────────────────
@@ -23,7 +23,7 @@ function DxfPipeMesh({ pipe, isSelected, onClick }) {
   const { geometry, position, quaternion } = useMemo(
     () => generatePipeSegment(
       [pipe.start[0], -(pipe.depth_m ?? 1.5), pipe.start[1]],
-      [pipe.end[0],   -(pipe.depth_m ?? 1.5), pipe.end[1]],
+      [pipe.end[0], -(pipe.depth_m ?? 1.5), pipe.end[1]],
       pipe.diameter_mm ?? 150,
     ),
     [pipe],
@@ -65,9 +65,9 @@ function DxfNodeMesh({ position, color, radius = 0.4, onClick }) {
 }
 
 function DxfNetworkScene({ pipelineData, selectedItem, onSelect }) {
-  const pipes    = pipelineData?.pipes    ?? [];
+  const pipes = pipelineData?.pipes ?? [];
   const manholes = pipelineData?.manholes ?? [];
-  const valves   = pipelineData?.valves   ?? [];
+  const valves = pipelineData?.valves ?? [];
   const hydrants = pipelineData?.hydrants ?? [];
   const fittings = pipelineData?.fittings ?? [];
   return (
@@ -107,81 +107,83 @@ function DxfNetworkScene({ pipelineData, selectedItem, onSelect }) {
 // ── DXF edit panel ──────────────────────────────────────────────────────────
 function DxfEditPanel({ item, onClose, onSave }) {
   const [form, setForm] = useState({ ...item });
-  const isPipe    = item && 'start' in item && 'end' in item;
-  const isManhole = item && 'depth_m' in item && !('start' in item) && !(['gate','butterfly','ball','check'].includes(item.type));
-  const isValve   = item && ['gate','butterfly','ball','check'].includes(item.type);
+  const isPipe = item && 'start' in item && 'end' in item;
+  const isManhole = item && 'depth_m' in item && !('start' in item) && !(['gate', 'butterfly', 'ball', 'check'].includes(item.type));
+  const isValve = item && ['gate', 'butterfly', 'ball', 'check'].includes(item.type);
   const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
   return (
-    <div style={{ position:'absolute', top:60, right:12, width:220, background:'rgba(20,20,20,0.92)',
-      border:'1px solid rgba(255,255,255,0.12)', borderRadius:8, padding:12, zIndex:20, color:'#eee' }}>
-      <div style={{ display:'flex', justifyContent:'space-between', marginBottom:10 }}>
+    <div style={{
+      position: 'absolute', top: 60, right: 12, width: 220, background: 'rgba(20,20,20,0.92)',
+      border: '1px solid rgba(255,255,255,0.12)', borderRadius: 8, padding: 12, zIndex: 20, color: '#eee'
+    }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}>
         <b>{isPipe ? 'Pipe Segment' : isManhole ? 'Manhole' : isValve ? 'Valve' : 'Node'}</b>
-        <button onClick={onClose} style={{ background:'none', border:'none', color:'#aaa', cursor:'pointer' }}>✕</button>
+        <button onClick={onClose} style={{ background: 'none', border: 'none', color: '#aaa', cursor: 'pointer' }}>✕</button>
       </div>
-      <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
         {isPipe && (<>
-          <label style={{ fontSize:12 }}>Diameter (mm)<br/>
+          <label style={{ fontSize: 12 }}>Diameter (mm)<br />
             <input type="number" value={form.diameter_mm ?? 150}
-              onChange={(e) => set('diameter_mm', parseFloat(e.target.value)||150)}
-              style={{ width:'100%', background:'#333', border:'1px solid #555', color:'#eee', borderRadius:4, padding:'2px 6px' }} />
+              onChange={(e) => set('diameter_mm', parseFloat(e.target.value) || 150)}
+              style={{ width: '100%', background: '#333', border: '1px solid #555', color: '#eee', borderRadius: 4, padding: '2px 6px' }} />
           </label>
-          <label style={{ fontSize:12 }}>Material<br/>
+          <label style={{ fontSize: 12 }}>Material<br />
             <select value={form.material ?? 'PVC'} onChange={(e) => set('material', e.target.value)}
-              style={{ width:'100%', background:'#333', border:'1px solid #555', color:'#eee', borderRadius:4, padding:'2px 6px' }}>
+              style={{ width: '100%', background: '#333', border: '1px solid #555', color: '#eee', borderRadius: 4, padding: '2px 6px' }}>
               <option>PVC</option><option>HDPE</option><option>DI</option><option>RCP</option><option>CSP</option>
             </select>
           </label>
-          <label style={{ fontSize:12 }}>Pipe Type<br/>
+          <label style={{ fontSize: 12 }}>Pipe Type<br />
             <select value={form.pipe_type ?? 'water_main'} onChange={(e) => set('pipe_type', e.target.value)}
-              style={{ width:'100%', background:'#333', border:'1px solid #555', color:'#eee', borderRadius:4, padding:'2px 6px' }}>
+              style={{ width: '100%', background: '#333', border: '1px solid #555', color: '#eee', borderRadius: 4, padding: '2px 6px' }}>
               <option value="water_main">Water Main</option>
               <option value="sanitary_sewer">Sanitary Sewer</option>
               <option value="storm_sewer">Storm Sewer</option>
               <option value="gas_line">Gas Line</option>
             </select>
           </label>
-          <label style={{ fontSize:12 }}>Depth (m)<br/>
+          <label style={{ fontSize: 12 }}>Depth (m)<br />
             <input type="number" step="0.1" value={form.depth_m ?? 1.5}
-              onChange={(e) => set('depth_m', parseFloat(e.target.value)||1.5)}
-              style={{ width:'100%', background:'#333', border:'1px solid #555', color:'#eee', borderRadius:4, padding:'2px 6px' }} />
+              onChange={(e) => set('depth_m', parseFloat(e.target.value) || 1.5)}
+              style={{ width: '100%', background: '#333', border: '1px solid #555', color: '#eee', borderRadius: 4, padding: '2px 6px' }} />
           </label>
         </>)}
         {isManhole && (<>
-          <label style={{ fontSize:12 }}>ID<br/>
+          <label style={{ fontSize: 12 }}>ID<br />
             <input value={form.id ?? ''} onChange={(e) => set('id', e.target.value)}
-              style={{ width:'100%', background:'#333', border:'1px solid #555', color:'#eee', borderRadius:4, padding:'2px 6px' }} />
+              style={{ width: '100%', background: '#333', border: '1px solid #555', color: '#eee', borderRadius: 4, padding: '2px 6px' }} />
           </label>
-          <label style={{ fontSize:12 }}>Depth (m)<br/>
+          <label style={{ fontSize: 12 }}>Depth (m)<br />
             <input type="number" step="0.1" value={form.depth_m ?? 2.0}
-              onChange={(e) => set('depth_m', parseFloat(e.target.value)||2.0)}
-              style={{ width:'100%', background:'#333', border:'1px solid #555', color:'#eee', borderRadius:4, padding:'2px 6px' }} />
+              onChange={(e) => set('depth_m', parseFloat(e.target.value) || 2.0)}
+              style={{ width: '100%', background: '#333', border: '1px solid #555', color: '#eee', borderRadius: 4, padding: '2px 6px' }} />
           </label>
-          <label style={{ fontSize:12 }}>Rim Elevation (m)<br/>
+          <label style={{ fontSize: 12 }}>Rim Elevation (m)<br />
             <input type="number" step="0.01" value={form.rim_elevation ?? ''}
               onChange={(e) => set('rim_elevation', e.target.value ? parseFloat(e.target.value) : null)}
-              style={{ width:'100%', background:'#333', border:'1px solid #555', color:'#eee', borderRadius:4, padding:'2px 6px' }} />
+              style={{ width: '100%', background: '#333', border: '1px solid #555', color: '#eee', borderRadius: 4, padding: '2px 6px' }} />
           </label>
         </>)}
         {isValve && (<>
-          <label style={{ fontSize:12 }}>Type<br/>
+          <label style={{ fontSize: 12 }}>Type<br />
             <select value={form.type ?? 'gate'} onChange={(e) => set('type', e.target.value)}
-              style={{ width:'100%', background:'#333', border:'1px solid #555', color:'#eee', borderRadius:4, padding:'2px 6px' }}>
+              style={{ width: '100%', background: '#333', border: '1px solid #555', color: '#eee', borderRadius: 4, padding: '2px 6px' }}>
               <option value="gate">Gate</option><option value="butterfly">Butterfly</option>
               <option value="ball">Ball</option><option value="check">Check</option>
             </select>
           </label>
-          <label style={{ fontSize:12 }}>Diameter (mm)<br/>
+          <label style={{ fontSize: 12 }}>Diameter (mm)<br />
             <input type="number" value={form.diameter_mm ?? 150}
-              onChange={(e) => set('diameter_mm', parseFloat(e.target.value)||150)}
-              style={{ width:'100%', background:'#333', border:'1px solid #555', color:'#eee', borderRadius:4, padding:'2px 6px' }} />
+              onChange={(e) => set('diameter_mm', parseFloat(e.target.value) || 150)}
+              style={{ width: '100%', background: '#333', border: '1px solid #555', color: '#eee', borderRadius: 4, padding: '2px 6px' }} />
           </label>
         </>)}
       </div>
-      <div style={{ display:'flex', gap:6, marginTop:12 }}>
+      <div style={{ display: 'flex', gap: 6, marginTop: 12 }}>
         <button onClick={() => onSave(form)}
-          style={{ flex:1, background:'#2196f3', border:'none', color:'#fff', borderRadius:4, padding:'4px 0', cursor:'pointer' }}>Apply</button>
+          style={{ flex: 1, background: '#2196f3', border: 'none', color: '#fff', borderRadius: 4, padding: '4px 0', cursor: 'pointer' }}>Apply</button>
         <button onClick={onClose}
-          style={{ flex:1, background:'#333', border:'1px solid #555', color:'#eee', borderRadius:4, padding:'4px 0', cursor:'pointer' }}>Cancel</button>
+          style={{ flex: 1, background: '#333', border: '1px solid #555', color: '#eee', borderRadius: 4, padding: '4px 0', cursor: 'pointer' }}>Cancel</button>
       </div>
     </div>
   );
@@ -191,17 +193,19 @@ function DxfEditPanel({ item, onClose, onSave }) {
 function DxfStatsBar({ pipelineData }) {
   const s = pipelineData?.summary ?? {};
   const pipes = pipelineData?.pipes ?? [];
-  const byType = pipes.reduce((a, p) => { a[p.pipe_type] = (a[p.pipe_type]??0)+1; return a; }, {});
+  const byType = pipes.reduce((a, p) => { a[p.pipe_type] = (a[p.pipe_type] ?? 0) + 1; return a; }, {});
   return (
-    <div style={{ position:'absolute', bottom:0, left:0, right:0, height:36, background:'rgba(10,10,10,0.85)',
-      display:'flex', alignItems:'center', gap:16, padding:'0 16px', fontSize:12, color:'#ccc', zIndex:10 }}>
-      <span><strong style={{ color:'#fff' }}>{s.total_length_m ?? 0}m</strong> total</span>
-      <span><strong style={{ color:'#fff' }}>{s.pipe_count ?? 0}</strong> segments</span>
-      <span><strong style={{ color:'#fff' }}>{s.manhole_count ?? 0}</strong> manholes</span>
-      {s.valve_count > 0 && <span><strong style={{ color:'#fff' }}>{s.valve_count}</strong> valves</span>}
-      {s.hydrant_count > 0 && <span><strong style={{ color:'#fff' }}>{s.hydrant_count}</strong> hydrants</span>}
+    <div style={{
+      position: 'absolute', bottom: 0, left: 0, right: 0, height: 36, background: 'rgba(10,10,10,0.85)',
+      display: 'flex', alignItems: 'center', gap: 16, padding: '0 16px', fontSize: 12, color: '#ccc', zIndex: 10
+    }}>
+      <span><strong style={{ color: '#fff' }}>{s.total_length_m ?? 0}m</strong> total</span>
+      <span><strong style={{ color: '#fff' }}>{s.pipe_count ?? 0}</strong> segments</span>
+      <span><strong style={{ color: '#fff' }}>{s.manhole_count ?? 0}</strong> manholes</span>
+      {s.valve_count > 0 && <span><strong style={{ color: '#fff' }}>{s.valve_count}</strong> valves</span>}
+      {s.hydrant_count > 0 && <span><strong style={{ color: '#fff' }}>{s.hydrant_count}</strong> hydrants</span>}
       {Object.entries(byType).map(([t, n]) => (
-        <span key={t} style={{ color: DXF_PIPE_COLORS[t] ?? '#ccc' }}>{n}× {t.replace(/_/g,' ')}</span>
+        <span key={t} style={{ color: DXF_PIPE_COLORS[t] ?? '#ccc' }}>{n}× {t.replace(/_/g, ' ')}</span>
       ))}
     </div>
   );
@@ -216,8 +220,8 @@ import {
   commitVersion,
   listVersions,
 } from '../api.js';
-import '../InfrastructureViewer.css';
-import '../ModelViewer.css';
+import '../styles/InfrastructureViewer.css';
+import '../styles/ModelViewer.css';
 
 const INFRA_COLORS = {
   water: '#2277bb',
@@ -447,9 +451,9 @@ export default function InfrastructureViewer({
     const updateList = (list) => list.map((it) => (it === dxfSelectedItem ? { ...it, ...updatedItem } : it));
     const updated = {
       ...activePipelineData,
-      pipes:    updateList(activePipelineData.pipes ?? []),
+      pipes: updateList(activePipelineData.pipes ?? []),
       manholes: updateList(activePipelineData.manholes ?? []),
-      valves:   updateList(activePipelineData.valves ?? []),
+      valves: updateList(activePipelineData.valves ?? []),
     };
     setLocalPipelineData(updated);
     setDxfSelectedItem(null);
@@ -459,32 +463,36 @@ export default function InfrastructureViewer({
 
   // If we have DXF pipeline data, render the dedicated network viewer
   if (isOpen && activePipelineData?.type === 'pipeline_network') {
-    const sidebarW = isSidebarCollapsed ? 52 : 160;
-    const panelW   = isPanelOpen ? 380 : 0;
-    const chatH    = isChatExpanded ? 328 : 48;
+    const sidebarW = isSidebarCollapsed ? 52 : 'var(--sidebar-width, 160px)';
+    const panelW = isPanelOpen ? 'var(--panel-width, 380px)' : 0;
+    const chatH = isChatExpanded ? 'calc(var(--chat-height, 280px) + 49px)' : 49;
     return createPortal(
-      <div style={{ position:'fixed', top:0, left:sidebarW, right:panelW, bottom:chatH,
-        background:'#111', zIndex:6, transition:'left 0.3s,right 0.3s,bottom 0.3s', display:'flex', flexDirection:'column' }}>
+      <div className="infra-canvas-area" style={{
+        position: 'fixed', top: 0, left: sidebarW, right: panelW, bottom: chatH,
+        background: '#111', zIndex: 6, transition: 'left 0.3s,right 0.3s,bottom 0.3s', display: 'flex', flexDirection: 'column'
+      }}>
         {/* Header */}
-        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between',
-          padding:'8px 16px', background:'rgba(0,0,0,0.6)', zIndex:10, flexShrink:0 }}>
-          <span style={{ color:'#eee', fontWeight:600 }}>Pipeline Network Viewer</span>
-          <div style={{ display:'flex', gap:8 }}>
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '8px 16px', background: 'rgba(0,0,0,0.6)', zIndex: 10, flexShrink: 0
+        }}>
+          <span style={{ color: '#eee', fontWeight: 600 }}>Pipeline Network Viewer</span>
+          <div style={{ display: 'flex', gap: 8 }}>
             {isDxfDirty && (
               <button onClick={() => { onPipelineDataChange?.(localPipelineData); setIsDxfDirty(false); }}
-                style={{ background:'#2196f3', border:'none', color:'#fff', borderRadius:4, padding:'4px 12px', cursor:'pointer', fontSize:12 }}>
+                style={{ background: '#2196f3', border: 'none', color: '#fff', borderRadius: 4, padding: '4px 12px', cursor: 'pointer', fontSize: 12 }}>
                 Save changes
               </button>
             )}
             <button onClick={onClose}
-              style={{ background:'none', border:'1px solid #555', color:'#eee', borderRadius:4, padding:'4px 10px', cursor:'pointer', fontSize:12 }}>
+              style={{ background: 'none', border: '1px solid #555', color: '#eee', borderRadius: 4, padding: '4px 10px', cursor: 'pointer', fontSize: 12 }}>
               ✕
             </button>
           </div>
         </div>
         {/* Canvas area */}
-        <div style={{ flex:1, position:'relative', overflow:'hidden' }}>
-          <Canvas camera={{ position:[0,30,60], fov:55 }} shadows gl={{ antialias:true }}
+        <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
+          <Canvas camera={{ position: [0, 30, 60], fov: 55 }} shadows gl={{ antialias: true }}
             onPointerMissed={() => setDxfSelectedItem(null)}>
             <Suspense fallback={null}>
               <DxfNetworkScene pipelineData={activePipelineData} selectedItem={dxfSelectedItem} onSelect={handleDxfSelect} />
@@ -534,7 +542,7 @@ export default function InfrastructureViewer({
           console.error('Failed to create main branch:', e);
         }
       }
-    }).catch(() => {});
+    }).catch(() => { });
   }, [projectId, isOpen]);
 
   // Load versions
@@ -543,7 +551,7 @@ export default function InfrastructureViewer({
     listVersions(currentBranch.id).then((data) => {
       setVersions(data || []);
       if (data?.length > 0) setCurrentVersion(data[0]);
-    }).catch(() => {});
+    }).catch(() => { });
   }, [currentBranch]);
 
   const handleCommit = useCallback(async (message) => {
@@ -588,9 +596,9 @@ export default function InfrastructureViewer({
 
   if (!isOpen) return null;
 
-  const sidebarW = isSidebarCollapsed ? 52 : 160;
-  const panelW = isPanelOpen ? 380 : 0;
-  const chatH = isChatExpanded ? 328 : 48;
+  const sidebarW = isSidebarCollapsed ? 52 : 'var(--sidebar-width, 160px)';
+  const panelW = isPanelOpen ? 'var(--panel-width, 380px)' : 0;
+  const chatH = isChatExpanded ? 'calc(var(--chat-height, 280px) + 49px)' : 49;
 
   const closeBtn = createPortal(
     <button
@@ -600,7 +608,7 @@ export default function InfrastructureViewer({
       style={{
         position: 'fixed',
         top: 12,
-        right: (isPanelOpen ? 380 : 0) + 16,
+        right: isPanelOpen ? 'calc(var(--panel-width, 380px) + 16px)' : 16,
         zIndex: 99999,
         transition: 'right 0.3s ease',
       }}

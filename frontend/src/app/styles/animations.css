@@ -1,0 +1,183 @@
+/* ========================================
+   COCIVIL — Animations & Transitions
+   ======================================== */
+
+/* --- General --- */
+@keyframes slideDown {
+    from {
+        opacity: 0;
+        transform: translateY(-8px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes fadeInUp {
+    from {
+        opacity: 0;
+        transform: translateY(8px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes typingBounce {
+
+    0%,
+    60%,
+    100% {
+        transform: translateY(0);
+    }
+
+    30% {
+        transform: translateY(-6px);
+    }
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* --- Landing Entrance --- */
+@keyframes landingFadeIn {
+    from {
+        opacity: 0;
+    }
+
+    to {
+        opacity: 1;
+    }
+}
+
+@keyframes landingBrandIn {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes landingCardIn {
+    from {
+        opacity: 0;
+        transform: translateY(16px) scale(0.98);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+/* --- Landing Exit --- */
+.landing-exit {
+    animation: landingOverlayOut 0.7s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+.landing-exit .landing-brand {
+    animation: landingBrandOut 0.35s cubic-bezier(0.4, 0, 1, 1) forwards;
+}
+
+.landing-exit .landing-card {
+    animation: landingCardOut 0.4s cubic-bezier(0.4, 0, 1, 1) 0.05s forwards;
+}
+
+.landing-exit .landing-hint {
+    animation: landingHintOut 0.25s cubic-bezier(0.4, 0, 1, 1) forwards;
+}
+
+@keyframes landingOverlayOut {
+    0% {
+        opacity: 1;
+        backdrop-filter: blur(40px);
+        -webkit-backdrop-filter: blur(40px);
+    }
+
+    100% {
+        opacity: 0;
+        backdrop-filter: blur(0px);
+        -webkit-backdrop-filter: blur(0px);
+        pointer-events: none;
+    }
+}
+
+@keyframes landingBrandOut {
+    to {
+        opacity: 0;
+        transform: translateY(-20px);
+    }
+}
+
+@keyframes landingCardOut {
+    to {
+        opacity: 0;
+        transform: scale(0.95) translateY(10px);
+    }
+}
+
+@keyframes landingHintOut {
+    to {
+        opacity: 0;
+    }
+}
+
+/* --- Dashboard Entrance --- */
+#sidebar.dash-enter {
+    animation: sidebarSlideIn 0.4s cubic-bezier(0, 0, 0.2, 1) both;
+}
+
+#search-container.dash-enter {
+    animation: searchSlideIn 0.4s cubic-bezier(0, 0, 0.2, 1) 0.1s both;
+}
+
+#chat-panel.dash-enter {
+    animation: chatSlideIn 0.4s cubic-bezier(0, 0, 0.2, 1) 0.15s both;
+}
+
+@keyframes sidebarSlideIn {
+    from {
+        opacity: 0;
+        transform: translateX(-100%);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+@keyframes searchSlideIn {
+    from {
+        opacity: 0;
+        transform: translateY(-20px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes chatSlideIn {
+    from {
+        opacity: 0;
+        transform: translateY(100%);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}

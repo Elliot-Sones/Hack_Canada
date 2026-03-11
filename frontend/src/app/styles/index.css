@@ -1,0 +1,26 @@
+/* ========================================
+   COCIVIL — Main Entry Point
+   Import order matters: variables first,
+   then layout, then components.
+   ======================================== */
+
+@import './variables.css';
+/* CSS vars, reset, utility, responsive */
+@import './animations.css';
+/* All keyframes & transition classes */
+@import './map-search.css';
+/* Map, search bar & suggestions */
+@import './sidebar.css';
+/* Left sidebar, nav, user profile, history */
+@import './panel.css';
+/* Right policy panel & content sections */
+@import './chat.css';
+/* Bottom chat panel & upload UI */
+@import './upload.css';
+/* File upload dropzones & file list */
+@import './due-diligence.css';
+/* KPI cards, configurator, accordion, precedents, etc. */
+@import './documents.css';
+/* Document gallery & viewer */
+@import './index-landing.css';
+/* Landing page overlay */
