@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 # Resolve paths relative to this file's directory (works regardless of working dir)
 _rag_dir = Path(__file__).resolve().parent
 load_dotenv(_rag_dir / ".env")
+load_dotenv(_rag_dir.parent / ".env")
 _docs_raw = os.getenv("DOCS_DIR", "../../SDG/Hack Canada")
 DOCS_DIR = str((_rag_dir / _docs_raw).resolve())
 
