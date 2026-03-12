@@ -1,0 +1,541 @@
+/* ── Electrical Viewer Overlay ─────────────────────────────────────────────── */
+
+.elec-viewer-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 5;
+    pointer-events: none;
+}
+
+.elec-viewer-overlay > * {
+    pointer-events: auto;
+}
+
+/* ── Close Button ─────────────────────────────────────────────────────────── */
+
+.elec-close-btn {
+    position: absolute;
+    top: 16px;
+    left: calc(var(--sidebar-width, 160px) + 16px);
+    z-index: 25;
+    background: #1a1a1a;
+    border: 1px solid #333;
+    border-radius: 8px;
+    padding: 8px;
+    color: #f0ece4;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.elec-close-btn:hover {
+    background: #333;
+}
+
+/* ── Stats Bar (bottom) ──────────────────────────────────────────────────── */
+
+.elec-stats-bar {
+    position: absolute;
+    bottom: 56px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(26, 26, 26, 0.92);
+    border: 1px solid #333;
+    border-radius: 10px;
+    padding: 10px 20px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    font-family: Inter, sans-serif;
+    color: #f0ece4;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+    z-index: 20;
+    max-width: 90vw;
+    overflow-x: auto;
+}
+
+.elec-stat {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+}
+
+.elec-stat--small {
+    flex-direction: row;
+    gap: 6px;
+}
+
+.elec-stat-value {
+    font-size: 16px;
+    font-weight: 700;
+    color: #e74c3c;
+}
+
+.elec-stat--small .elec-stat-value {
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.elec-stat-label {
+    font-size: 10px;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.elec-stat--small .elec-stat-label {
+    text-transform: none;
+    color: #aaa;
+}
+
+.elec-stat-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.elec-stat-divider {
+    width: 1px;
+    height: 28px;
+    background: #444;
+}
+
+/* ── Filter Panel (top-right) ────────────────────────────────────────────── */
+
+.elec-filter-panel {
+    position: absolute;
+    top: 60px;
+    right: 16px;
+    background: rgba(26, 26, 26, 0.95);
+    border: 1px solid #333;
+    border-radius: 10px;
+    padding: 12px 16px;
+    min-width: 180px;
+    font-family: Inter, sans-serif;
+    color: #f0ece4;
+    z-index: 20;
+    font-size: 12px;
+}
+
+.elec-filter-header {
+    font-size: 11px;
+    font-weight: 600;
+    color: #e74c3c;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 8px;
+}
+
+.elec-filter-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 0;
+    cursor: pointer;
+    color: #ccc;
+}
+
+.elec-filter-item input[type="checkbox"] {
+    accent-color: #e74c3c;
+}
+
+.elec-filter-select {
+    width: 100%;
+    background: #222;
+    border: 1px solid #444;
+    color: #f0ece4;
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 11px;
+    cursor: pointer;
+}
+
+/* ── Legend ───────────────────────────────────────────────────────────────── */
+
+.elec-legend-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 3px 0;
+    font-size: 11px;
+    color: #ccc;
+}
+
+.elec-legend-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.elec-legend-dot--lg {
+    width: 12px;
+    height: 12px;
+}
+
+.elec-legend-line {
+    width: 16px;
+    height: 3px;
+    border-radius: 2px;
+    flex-shrink: 0;
+}
+
+/* ── Panel Tabs ──────────────────────────────────────────────────────────── */
+
+.elec-panel-tabs {
+    position: absolute;
+    bottom: 110px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 2px;
+    background: rgba(26, 26, 26, 0.9);
+    border: 1px solid #333;
+    border-radius: 8px;
+    overflow: hidden;
+    z-index: 20;
+}
+
+.elec-panel-tab {
+    padding: 6px 16px;
+    background: transparent;
+    border: none;
+    color: #888;
+    font-family: Inter, sans-serif;
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.elec-panel-tab.active {
+    background: #e74c3c;
+    color: #fff;
+}
+
+.elec-panel-tab:hover:not(.active) {
+    color: #f0ece4;
+}
+
+/* ── Compliance / Capacity Panel (left) ──────────────────────────────────── */
+
+.elec-compliance-panel {
+    position: absolute;
+    top: 60px;
+    left: calc(var(--sidebar-width, 160px) + 16px);
+    background: rgba(26, 26, 26, 0.95);
+    border: 1px solid #333;
+    border-radius: 10px;
+    padding: 16px;
+    width: 340px;
+    max-height: calc(100vh - 200px);
+    overflow-y: auto;
+    font-family: Inter, sans-serif;
+    color: #f0ece4;
+    z-index: 20;
+}
+
+.elec-compliance-header {
+    font-size: 13px;
+    font-weight: 600;
+    color: #e74c3c;
+    margin-bottom: 12px;
+}
+
+.elec-compliance-form {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.elec-form-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 11px;
+    color: #ccc;
+}
+
+.elec-form-row input,
+.elec-form-row select {
+    background: #222;
+    border: 1px solid #444;
+    color: #f0ece4;
+    border-radius: 4px;
+    padding: 3px 6px;
+    font-size: 11px;
+    width: 120px;
+    text-align: right;
+}
+
+.elec-form-section {
+    font-size: 10px;
+    font-weight: 600;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-top: 10px;
+    margin-bottom: 4px;
+    padding-top: 6px;
+    border-top: 1px solid #333;
+}
+
+.elec-form-check {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+    color: #ccc;
+    cursor: pointer;
+    padding: 2px 0;
+}
+
+.elec-form-check input[type="checkbox"] {
+    accent-color: #e74c3c;
+}
+
+.elec-compliance-run {
+    margin-top: 12px;
+    padding: 8px 16px;
+    background: #e74c3c;
+    border: none;
+    border-radius: 6px;
+    color: #fff;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.elec-compliance-run:hover {
+    background: #c0392b;
+}
+
+.elec-compliance-run:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* ── Compliance Results ──────────────────────────────────────────────────── */
+
+.elec-compliance-results {
+    margin-top: 12px;
+    border-top: 1px solid #333;
+    padding-top: 12px;
+}
+
+.elec-compliance-verdict {
+    text-align: center;
+    font-size: 14px;
+    font-weight: 700;
+    padding: 8px;
+    border-radius: 6px;
+    margin-bottom: 10px;
+}
+
+.elec-compliance-verdict.pass {
+    background: rgba(39, 174, 96, 0.15);
+    color: #27ae60;
+    border: 1px solid rgba(39, 174, 96, 0.3);
+}
+
+.elec-compliance-verdict.fail {
+    background: rgba(231, 76, 60, 0.15);
+    color: #e74c3c;
+    border: 1px solid rgba(231, 76, 60, 0.3);
+}
+
+.elec-compliance-rule {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 6px 0;
+    border-bottom: 1px solid #2a2a2a;
+}
+
+.elec-compliance-rule:last-child {
+    border-bottom: none;
+}
+
+.elec-rule-status {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    margin-top: 4px;
+}
+
+.elec-rule-status.pass {
+    background: #27ae60;
+}
+
+.elec-rule-status.fail {
+    background: #e74c3c;
+}
+
+.elec-rule-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.elec-rule-name {
+    font-size: 11px;
+    font-weight: 500;
+    color: #f0ece4;
+}
+
+.elec-rule-ref {
+    font-size: 10px;
+    color: #888;
+}
+
+.elec-rule-note {
+    font-size: 10px;
+    color: #666;
+    margin-top: 2px;
+}
+
+.elec-compliance-error {
+    margin-top: 12px;
+    padding: 8px;
+    background: rgba(231, 76, 60, 0.1);
+    border: 1px solid rgba(231, 76, 60, 0.3);
+    border-radius: 6px;
+    color: #e74c3c;
+    font-size: 11px;
+}
+
+/* ── Grid Overview ───────────────────────────────────────────────────────── */
+
+.elec-grid-overview {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.elec-grid-stat-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 3px 0;
+    font-size: 11px;
+}
+
+.elec-grid-stat-label {
+    color: #aaa;
+}
+
+.elec-grid-stat-val {
+    color: #f0ece4;
+    font-weight: 600;
+    font-size: 11px;
+}
+
+/* ── Capacity Results ────────────────────────────────────────────────────── */
+
+.elec-capacity-results {
+    margin-top: 12px;
+    border-top: 1px solid #333;
+    padding-top: 12px;
+}
+
+.elec-capacity-verdict {
+    padding: 12px;
+    border-radius: 8px;
+    margin-bottom: 12px;
+}
+
+.elec-capacity-verdict.verdict-adequate {
+    background: rgba(39, 174, 96, 0.12);
+    border: 1px solid rgba(39, 174, 96, 0.3);
+}
+
+.elec-capacity-verdict.verdict-marginal {
+    background: rgba(243, 156, 18, 0.12);
+    border: 1px solid rgba(243, 156, 18, 0.3);
+}
+
+.elec-capacity-verdict.verdict-insufficient {
+    background: rgba(231, 76, 60, 0.12);
+    border: 1px solid rgba(231, 76, 60, 0.3);
+}
+
+.elec-capacity-verdict.verdict-unknown {
+    background: rgba(136, 136, 136, 0.12);
+    border: 1px solid rgba(136, 136, 136, 0.3);
+}
+
+.elec-verdict-label {
+    font-size: 14px;
+    font-weight: 700;
+    text-align: center;
+    margin-bottom: 8px;
+    letter-spacing: 0.05em;
+}
+
+.verdict-adequate .elec-verdict-label { color: #27ae60; }
+.verdict-marginal .elec-verdict-label { color: #f39c12; }
+.verdict-insufficient .elec-verdict-label { color: #e74c3c; }
+.verdict-unknown .elec-verdict-label { color: #888; }
+
+.elec-verdict-score {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.elec-score-bar {
+    flex: 1;
+    height: 6px;
+    background: #333;
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.elec-score-fill {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.5s ease;
+}
+
+.elec-score-num {
+    font-size: 12px;
+    font-weight: 600;
+    color: #f0ece4;
+    min-width: 44px;
+    text-align: right;
+}
+
+.elec-capacity-detail {
+    margin-bottom: 8px;
+}
+
+.elec-capacity-infra {
+    margin-bottom: 4px;
+}
+
+.elec-capacity-location {
+    font-size: 10px;
+    color: #666;
+    margin-top: 8px;
+    text-align: center;
+}
+
+/* ── Recommendations ─────────────────────────────────────────────────────── */
+
+.elec-capacity-recs {
+    margin-top: 4px;
+}
+
+.elec-rec-item {
+    font-size: 11px;
+    color: #ccc;
+    padding: 5px 0 5px 12px;
+    border-left: 2px solid #444;
+    margin-bottom: 4px;
+    line-height: 1.4;
+}
+
+.elec-rec-item:last-child {
+    margin-bottom: 0;
+}

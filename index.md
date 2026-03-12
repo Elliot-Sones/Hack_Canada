@@ -1,7 +1,7 @@
 # CoCivil — AI-Powered Civil Development Platform
 
 > **Auto-maintained**: Updated after every file edit/creation. See `.claude/CLAUDE.md` for rules.
-> **Last updated**: 2026-03-10 (full index audit) | **PRD**: [`.claude/docs/PRD.md`](.claude/docs/PRD.md)
+> **Last updated**: 2026-03-11 (infra data layer refactor: typed tables, no file caches) | **PRD**: [`.claude/docs/PRD.md`](.claude/docs/PRD.md)
 
 ---
 
@@ -99,7 +99,7 @@
 | `plan.py` | Development plan |
 | `geospatial.py` | Parcel, zoning, overlay |
 | `entitlement.py` | Variances, approvals |
-| `infrastructure.py` | Water, electrical, drainage assets |
+| `infrastructure.py` | PipelineAsset (water, sewer, gas), ElectricalAsset (power lines, substations), BridgeAsset |
 | `finance.py` | Development cost models |
 | `policy.py` | Policy references & citations |
 | `ingestion.py` | Data ingestion tracking |
@@ -118,9 +118,9 @@
 | `parcels.py` | `/api/v1/parcels` | Parcel data & search |
 | `entitlement.py` | `/api/v1/entitlements` | Zoning approvals |
 | `compliance.py` | `/api/v1/compliance` | OBC interior compliance checks |
-| `infrastructure.py` | `/api/v1/infrastructure` | Pipeline assets, watermains, compliance |
+| `infrastructure.py` | `/api/v1/infrastructure` | Pipelines, watermains, sewers, electrical — all from typed DB tables |
 | `finance.py` | `/api/v1/finance` | Pro formas, cost estimates |
-| `assistant.py` | `/api/v1/assistant` | AI chat |
+| `assistant.py` | `/api/v1/assistant` | AI chat — single-call with live zoning, electrical, water, and RAG context |
 | `exports.py` | `/api/v1/exports` | PDF/Docx generation |
 | `ingestion.py` | `/api/v1/ingestion` | CKAN/GeoJSON import |
 | `uploads.py` | `/api/v1/uploads` | File upload handling |
@@ -193,7 +193,7 @@
 | `plan.py` | PlanGenerateRequest, PlanResponse, SubmissionDocumentResponse, readiness |
 | `entitlement.py` | EntitlementRunRequest/Response, PrecedentSearchRequest/Response |
 | `geospatial.py` | ParcelSearchParams, ParcelResponse, PolicyStackResponse, ZoningAnalysisResponse |
-| `assistant.py` | AssistantChatRequest/Response, ModelParseRequest, InfraModelParseRequest |
+| `assistant.py` | AssistantChatRequest/Response (+ parcel_id, lat, lng fields), ModelParseRequest, InfraModelParseRequest |
 | `finance.py` | FinancialRunRequest/Response, FinancialAssumptionSetReferenceResponse |
 | `infrastructure.py` | PipelineComplianceRequest, BridgeComplianceRequest, NearbyPipelineRequest |
 | `simulation.py` | MassingRequest/Response, LayoutRunRequest/Response, UnitTypeReferenceResponse |
@@ -511,7 +511,7 @@ Address → source-discovery → parcel-zoning-research → buildability-analysi
 | `data/zoning-height-overlay-4326.geojson` | Height restriction overlays |
 | `data/development-applications.json` | CoA/ZBA/OPA precedent records (UTM coords) |
 | `data/test_floor_plan.dxf` | Sample DXF for parser testing |
-| `water-system-data/` | 7 files: watermain networks, hydrants, valves, fittings, fountains, waterbodies shapefile |
+| `water-system-data/` | Distribution mains GeoJSON + waterbodies shapefile (other layers removed — ingested into pipeline_assets) |
 | `water-policy/` | 13 markdown docs + 20 PDF references (Ontario regs, MECP procedures, MTU zone maps) |
 | `Road/` | Road Reconstruction Program GeoJSON (LineString) |
 | `City-electric-charge/` | City-operated EV charging stations GeoJSON (Point) |
@@ -527,7 +527,7 @@ Address → source-discovery → parcel-zoning-research → buildability-analysi
 | `Dockerfile` | Two-stage build: Node 20 frontend + Python 3.11 backend |
 | `railway.toml` | Railway config (pre-deploy: alembic migrate, health: /api/v1/health) |
 | `alembic.ini` | Alembic migration config |
-| `alembic/` | 6 migrations: initial 34-table schema → infrastructure assets |
+| `alembic/` | 9 migrations: initial 34-table schema → infrastructure assets → infra data refactor (electrical_assets table, pipeline_assets columns) |
 | `pyproject.toml` | Python project config (uv), Python ≥3.11, pytest asyncio_mode=auto |
 | `Makefile` | 12 targets: infra-up/down, doctor, migrate, run-api/frontend, seed, test |
 | `.env.example` | Environment variable template (localhost targets) |
@@ -654,13 +654,18 @@ Address → source-discovery → parcel-zoning-research → buildability-analysi
 | `POST` | `/api/v1/admin/ingest/bridges` | Trigger bridge inventory ingestion |
 | `GET` | `/api/v1/admin/ingest/status` | Ingestion status + dataset counts |
 
-### Infrastructure (3 endpoints)
+### Infrastructure (8 endpoints)
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `GET` | `/api/v1/infrastructure/pipelines/nearby` | Nearby pipeline assets (GeoJSON) |
 | `POST` | `/api/v1/infrastructure/compliance/pipeline` | Pipeline compliance check |
-| `GET` | `/api/v1/infrastructure/watermains/bbox` | Watermain segments in viewport |
+| `GET` | `/api/v1/infrastructure/watermains/bbox` | Water main segments in viewport (from pipeline_assets) |
+| `GET` | `/api/v1/infrastructure/sewers/bbox` | Sewer segments in viewport (sanitary + storm from pipeline_assets) |
+| `GET` | `/api/v1/infrastructure/electrical/bbox` | Electrical assets in viewport (from electrical_assets) |
+| `GET` | `/api/v1/infrastructure/electrical/nearby` | Nearby electrical assets (GeoJSON) |
+| `GET` | `/api/v1/infrastructure/electrical/standards` | Ontario electrical standards reference |
+| `POST` | `/api/v1/infrastructure/electrical/capacity-check` | Grid capacity check for proposed building |
 
 ### Compliance, Exports, Design, Governance, Policy, Jobs (12 endpoints)
 

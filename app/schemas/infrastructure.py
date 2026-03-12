@@ -96,3 +96,26 @@ class InfraModelParseResponse(BaseModel):
     asset_type: str
     params: dict
     warnings: list[str] | None = None
+
+
+class ElectricalComplianceRequest(BaseModel):
+    building_type: Literal["residential", "commercial", "industrial", "institutional"]
+    num_units: int | None = None
+    total_area_m2: float | None = None
+    num_floors: int | None = None
+    service_amps: float | None = None
+    has_ev_charging: bool = False
+    has_electric_heating: bool = False
+
+
+class CapacityCheckRequest(BaseModel):
+    lat: float = Field(..., ge=-90, le=90)
+    lng: float = Field(..., ge=-180, le=180)
+    building_type: str = "residential"
+    building_subtype: str | None = None
+    requested_amps: float | None = None
+    num_units: int = 1
+    total_area_m2: float | None = None
+    num_floors: int | None = None
+    has_ev_charging: bool = False
+    has_electric_heating: bool = False

@@ -7,12 +7,13 @@ import PolicyPanel from './components/PolicyPanel.jsx';
 import ChatPanel from './components/ChatPanel.jsx';
 import InfrastructureLayerControl from './components/InfrastructureLayerControl.jsx';
 import LandingPage from './components/LandingPage.jsx';
-import { searchParcels, getNearbyPipelines, getWatermainsBbox } from './api.js';
+import { searchParcels, getNearbyPipelines, getWatermainsBbox, getSewersBbox, getElectricalBbox } from './api.js';
 import { buildParcelState, isResolvedParcel } from './lib/parcelState.js';
 import './landing.css';
 
 const ModelViewer = lazy(() => import('./components/ModelViewer.jsx'));
 const InfrastructureViewer = lazy(() => import('./components/InfrastructureViewer.jsx').catch(() => ({ default: () => null })));
+const ElectricalViewer = lazy(() => import('./components/ElectricalViewer.jsx').catch(() => ({ default: () => null })));
 
 export default function App() {
   const { isLoading, isAuthenticated, loginWithRedirect, user } = useAuth0();
@@ -34,6 +35,8 @@ export default function App() {
   const [projectId, setProjectId] = useState(null);
   const [activePlanId, setActivePlanId] = useState(null);
   const [assetType, setAssetType] = useState('building');
+  const [electricalData, setElectricalData] = useState(null);
+  const [mapCenter, setMapCenter] = useState({ lat: 43.6532, lng: -79.3832 });
 
   const handleUploadAnalyzed = useCallback((upload) => {
     setAnalyzedUploads((prev) => {
@@ -234,13 +237,31 @@ export default function App() {
     let cancelled = false;
     const loadInfraData = async () => {
       const center = map.getCenter();
-      const lat = center.lat;
-      const lng = center.lng;
+      if (!cancelled) setMapCenter({ lat: center.lat, lng: center.lng });
       try {
         if (assetType === 'pipeline') {
           const bounds = map.getBounds();
-          const data = await getWatermainsBbox(bounds);
-          if (!cancelled && mapRef.current) mapRef.current.setPipelines(data);
+          const [waterData, sewerData] = await Promise.all([
+            getWatermainsBbox(bounds),
+            getSewersBbox(bounds),
+          ]);
+          if (!cancelled && mapRef.current) {
+            const combined = {
+              type: 'FeatureCollection',
+              features: [
+                ...(waterData?.features || []),
+                ...(sewerData?.features || []),
+              ],
+            };
+            mapRef.current.setPipelines(combined);
+          }
+        } else if (assetType === 'electrical') {
+          const bounds = map.getBounds();
+          const data = await getElectricalBbox(bounds);
+          if (!cancelled) {
+            setElectricalData(data);
+            if (mapRef.current) mapRef.current.setElectrical(data);
+          }
         }
       } catch (err) {
         // Silently fail — infrastructure data is optional context
@@ -333,7 +354,10 @@ export default function App() {
         historyItems={searchHistory}
         onHistoryItemClick={handleHistoryItemClick}
         assetType={assetType}
-        onAssetTypeChange={setAssetType}
+        onAssetTypeChange={(type) => {
+          setAssetType(type);
+          if (type === 'electrical') setIsModelOpen(true);
+        }}
       />
       <PolicyPanel
         parcel={selectedParcel}
@@ -346,6 +370,8 @@ export default function App() {
         activePlanId={activePlanId}
         assetType={assetType}
         selectedPipelineAsset={selectedPipelineAsset}
+        electricalData={electricalData}
+        mapCenter={mapCenter}
       />
       {!isPanelOpen && (
         <button
@@ -399,6 +425,16 @@ export default function App() {
             floorPlans={floorPlans}
             projectId={projectId}
             parcelId={selectedParcel?.id}
+          />
+        ) : assetType === 'electrical' ? (
+          <ElectricalViewer
+            isOpen={isModelOpen}
+            onClose={() => setIsModelOpen(false)}
+            isPanelOpen={isPanelOpen}
+            isSidebarCollapsed={isSidebarCollapsed}
+            isChatExpanded={isChatExpanded}
+            electricalData={electricalData}
+            mapCenter={mapCenter}
           />
         ) : (
           <InfrastructureViewer

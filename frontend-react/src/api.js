@@ -130,8 +130,11 @@ export async function parseModel(text, currentParams = null, zoneCode = null, lo
     });
 }
 
-export async function chatWithAssistant({ messages, parcelContext = null, modelParams = null, zoneCode = null, uploadContext = null }) {
+export async function chatWithAssistant({ messages, parcelContext = null, parcelId = null, lat = null, lng = null, modelParams = null, zoneCode = null, uploadContext = null }) {
     const payload = { messages, parcel_context: parcelContext };
+    if (parcelId) payload.parcel_id = parcelId;
+    if (lat != null) payload.lat = lat;
+    if (lng != null) payload.lng = lng;
     if (modelParams) payload.model_params = modelParams;
     if (zoneCode) payload.zone_code = zoneCode;
     if (uploadContext?.length) payload.upload_context = uploadContext;
@@ -287,6 +290,31 @@ export async function checkPipelineCompliance(params) {
     });
 }
 
+export async function getElectricalBbox(bounds, options = {}) {
+    try {
+        const sw = bounds.getSouthWest();
+        const ne = bounds.getNorthEast();
+        const url = `${API_BASE}/infrastructure/electrical/bbox?min_lng=${sw.lng}&min_lat=${sw.lat}&max_lng=${ne.lng}&max_lat=${ne.lat}`;
+        return await apiFetch(url, options);
+    } catch (error) {
+        if (isAbortError(error)) throw error;
+        return { type: 'FeatureCollection', features: [] };
+    }
+}
+
+export async function getElectricalStandards(options = {}) {
+    return apiFetch(`${API_BASE}/infrastructure/electrical/standards`, options);
+}
+
+export async function checkElectricalCapacity(params, options = {}) {
+    return apiFetch(`${API_BASE}/infrastructure/electrical/capacity-check`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(params),
+        ...options,
+    });
+}
+
 export async function parseInfraModel(text, currentParams = null, assetType = 'pipeline') {
     return apiFetch(`${API_BASE}/assistant/parse-infra-model`, {
         method: 'POST',
@@ -304,6 +332,19 @@ export async function triggerSanitarySewerIngestion() {
 
 export async function triggerStormSewerIngestion() {
     return apiFetch(`${API_BASE}/admin/ingest/storm-sewers`, { method: 'POST' });
+}
+
+export async function getSewersBbox(bounds, pipeType = null, options = {}) {
+    try {
+        const sw = bounds.getSouthWest();
+        const ne = bounds.getNorthEast();
+        let url = `${API_BASE}/infrastructure/sewers/bbox?min_lng=${sw.lng}&min_lat=${sw.lat}&max_lng=${ne.lng}&max_lat=${ne.lat}`;
+        if (pipeType) url += `&pipe_type=${pipeType}`;
+        return await apiFetch(url, options);
+    } catch (error) {
+        if (isAbortError(error)) throw error;
+        return { type: 'FeatureCollection', features: [] };
+    }
 }
 
 // ─── Design Version Control ───

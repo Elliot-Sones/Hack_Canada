@@ -115,6 +115,16 @@ const MapView = forwardRef(function MapView({ isParcelResolved, onModelOpen, isP
             }
             setInfraEmpty(!fc.features || fc.features.length === 0);
         },
+        /** Load electrical GeoJSON onto the map */
+        setElectrical(geojson) {
+            const map = mapInstanceRef.current;
+            if (!map || !mapLoaded) return;
+            const fc = geojson || EMPTY_FC;
+            if (map.getSource('electrical')) {
+                map.getSource('electrical').setData(fc);
+            }
+            setInfraEmpty(!fc.features || fc.features.length === 0);
+        },
     }));
 
     // Track whether infra data has been loaded
@@ -126,12 +136,14 @@ const MapView = forwardRef(function MapView({ isParcelResolved, onModelOpen, isP
         if (!map || !mapLoaded) return;
 
         const pipelineLayers = ['pipelines-line', 'pipelines-line-casing', 'pipelines-label'];
+        const electricalLayers = ['electrical-lines', 'electrical-lines-casing', 'electrical-substations', 'electrical-labels'];
 
-        // Buildings: always visible but dimmer in pipeline mode to give 3D context
+        // Buildings: always visible but dimmer in infra mode to give 3D context
+        const isInfra = assetType === 'pipeline' || assetType === 'electrical';
         if (map.getLayer('osm-buildings-3d')) {
             map.setLayoutProperty('osm-buildings-3d', 'visibility', 'visible');
-            map.setPaintProperty('osm-buildings-3d', 'fill-extrusion-opacity', assetType === 'pipeline' ? 0.25 : 0.6);
-            map.setPaintProperty('osm-buildings-3d', 'fill-extrusion-color', assetType === 'pipeline' ? '#aaaaaa' : '#e0e0e0');
+            map.setPaintProperty('osm-buildings-3d', 'fill-extrusion-opacity', isInfra ? 0.25 : 0.6);
+            map.setPaintProperty('osm-buildings-3d', 'fill-extrusion-color', isInfra ? '#aaaaaa' : '#e0e0e0');
         }
         for (const id of ['parcel-fill', 'parcel-line', 'proposed-massing-extrusion']) {
             if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', assetType === 'building' ? 'visible' : 'none');
@@ -139,9 +151,12 @@ const MapView = forwardRef(function MapView({ isParcelResolved, onModelOpen, isP
         for (const id of pipelineLayers) {
             if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', assetType === 'pipeline' ? 'visible' : 'none');
         }
+        for (const id of electricalLayers) {
+            if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', assetType === 'electrical' ? 'visible' : 'none');
+        }
 
         // Camera
-        if (assetType === 'pipeline') {
+        if (assetType === 'pipeline' || assetType === 'electrical') {
             map.easeTo({ pitch: 55, bearing: -20, duration: 1200 });
             setInfraEmpty(true);
         } else {
@@ -302,18 +317,7 @@ const MapView = forwardRef(function MapView({ isParcelResolved, onModelOpen, isP
                 source: 'pipelines',
                 layout: { visibility: 'none', 'line-cap': 'round', 'line-join': 'round' },
                 paint: {
-                    'line-color': [
-                        'match', ['get', 'material'],
-                        'CI',   '#e67e22',   // Cast Iron → orange (old/legacy)
-                        'CICL', '#e67e22',
-                        'DIP',  '#2277bb',   // Ductile Iron → blue (standard)
-                        'DICL', '#2277bb',
-                        'PVC',  '#27ae60',   // PVC → green (modern)
-                        'CPP',  '#27ae60',
-                        'AC',   '#e74c3c',   // Asbestos Cement → red (hazard)
-                        'COP',  '#f1c40f',   // Copper → yellow
-                        '#888888'            // Unknown
-                    ],
+                    'line-color': ['coalesce', ['get', 'color'], '#888888'],
                     'line-width': [
                         'interpolate', ['linear'], ['zoom'],
                         12, ['interpolate', ['linear'], ['coalesce', ['get', 'diameter_mm'], 150], 50, 0.8, 600, 3],
@@ -351,6 +355,124 @@ const MapView = forwardRef(function MapView({ isParcelResolved, onModelOpen, isP
                 },
             });
 
+            // ─── Electrical Layers ────────────────────────────
+            map.addSource('electrical', { type: 'geojson', data: EMPTY_FC });
+
+            // Casing (dark outline behind power lines)
+            map.addLayer({
+                id: 'electrical-lines-casing',
+                type: 'line',
+                source: 'electrical',
+                filter: ['in', ['get', 'layer_type'], ['literal', ['power_line']]],
+                layout: { visibility: 'none', 'line-cap': 'round', 'line-join': 'round' },
+                paint: {
+                    'line-color': '#0a0a0a',
+                    'line-width': ['interpolate', ['linear'], ['zoom'], 10, 2, 14, 4, 18, 8],
+                    'line-opacity': 0.4,
+                },
+            });
+
+            // Power lines — colored by voltage_color property from backend
+            map.addLayer({
+                id: 'electrical-lines',
+                type: 'line',
+                source: 'electrical',
+                filter: ['in', ['get', 'layer_type'], ['literal', ['power_line']]],
+                layout: { visibility: 'none', 'line-cap': 'round', 'line-join': 'round' },
+                paint: {
+                    'line-color': ['coalesce', ['get', 'voltage_color'], '#e74c3c'],
+                    'line-width': [
+                        'interpolate', ['linear'], ['zoom'],
+                        10, ['*', 1.0, ['coalesce', ['get', 'line_width_factor'], 1]],
+                        14, ['*', 2.5, ['coalesce', ['get', 'line_width_factor'], 1]],
+                        18, ['*', 5, ['coalesce', ['get', 'line_width_factor'], 1]],
+                    ],
+                    'line-opacity': 0.9,
+                },
+            });
+
+            // Substations as circles
+            map.addLayer({
+                id: 'electrical-substations',
+                type: 'circle',
+                source: 'electrical',
+                filter: ['in', ['get', 'layer_type'], ['literal', ['electrical_substation']]],
+                layout: { visibility: 'none' },
+                paint: {
+                    'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 4, 14, 8, 18, 14],
+                    'circle-color': '#8e44ad',
+                    'circle-stroke-color': '#1a1a1a',
+                    'circle-stroke-width': 1.5,
+                    'circle-opacity': 0.85,
+                },
+            });
+
+            // Labels for power lines
+            map.addLayer({
+                id: 'electrical-labels',
+                type: 'symbol',
+                source: 'electrical',
+                filter: ['in', ['get', 'layer_type'], ['literal', ['power_line']]],
+                minzoom: 15,
+                layout: {
+                    visibility: 'none',
+                    'symbol-placement': 'line',
+                    'text-field': ['case',
+                        ['has', 'voltage_tier'],
+                        ['concat', ['upcase', ['get', 'voltage_tier']], ' Line'],
+                        'Power Line'
+                    ],
+                    'text-size': 10,
+                    'text-offset': [0, -1],
+                    'text-allow-overlap': false,
+                },
+                paint: {
+                    'text-color': '#f0ece4',
+                    'text-halo-color': '#1a1a1a',
+                    'text-halo-width': 1.5,
+                },
+            });
+
+            // Click handlers for electrical features
+            map.on('click', 'electrical-lines', (e) => {
+                if (!e.features?.length) return;
+                const props = e.features[0].properties;
+                if (popupRef.current) popupRef.current.remove();
+                popupRef.current = new maplibregl.Popup({ closeButton: true, maxWidth: '260px' })
+                    .setLngLat(e.lngLat)
+                    .setHTML(`
+                        <div style="font-family:Inter,sans-serif;font-size:12px;color:#1a1a1a">
+                            <strong>Power Line</strong><br/>
+                            ${props.voltage_tier && props.voltage_tier !== 'unknown' ? `Voltage: ${props.voltage_tier}<br/>` : ''}
+                            ${props.voltage_kv ? `${props.voltage_kv} kV<br/>` : ''}
+                            ${props.name ? `${props.name}<br/>` : ''}
+                        </div>
+                    `)
+                    .addTo(map);
+            });
+
+            map.on('click', 'electrical-substations', (e) => {
+                if (!e.features?.length) return;
+                const props = e.features[0].properties;
+                if (popupRef.current) popupRef.current.remove();
+                popupRef.current = new maplibregl.Popup({ closeButton: true, maxWidth: '260px' })
+                    .setLngLat(e.lngLat)
+                    .setHTML(`
+                        <div style="font-family:Inter,sans-serif;font-size:12px;color:#1a1a1a">
+                            <strong>Substation</strong><br/>
+                            ${props.name ? `${props.name}<br/>` : ''}
+                            ${props.voltage ? `Voltage: ${props.voltage}<br/>` : ''}
+                            ${props.power_type ? `Type: ${props.power_type}<br/>` : ''}
+                        </div>
+                    `)
+                    .addTo(map);
+            });
+
+            map.on('mouseenter', 'electrical-lines', () => { map.getCanvas().style.cursor = 'pointer'; });
+            map.on('mouseleave', 'electrical-lines', () => { map.getCanvas().style.cursor = ''; });
+            map.on('mouseenter', 'electrical-substations', () => { map.getCanvas().style.cursor = 'pointer'; });
+            map.on('mouseleave', 'electrical-substations', () => { map.getCanvas().style.cursor = ''; });
+
             // ─── Click handlers for infrastructure ─────────
             map.on('click', 'pipelines-line', (e) => {
                 if (!e.features?.length) return;
@@ -386,9 +508,9 @@ const MapView = forwardRef(function MapView({ isParcelResolved, onModelOpen, isP
         };
     }, []);
 
-    const MODE_LABELS = { building: null, pipeline: 'Pipeline Network' };
-    const MODE_ICONS = { pipeline: '⏣' };
-    const MODE_COLORS = { pipeline: '#44aa66' };
+    const MODE_LABELS = { building: null, pipeline: 'Pipeline Network', electrical: 'Electrical Grid' };
+    const MODE_ICONS = { pipeline: '⏣', electrical: '⚡' };
+    const MODE_COLORS = { pipeline: '#44aa66', electrical: '#e74c3c' };
 
     return (
         <>
@@ -407,7 +529,7 @@ const MapView = forwardRef(function MapView({ isParcelResolved, onModelOpen, isP
                     <span style={{ fontSize: 18 }}>{MODE_ICONS[assetType]}</span>
                     <span style={{ color: MODE_COLORS[assetType], fontWeight: 600 }}>{MODE_LABELS[assetType]}</span>
                     <span style={{ display: 'flex', gap: 10, marginLeft: 4, alignItems: 'center' }}>
-                        {[['CI/CICL', '#e67e22'], ['DIP/DICL', '#2277bb'], ['PVC', '#27ae60'], ['AC', '#e74c3c'], ['COP', '#f1c40f']].map(([label, color]) => (
+                        {assetType === 'pipeline' && [['Water Main', '#2277bb'], ['Sanitary', '#886644'], ['Storm', '#44aa66']].map(([label, color]) => (
                             <span key={label} style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: 10, color: '#ccc' }}>
                                 <span style={{ width: 16, height: 3, background: color, borderRadius: 2, display: 'inline-block' }} />
                                 {label}
@@ -428,10 +550,10 @@ const MapView = forwardRef(function MapView({ isParcelResolved, onModelOpen, isP
                 }}>
                     <div style={{ fontSize: 36, marginBottom: 12, opacity: 0.6 }}>⏣</div>
                     <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 8 }}>
-                        No pipeline data in this area
+                        No infrastructure data in this area
                     </div>
                     <div style={{ fontSize: 12, color: '#888', lineHeight: 1.5 }}>
-                        Pan or zoom the map to load Toronto watermain data.
+                        Pan or zoom the map to load water main and sewer data.
                     </div>
                 </div>
             )}
