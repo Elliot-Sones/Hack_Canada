@@ -26,3 +26,7 @@ class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     user: UserInfo
+
+
+class SessionExchangeRequest(BaseModel):
+    session_token: str = Field(min_length=1)

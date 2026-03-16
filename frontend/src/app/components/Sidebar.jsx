@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState, useRef, useEffect } from 'react';
 import { useSession, signOut } from '../lib/auth-client.js';
+import { clearFastApiToken } from '../api.js';
 import useResizable from '../hooks/useResizable.js';
 
 const BUILDING_NAV_ITEMS = [
@@ -77,6 +78,7 @@ export default function Sidebar({ isCollapsed, onToggleCollapse, activeNav, onNa
     }, [isUserMenuOpen]);
 
     const logout = useCallback(async () => {
+        clearFastApiToken();
         await signOut();
         window.location.href = '/';
     }, []);

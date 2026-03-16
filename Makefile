@@ -54,7 +54,7 @@ run-api:
 	uvicorn app.main:app --reload
 
 run-frontend:
-	npm --prefix frontend-react run dev
+	npm --prefix frontend run dev
 
 # ── Seed / audit ─────────────────────────────────────────────────────────────
 
@@ -73,4 +73,4 @@ test-backend:
 	pytest tests -q -p no:rerunfailures
 
 test-frontend:
-	npm --prefix frontend-react test
+	npm --prefix frontend test

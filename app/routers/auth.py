@@ -1,16 +1,22 @@
+import os
 import re
 from datetime import datetime, timedelta, timezone
 
+import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
 from jose import jwt
 from passlib.context import CryptContext
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.dependencies import get_db_session
+from app.models.better_auth import BetterAuthSession, BetterAuthUser
 from app.models.tenant import Organization, User, WorkspaceMember
-from app.schemas.auth import LoginRequest, RegisterRequest, TokenResponse, UserInfo
+from app.schemas.auth import LoginRequest, RegisterRequest, SessionExchangeRequest, TokenResponse, UserInfo
+
+log = structlog.get_logger()
 
 router = APIRouter()
 
@@ -76,3 +82,88 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db_session)):
         access_token=token,
         user=UserInfo(id=str(user.id), email=user.email, name=user.name, organization_id=str(member.organization_id)),
     )
+
+
+@router.post("/auth/session-exchange", response_model=TokenResponse)
+async def session_exchange(body: SessionExchangeRequest, db: AsyncSession = Depends(get_db_session)):
+    """Exchange a Better Auth session token for a FastAPI JWT."""
+    # 1. Look up the Better Auth session
+    result = await db.execute(
+        select(BetterAuthSession).where(BetterAuthSession.token == body.session_token)
+    )
+    ba_session = result.scalar_one_or_none()
+    if not ba_session:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid session token")
+
+    # 2. Check expiry
+    if ba_session.expires_at < datetime.now(timezone.utc):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expired")
+
+    # 3. Get the Better Auth user
+    ba_user_result = await db.execute(
+        select(BetterAuthUser).where(BetterAuthUser.id == ba_session.user_id)
+    )
+    ba_user = ba_user_result.scalar_one_or_none()
+    if not ba_user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+
+    # 4. Find or create the cocivil user by email
+    user = await _find_or_create_cocivil_user(db, ba_user)
+
+    # 5. Get workspace membership for org_id
+    member_result = await db.execute(
+        select(WorkspaceMember).where(WorkspaceMember.user_id == user.id).order_by(WorkspaceMember.created_at.asc())
+    )
+    member = member_result.scalar_one_or_none()
+    if not member:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No workspace membership found")
+
+    token = _create_token(user, member.organization_id)
+    return TokenResponse(
+        access_token=token,
+        user=UserInfo(id=str(user.id), email=user.email, name=user.name, organization_id=str(member.organization_id)),
+    )
+
+
+async def _find_or_create_cocivil_user(db: AsyncSession, ba_user: BetterAuthUser) -> User:
+    """Find existing cocivil user by email, or bootstrap a new one."""
+    result = await db.execute(select(User).where(User.email == ba_user.email))
+    user = result.scalar_one_or_none()
+    if user:
+        return user
+
+    # First-time bootstrap: create org + user + membership
+    org_name = f"{ba_user.name}'s Organization"
+    slug = _slugify(org_name)
+
+    try:
+        org = Organization(name=org_name, slug=slug)
+        db.add(org)
+        await db.flush()
+    except IntegrityError:
+        # Slug collision — retry with random suffix
+        await db.rollback()
+        slug = f"{slug}-{os.urandom(2).hex()}"
+        org = Organization(name=org_name, slug=slug)
+        db.add(org)
+        await db.flush()
+
+    try:
+        user = User(email=ba_user.email, name=ba_user.name, password_hash=None)
+        db.add(user)
+        await db.flush()
+    except IntegrityError:
+        # Race condition: another request created the user concurrently
+        await db.rollback()
+        result = await db.execute(select(User).where(User.email == ba_user.email))
+        user = result.scalar_one_or_none()
+        if not user:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create user")
+        return user
+
+    member = WorkspaceMember(organization_id=org.id, user_id=user.id, role="owner")
+    db.add(member)
+    await db.flush()
+
+    log.info("bootstrapped_cocivil_user", email=ba_user.email, org_slug=slug)
+    return user

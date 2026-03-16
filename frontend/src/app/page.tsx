@@ -1,10 +1,19 @@
-import App from "./App";
-import { Providers } from "./Providers";
+"use client";
+
+import { useCallback } from 'react';
+import { useRouter } from 'next/navigation';
+import LandingPage from './components/LandingPage';
 
 export default function Home() {
-  return (
-    <Providers>
-      <App />
-    </Providers>
-  );
+  const router = useRouter();
+
+  const handleNavigate = useCallback((address?: string) => {
+    if (address) {
+      router.push(`/dashboard?address=${encodeURIComponent(address)}`);
+    } else {
+      router.push('/dashboard');
+    }
+  }, [router]);
+
+  return <LandingPage onNavigate={handleNavigate} />;
 }

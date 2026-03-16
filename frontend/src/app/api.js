@@ -29,6 +29,16 @@ function isAbortError(error) {
 async function apiFetch(url, options = {}) {
     const res = await fetch(url, { ...options, headers: { ...authHeaders(), ...options.headers } });
     const data = await res.json().catch(() => ({}));
+
+    if (res.status === 401 && !options._retried) {
+        try {
+            await sessionExchange();
+            return apiFetch(url, { ...options, _retried: true });
+        } catch {
+            // sessionExchange failed too — user is truly unauthenticated
+        }
+    }
+
     if (!res.ok) {
         const error = new Error(getErrorMessage(data, res.status));
         error.status = res.status;
@@ -53,6 +63,17 @@ export async function register({ email, password, name, organization_name }) {
         body: JSON.stringify({ email, password, name, organization_name }),
     });
 }
+
+export async function sessionExchange() {
+    const res = await fetch('/api/auth/exchange', { method: 'POST' });
+    if (!res.ok) throw new Error('Session exchange failed');
+    const data = await res.json();
+    localStorage.setItem('token', data.access_token);
+    return data;
+}
+
+export function hasFastApiToken() { return !!localStorage.getItem('token'); }
+export function clearFastApiToken() { localStorage.removeItem('token'); }
 
 // ─── Parcels ───
 

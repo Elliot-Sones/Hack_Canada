@@ -1,4 +1,11 @@
-# Railway config for the API service (uses Dockerfile at project root)
+# Railway config — API service (FastAPI)
+# Uses root Dockerfile (Python-only, no frontend build)
+#
+# The Next.js frontend is a separate Railway service:
+#   Root directory: /frontend
+#   Build: Dockerfile in /frontend
+#   Env vars: API_URL, DATABASE_URL, BETTER_AUTH_SECRET, BETTER_AUTH_URL
+
 [build]
 dockerfilePath = "Dockerfile"
 
@@ -9,13 +16,12 @@ healthcheckPath = "/api/v1/health"
 healthcheckTimeout = 120
 restartPolicyType = "on_failure"
 
-# Required environment variables (set these in Railway dashboard):
-# DATABASE_URL        - Postgres connection string (Railway injects from Postgres plugin)
+# Required environment variables (set in Railway dashboard):
+# DATABASE_URL        - Postgres (Railway injects from Postgres plugin)
 # DATABASE_URL_SYNC   - Sync Postgres URL for Alembic (psycopg2 driver)
-# REDIS_URL           - Redis connection string (Railway injects from Redis plugin)
+# REDIS_URL           - Redis (Railway injects from Redis plugin)
 # JWT_SECRET_KEY      - Long random string for JWT signing
 # AI_PROVIDER         - "claude" or "openai"
 # AI_API_KEY          - Anthropic or OpenAI API key
-# S3_ENDPOINT_URL     - S3-compatible storage endpoint (or leave empty for no-op)
-# AUTH0_DOMAIN        - Auth0 domain (frontend auth)
-# AUTH0_CLIENT_ID     - Auth0 client ID (frontend auth)
+# S3_ENDPOINT_URL     - S3-compatible storage endpoint
+# BETTER_AUTH_SECRET  - Better Auth secret (shared with Next.js service)

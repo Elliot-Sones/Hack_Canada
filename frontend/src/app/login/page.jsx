@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect } from 'react';
 import { authClient, useSession } from '../lib/auth-client.js';
+import { sessionExchange } from '../api.js';
 
 export default function LoginPage() {
     const { data: session, isPending: isSessionPending } = useSession();
@@ -104,6 +105,7 @@ export default function LoginPage() {
                     name: formData.name.trim()
                 });
             }
+            await sessionExchange();
             window.location.href = '/';
         } catch (error) {
             console.error(error);

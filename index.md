@@ -1,7 +1,7 @@
 # CoCivil — AI-Powered Civil Development Platform
 
 > **Auto-maintained**: Updated after every file edit/creation. See `.claude/CLAUDE.md` for rules.
-> **Last updated**: 2026-03-16 (repo hygiene: gitignore chroma_db & large GeoJSON, document billing env vars) | **PRD**: [`.claude/docs/PRD.md`](.claude/docs/PRD.md)
+> **Last updated**: 2026-03-16 (auth bridge, app router restructure, two-service deployment) | **PRD**: [`.claude/docs/PRD.md`](.claude/docs/PRD.md)
 
 ---
 
@@ -33,11 +33,11 @@
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│  Frontend (React 19 + Vite)                             │
-│  MapLibre GL · Three.js · Konva.js · Auth0              │
+│  Frontend (Next.js 16 App Router + Better Auth)          │
+│  MapLibre GL · Three.js · Konva.js                       │
 ├─────────────────────────────────────────────────────────┤
 │  Backend (FastAPI + SQLAlchemy async)                    │
-│  18 API routers · 81 endpoints · 30+ services · 9 tasks  │
+│  21 API routers · 98 endpoints · 39 services · 9 tasks   │
 ├─────────────────────────────────────────────────────────┤
 │  PostgreSQL + PostGIS    │  ChromaDB (RAG vectors)      │
 │  Toronto Open Data CKAN  │  Claude / OpenAI LLM         │
@@ -46,7 +46,7 @@
 
 | Layer | Tech |
 |-------|------|
-| Frontend | React 19, Vite, MapLibre GL, Three.js, Konva.js, Auth0 |
+| Frontend | Next.js 16, App Router, Better Auth, MapLibre GL, Three.js, Konva.js |
 | Backend | FastAPI, SQLAlchemy 2.0 (async), Pydantic 2.7+, Structlog |
 | Database | PostgreSQL + PostGIS, GeoAlchemy2, Alembic migrations |
 | AI | Claude (primary), OpenAI (fallback), ChromaDB RAG |
@@ -77,7 +77,7 @@
 
 | File | Purpose |
 |------|---------|
-| `app/main.py` | FastAPI app factory, route registration, middleware |
+| `app/main.py` | FastAPI app factory, route registration, middleware (API-only, no SPA serving) |
 | `app/config.py` | Settings (DB, AI provider, S3, Auth0) via Pydantic BaseSettings |
 | `app/database.py` | SQLAlchemy dual async/sync engines & session factories |
 | `app/dependencies.py` | FastAPI dependency injection (JWT auth, multi-tenant org scoping) |
@@ -109,6 +109,9 @@
 | `design_version.py` | Design version tracking |
 | `simulation.py` | Scenario simulation |
 | `tenant.py` | Multi-tenant isolation |
+| `better_auth.py` | Read-only Better Auth session/user models (separate base, excluded from Alembic) |
+| `users_db.py` | Billing/auth database models (User, Organisation, Subscription, SubscriptionPlan, TokenAccount, TokenLedger, Invoice, BillingRateCard); two-bucket token design |
+| `better_auth.py` | Read-only SQLAlchemy models for Better Auth tables (user, session) on separate DeclarativeBase to stay out of Alembic |
 
 ### API Routes (`app/routers/`)
 
@@ -124,7 +127,7 @@
 | `exports.py` | `/api/v1/exports` | PDF/Docx generation |
 | `ingestion.py` | `/api/v1/ingestion` | CKAN/GeoJSON import |
 | `uploads.py` | `/api/v1/uploads` | File upload handling |
-| `auth.py` | `/api/v1/auth` | Authentication |
+| `auth.py` | `/api/v1/auth` | Authentication (login, register, session-exchange for Better Auth bridge) |
 | `jobs.py` | `/api/v1/jobs` | Async task tracking |
 | `projects.py` | `/api/v1/projects` | Project CRUD |
 | `scenarios.py` | `/api/v1/scenarios` | Scenario modeling |
@@ -132,6 +135,8 @@
 | `design_versions.py` | `/api/v1/design-versions` | Version control |
 | `governance.py` | `/api/v1/governance` | Permissions |
 | `policy.py` | `/api/v1/policy` | Policy data |
+| `billing.py` | `/api/v1/billing` | Stripe subscriptions, token purchase/consume, invoices, portal |
+| `billing_webhooks.py` | `/api/v1/webhooks` | Stripe webhook handler (subscription.updated, invoice.paid, payment_intent events) |
 | `health.py` | `/api/health` | Health check |
 
 ### Services (`app/services/`)
@@ -165,7 +170,11 @@
 | `validation.py` | Data validation for source metadata, policy, precedent, finance |
 | `reference_data.py` | DB-backed reference data management (templates, unit types) |
 | `idempotency.py` | Pydantic-aware wrapper over Redis idempotency cache |
-| `infrastructure_ingestion.py` | CKAN ingestion for water mains, sewers, bridges |
+| `infrastructure_ingestion.py` | CKAN ingestion for sewers, bridges |
+| `water_main_ingestion.py` | Ingests Toronto distribution water mains from GeoJSON into pipeline_assets |
+| `electrical_capacity.py` | Deterministic electrical demand analysis (CEC Rule 8-200 tables + grid scoring) |
+| `electrical_ingestion.py` | Ingests power lines & substations from Overpass API into electrical_assets |
+| `token_service.py` | Token grant/consume/renew/top-up; two-bucket rules (subscription first, spill to purchased) |
 | `submission/templates.py` | Document templates & AI prompts |
 | `submission/context_builder.py` | Submission context assembly |
 | `submission/generator.py` | AI-driven document generation |
@@ -184,6 +193,7 @@
 | `civil_standards.py` | Civil infrastructure standards |
 | `infrastructure_policy.py` | Infrastructure policy rules |
 | `obc_interior_standards.py` | Ontario Building Code interior standards |
+| `electrical_standards.py` | CEC demand tables, Toronto Hydro service ratings, voltage tiers (OESC CSA C22.1) |
 
 ### Schemas (`app/schemas/`)
 
@@ -199,7 +209,7 @@
 | `simulation.py` | MassingRequest/Response, LayoutRunRequest/Response, UnitTypeReferenceResponse |
 | `tenant.py` | ProjectCreate/Response, ScenarioCreate/Response, AddParcelRequest |
 | `job.py` | JobStatusResponse (unified across all async job types) |
-| `auth.py` | RegisterRequest, LoginRequest, TokenResponse |
+| `auth.py` | RegisterRequest, LoginRequest, TokenResponse, SessionExchangeRequest |
 | `upload.py` | UploadResponse, UploadDetail, GenerateResponseRequest |
 | `export.py` | ExportRequest/Response |
 | `governance.py` | SnapshotManifestResponse, ReviewQueueItemResponse |
@@ -232,39 +242,43 @@
 
 ---
 
-## Frontend — `frontend-react/`
+## Frontend — `frontend/` (Next.js 16 App Router)
 
 ### Entry & Config
 
 | File | Purpose |
 |------|---------|
-| `src/main.jsx` | React root, Auth0 provider |
-| `src/App.jsx` | Main app shell |
-| `src/api.js` | API client (all backend calls) |
-| `src/index.css` | Global styles + CSS custom properties (--sidebar-width, --panel-width, --chat-height) |
-| `src/landing.css` | Landing page styles |
-| `src/ModelViewer.css` | 3D viewer overlay styles |
-| `src/InfrastructureViewer.css` | Infrastructure viewer styles |
-| `src/UserBubble.css` | User bubble expand/collapse animations |
-| `index.html` | HTML entry point |
-| `vite.config.js` | Vite bundler config |
+| `src/app/layout.tsx` | Root layout (global CSS, Providers wrapper) |
+| `src/app/page.tsx` | Landing page route (public) |
+| `src/app/Providers.jsx` | Client providers wrapper |
+| `src/app/login/page.jsx` | Login/signup page (Better Auth + session exchange) |
+| `src/app/dashboard/layout.tsx` | Auth gate (redirects to /login if no session) |
+| `src/app/dashboard/page.tsx` | Dashboard route (reads ?address= query param) |
+| `src/app/dashboard/[parcelId]/page.tsx` | Dashboard with parcel from URL |
+| `src/app/api/auth/exchange/route.ts` | Server-side session exchange (reads BA cookie, calls FastAPI, returns JWT) |
+| `src/app/api.js` | API client (all backend calls, session exchange, 401 auto-retry) |
+| `src/app/lib/auth-client.js` | Better Auth client (session management) |
+| `src/app/styles/` | Global CSS, landing, ModelViewer, InfrastructureViewer, UserBubble styles |
+| `next.config.ts` | Next.js config (standalone output, API proxy rewrites) |
+| `Dockerfile` | Standalone Next.js Docker build |
 
-### Components (`src/components/`)
+### Components (`src/app/components/`)
 
 | File | Purpose |
 |------|---------|
+| `DashboardView.jsx` | Main dashboard shell (map, sidebar, panels, models) |
 | `LandingPage.jsx` | Home page / onboarding |
-| `LoginPage.jsx` | Auth0 login flow |
 | `MapView.jsx` | Interactive parcel/zoning map (MapLibre GL) |
 | `SearchBar.jsx` | Address/parcel search |
 | `Sidebar.jsx` | Navigation & context panel |
-| `ChatPanel.jsx` | AI assistant chat (renders HTML directly from fine-tuned AI) |
+| `ChatPanel.jsx` | AI assistant chat with plan generation, file uploads, contractor matching, and polling |
 | `PolicyPanel.jsx` | Policy extracts, overlays, datasets, uploads, zoning analysis |
 | `DocumentViewer.jsx` | Markdown document viewer (ReactMarkdown + remark-gfm) |
 | `DocumentGallery.jsx` | Document library UI |
 | `ModelViewer.jsx` | 3D building massing viewer (Three.js) |
 | `FloorPlanView.jsx` | 2D floor plan view (Konva.js) |
 | `InfrastructureViewer.jsx` | 3D pipeline network viewer |
+| `ElectricalViewer.jsx` | Electrical grid visualization (power lines, substations, voltage tiers) |
 | `ContractorCards.jsx` | Contractor/trade recommendation cards |
 | `BlueprintOverlay.jsx` | Blueprint display overlay |
 | `InfrastructureLayerControl.jsx` | Floating layer toggle panel (Roads, Water, EV) |
@@ -274,12 +288,14 @@
 
 | File | Purpose |
 |------|---------|
-| `FloorPlanEditor.jsx` | Main floor plan canvas |
+| `FloorPlanEditor.jsx` | Main floor plan canvas (orchestrates layers + panels) |
+| **layers/** | |
 | `WallLayer.jsx` | Wall rendering & editing |
 | `RoomLayer.jsx` | Room zones |
 | `DimensionLayer.jsx` | Dimension annotations |
 | `OpeningLayer.jsx` | Door/window openings |
 | `ComplianceBadgeLayer.jsx` | OBC compliance violation badges |
+| **panels/** | |
 | `EditorToolbar.jsx` | Tool selection, undo/redo |
 | `WallProperties.jsx` | Wall parameter panel |
 | `CompliancePanel.jsx` | Code violation list |
@@ -446,6 +462,9 @@ Address → source-discovery → parcel-zoning-research → buildability-analysi
 | `dev_doctor.py` | Preflight connectivity check for local dev environment |
 | `generate_sample_dxf.py` | Generate rich sample building DXF (6-storey mixed-use) |
 | `generate_sample_pipeline_dxf.py` | Generate sample water main DXF (3x2 junction grid) |
+| `railway_seed_full.py` | Full Railway deployment seed (streaming download, chunked ingestion, resume support) |
+| `fix_water_mains_download.py` | Patch for corrected CKAN water mains package slug + fallback search |
+| `generate_water_main_dxf.py` | Generate DXF from real Toronto water main data (color-coded by material) |
 | `test_search.py` | Ad-hoc parcel search test against live DB |
 | `init-extensions.sql` | PostgreSQL init (uuid-ossp, postgis, pgvector extensions) |
 
@@ -523,9 +542,12 @@ Address → source-discovery → parcel-zoning-research → buildability-analysi
 | File | Purpose |
 |------|---------|
 | `docker-compose.yml` | Infra-only compose: PostGIS 16, Redis 7, MinIO |
-| `docker-compose.app.yml` | App compose override: Celery worker + API (containerized) |
-| `Dockerfile` | Two-stage build: Node 20 frontend + Python 3.11 backend |
-| `railway.toml` | Railway config (pre-deploy: alembic migrate, health: /api/v1/health) |
+| `docker-compose.app.yml` | App compose override: Celery worker + API + Next.js frontend (containerized) |
+| `Dockerfile` | Python-only backend build (no frontend stage) |
+| `frontend/Dockerfile` | Next.js standalone build (multi-stage: builder + runner) |
+| `frontend/src/app/api.js` | Next.js API client (all backend calls, 401 auto-retry via session exchange) |
+| `frontend/src/app/api/auth/exchange/route.ts` | Next.js route: exchanges Better Auth session cookie for FastAPI JWT |
+| `railway.toml` | Railway API service config (pre-deploy: alembic migrate, health: /api/v1/health) |
 | `alembic.ini` | Alembic migration config |
 | `alembic/` | 9 migrations: initial 34-table schema → infrastructure assets → infra data refactor (electrical_assets table, pipeline_assets columns) |
 | `pyproject.toml` | Python project config (uv), Python ≥3.11, pytest asyncio_mode=auto |
@@ -539,7 +561,7 @@ Address → source-discovery → parcel-zoning-research → buildability-analysi
 
 ---
 
-## API Endpoint Reference (81 endpoints)
+## API Endpoint Reference (98 endpoints)
 
 ### Auth & Health
 
@@ -547,6 +569,7 @@ Address → source-discovery → parcel-zoning-research → buildability-analysi
 |--------|----------|-------------|
 | `POST` | `/api/v1/auth/register` | Register user + org, returns JWT |
 | `POST` | `/api/v1/auth/login` | Login, returns JWT |
+| `POST` | `/api/v1/auth/session-exchange` | Exchange Better Auth session token for FastAPI JWT (auto-creates user/org on first login) |
 | `GET` | `/api/v1/health` | DB + Redis + Celery liveness check |
 
 ### Parcels (7 endpoints)
@@ -667,6 +690,22 @@ Address → source-discovery → parcel-zoning-research → buildability-analysi
 | `GET` | `/api/v1/infrastructure/electrical/standards` | Ontario electrical standards reference |
 | `POST` | `/api/v1/infrastructure/electrical/capacity-check` | Grid capacity check for proposed building |
 
+### Billing (11 endpoints)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/v1/billing/subscriptions` | Create Stripe subscription |
+| `DELETE` | `/api/v1/billing/subscriptions/{id}` | Cancel subscription |
+| `POST` | `/api/v1/billing/portal` | Create Stripe customer portal session |
+| `POST` | `/api/v1/billing/tokens/purchase` | Purchase token package |
+| `POST` | `/api/v1/billing/tokens/consume` | Consume tokens (subscription balance first, then purchased) |
+| `GET` | `/api/v1/billing/tokens/balance` | Get token balance (both buckets) |
+| `PUT` | `/api/v1/billing/tokens/topup-config` | Configure auto top-up threshold |
+| `POST` | `/api/v1/billing/usage` | Record usage event |
+| `POST` | `/api/v1/billing/invoices/generate` | Generate invoice for org |
+| `GET` | `/api/v1/billing/invoices/{org_id}` | List invoices for org |
+| `POST` | `/api/v1/webhooks/stripe` | Stripe webhook handler |
+
 ### Compliance, Exports, Design, Governance, Policy, Jobs (12 endpoints)
 
 | Method | Endpoint | Description |
@@ -695,8 +734,11 @@ Address → source-discovery → parcel-zoning-research → buildability-analysi
 # Backend
 uvicorn app.main:app --reload
 
-# Frontend
-cd frontend-react && npm run dev
+# Frontend (Next.js)
+cd frontend && npm run dev
+
+# Docker (all services)
+docker compose -f docker-compose.yml -f docker-compose.app.yml up
 
 # RAG (optional, for policy retrieval)
 cd fine-tuned-RAG && python api.py

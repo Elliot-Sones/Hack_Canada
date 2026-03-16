@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useSession, signOut } from '../lib/auth-client.js';
+import { clearFastApiToken } from '../api.js';
 import '../styles/UserBubble.css';
 
 export default function UserBubble() {
@@ -13,6 +14,7 @@ export default function UserBubble() {
     const bubbleRef = useRef(null);
 
     const logout = useCallback(async () => {
+        clearFastApiToken();
         await signOut();
         window.location.href = '/';
     }, []);

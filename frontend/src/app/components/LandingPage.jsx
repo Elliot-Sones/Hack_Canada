@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useSession, signOut } from '../lib/auth-client.js';
+import { clearFastApiToken } from '../api.js';
 import maplibregl from 'maplibre-gl';
 
 const QUERIES = [
@@ -66,6 +67,7 @@ export default function LandingPage({ onNavigate }) {
     }, []);
 
     const logout = useCallback(async () => {
+        clearFastApiToken();
         await signOut();
         window.location.reload();
     }, []);

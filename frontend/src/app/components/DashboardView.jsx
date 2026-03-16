@@ -1,34 +1,37 @@
 "use client";
 
 import { useState, useRef, useCallback, useEffect, useMemo, lazy, Suspense } from 'react';
-import { useSession } from './lib/auth-client.js';
-import MapView from './components/MapView.jsx';
-import SearchBar from './components/SearchBar.jsx';
-import Sidebar from './components/Sidebar.jsx';
-import PolicyPanel from './components/PolicyPanel.jsx';
-import ChatPanel from './components/ChatPanel.jsx';
-import InfrastructureLayerControl from './components/InfrastructureLayerControl.jsx';
-import LandingPage from './components/LandingPage.jsx';
-import SettingsModal from './components/SettingsModal.jsx';
-import DashboardModal from './components/DashboardModal.jsx';
-import { searchParcels, getNearbyPipelines, getWatermainsBbox } from './api.js';
-import { buildParcelState, isResolvedParcel } from './lib/parcelState.js';
-import './styles/landing.css';
+import { useSession } from '../lib/auth-client.js';
+import MapView from './MapView.jsx';
+import SearchBar from './SearchBar.jsx';
+import Sidebar from './Sidebar.jsx';
+import PolicyPanel from './PolicyPanel.jsx';
+import ChatPanel from './ChatPanel.jsx';
+import InfrastructureLayerControl from './InfrastructureLayerControl.jsx';
+import SettingsModal from './SettingsModal.jsx';
+import DashboardModal from './DashboardModal.jsx';
+import { searchParcels, getWatermainsBbox, sessionExchange, hasFastApiToken, clearFastApiToken } from '../api.js';
+import { buildParcelState, isResolvedParcel } from '../lib/parcelState.js';
+import '../styles/landing.css';
 
-const ModelViewer = lazy(() => import('./components/ModelViewer.jsx'));
-const InfrastructureViewer = lazy(() => import('./components/InfrastructureViewer.jsx').catch(() => ({ default: () => null })));
+const ModelViewer = lazy(() => import('./ModelViewer.jsx'));
+const InfrastructureViewer = lazy(() => import('./InfrastructureViewer.jsx').catch(() => ({ default: () => null })));
 
-export default function App() {
+export default function DashboardView({ initialAddress, parcelId }) {
   const { data: session, isPending: isLoading } = useSession();
   const user = session?.user;
   const isAuthenticated = !!user;
 
-  const loginWithRedirect = useCallback(({ appState }) => {
-    // Basic redirect for now
-    window.location.href = '/login';
-  }, []);
+  // Auto-exchange Better Auth session for FastAPI JWT
+  useEffect(() => {
+    if (isAuthenticated && !hasFastApiToken()) {
+      sessionExchange().catch(() => {});
+    }
+    if (!isAuthenticated && !isLoading) {
+      clearFastApiToken();
+    }
+  }, [isAuthenticated, isLoading]);
 
-  const [currentPage, setCurrentPage] = useState('landing');
   const [selectedParcel, setSelectedParcel] = useState(null);
   const [isPanelOpen, setIsPanelOpen] = useState(true);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
@@ -53,7 +56,6 @@ export default function App() {
       if (prev.some((u) => u.id === upload.id)) return prev;
       return [...prev, upload];
     });
-    // Pipeline DXF
     if (upload.extractedData?.pipeline_network) {
       setPipelineData(upload.extractedData.pipeline_network);
       setProjectId(upload.id);
@@ -61,7 +63,6 @@ export default function App() {
       setIsModelOpen(true);
       return;
     }
-    // Building DXF / floor plans
     if (upload.extractedData?.floor_plans) {
       setFloorPlans(upload.extractedData.floor_plans);
       setProjectId(upload.id);
@@ -75,12 +76,8 @@ export default function App() {
     [user?.sub]
   );
 
-  const [searchHistory, setSearchHistory] = useState(() => {
-    // Will be properly loaded once user is available
-    return [];
-  });
+  const [searchHistory, setSearchHistory] = useState(() => []);
 
-  // Load history from localStorage once user is available
   useEffect(() => {
     if (!historyKey) return;
     try {
@@ -90,9 +87,6 @@ export default function App() {
       // ignore corrupt data
     }
   }, [historyKey]);
-
-  // Store pending address to process after authentication
-  const [pendingAddress, setPendingAddress] = useState(null);
 
   const mapRef = useRef(null);
 
@@ -108,7 +102,6 @@ export default function App() {
     setSelectedParcel(selected);
     setIsPanelOpen(true);
 
-    // Save to search history
     if (historyKey) {
       const entry = {
         address: location.shortAddress || location.address,
@@ -131,6 +124,45 @@ export default function App() {
       mapRef.current.setParcel(null);
     }
   }, [historyKey]);
+
+  // Geocode initial address on mount
+  useEffect(() => {
+    if (!initialAddress) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(
+          `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(
+            initialAddress + ' Toronto Canada'
+          )}&format=json&addressdetails=1&limit=1&countrycodes=ca`,
+          { headers: { 'Accept-Language': 'en' } }
+        );
+        const results = await res.json();
+        if (cancelled || results.length === 0) return;
+        const result = results[0];
+        const addr = result.address || {};
+        const parts = [];
+        if (addr.house_number) parts.push(addr.house_number);
+        if (addr.road) parts.push(addr.road);
+        let shortAddress = parts.join(' ') || result.display_name.split(',')[0];
+        if (addr.city || addr.town) shortAddress += `, ${addr.city || addr.town}`;
+
+        setTimeout(() => {
+          if (!cancelled) {
+            handleLocationSelected({
+              lng: parseFloat(result.lon),
+              lat: parseFloat(result.lat),
+              address: result.display_name,
+              shortAddress,
+            });
+          }
+        }, 500);
+      } catch (err) {
+        console.error('Geocoding error:', err);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [initialAddress, handleLocationSelected]);
 
   const handlePanelClose = useCallback(() => {
     setIsPanelOpen(false);
@@ -170,120 +202,39 @@ export default function App() {
     [handleLocationSelected]
   );
 
-  const handleLandingNavigate = useCallback(
-    async (address) => {
-      // If user is not authenticated, store the address and redirect to login
-      if (!isAuthenticated) {
-        if (address) {
-          setPendingAddress(address);
-          // Store in sessionStorage so it persists through the redirect
-          sessionStorage.setItem('pendingAddress', address);
-        }
-        loginWithRedirect({
-          appState: { returnTo: '/dashboard', pendingAddress: address },
-        });
-        return;
-      }
-
-      setCurrentPage('dashboard');
-
-      if (address) {
-        try {
-          const res = await fetch(
-            `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(
-              address + ' Toronto Canada'
-            )}&format=json&addressdetails=1&limit=1&countrycodes=ca`,
-            { headers: { 'Accept-Language': 'en' } }
-          );
-          const results = await res.json();
-          if (results.length > 0) {
-            const result = results[0];
-            const addr = result.address || {};
-            const parts = [];
-            if (addr.house_number) parts.push(addr.house_number);
-            if (addr.road) parts.push(addr.road);
-            let shortAddress =
-              parts.join(' ') || result.display_name.split(',')[0];
-            if (addr.city || addr.town)
-              shortAddress += `, ${addr.city || addr.town}`;
-
-            setTimeout(() => {
-              handleLocationSelected({
-                lng: parseFloat(result.lon),
-                lat: parseFloat(result.lat),
-                address: result.display_name,
-                shortAddress,
-              });
-            }, 500);
-          }
-        } catch (err) {
-          console.error('Geocoding error:', err);
-        }
-      }
-    },
-    [handleLocationSelected, isAuthenticated, loginWithRedirect]
-  );
-
-  // After authentication, process any pending address
-  useEffect(() => {
-    if (isAuthenticated && !isLoading && currentPage === 'landing') {
-      const stored = sessionStorage.getItem('pendingAddress');
-      if (stored) {
-        sessionStorage.removeItem('pendingAddress');
-        handleLandingNavigate(stored);
-      }
-    }
-  }, [isAuthenticated, isLoading, currentPage, handleLandingNavigate]);
-
-  // Redirect unauthenticated users away from dashboard
-  useEffect(() => {
-    if (!isLoading && !isAuthenticated && currentPage === 'dashboard') {
-      loginWithRedirect();
-    }
-  }, [isLoading, isAuthenticated, currentPage, loginWithRedirect]);
-
   // Load infrastructure data when asset type changes or map center moves
   useEffect(() => {
-    if (currentPage !== 'dashboard' || assetType === 'building') return;
+    if (assetType === 'building') return;
     const map = mapRef.current?.getMap();
     if (!map) return;
 
     let cancelled = false;
     const loadInfraData = async () => {
-      const center = map.getCenter();
-      const lat = center.lat;
-      const lng = center.lng;
       try {
         if (assetType === 'pipeline') {
           const bounds = map.getBounds();
           const data = await getWatermainsBbox(bounds);
           if (!cancelled && mapRef.current) mapRef.current.setPipelines(data);
         }
-      } catch (err) {
+      } catch {
         // Silently fail — infrastructure data is optional context
       }
     };
 
     loadInfraData();
 
-    // Reload when map stops moving
     const onMoveEnd = () => loadInfraData();
     map.on('moveend', onMoveEnd);
     return () => { cancelled = true; map.off('moveend', onMoveEnd); };
-  }, [assetType, currentPage]);
+  }, [assetType]);
 
   useEffect(() => {
     if (typeof document === 'undefined') return undefined;
 
-    const isDashboard = currentPage === 'dashboard';
-    document.body.classList.toggle(
-      'sidebar-collapsed',
-      isDashboard && isSidebarCollapsed
-    );
-    document.body.classList.toggle('panel-open', isDashboard && isPanelOpen);
+    document.body.classList.toggle('sidebar-collapsed', isSidebarCollapsed);
+    document.body.classList.toggle('panel-open', isPanelOpen);
 
-    // Update persistent map padding so "center" = center of visible gap
-    if (isDashboard && mapRef.current?.getMap()) {
+    if (mapRef.current?.getMap()) {
       const styles = getComputedStyle(document.documentElement);
       const left = parseInt(styles.getPropertyValue('--sidebar-width')) || 160;
       const right = isPanelOpen ? (parseInt(styles.getPropertyValue('--panel-width')) || 380) : 0;
@@ -298,34 +249,10 @@ export default function App() {
       document.body.classList.remove('sidebar-collapsed');
       document.body.classList.remove('panel-open');
     };
-  }, [currentPage, isSidebarCollapsed, isPanelOpen, isChatExpanded]);
+  }, [isSidebarCollapsed, isPanelOpen, isChatExpanded]);
 
-  // Landing — no auth gate
-  if (currentPage === 'landing') {
-    return <LandingPage onNavigate={handleLandingNavigate} />;
-  }
-
-  // Dashboard loading or waiting for auth
-  if (isLoading || !isAuthenticated) {
-    return (
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          height: '100vh',
-          background: '#fafafa',
-        }}
-      >
-        <p>Loading...</p>
-      </div>
-    );
-  }
-
-  // Dashboard (authenticated only)
   return (
     <>
-
       <MapView
         ref={mapRef}
         isParcelResolved={selectedParcel !== null}
@@ -372,12 +299,7 @@ export default function App() {
           onClick={() => setIsPanelOpen(true)}
           title="Show project info"
         >
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.5"
-          >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
             <polyline points="15 18 9 12 15 6" />
           </svg>
         </button>

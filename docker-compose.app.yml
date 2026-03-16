@@ -40,3 +40,20 @@ services:
         condition: service_healthy
       minio:
         condition: service_started
+
+  next:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      API_URL: http://api:8000
+      DATABASE_URL: postgresql://cocivil:cocivil@db:5432/cocivil
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-change-me-in-production}
+      BETTER_AUTH_URL: http://localhost:3000
+    depends_on:
+      db:
+        condition: service_healthy
+      api:
+        condition: service_started
