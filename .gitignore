@@ -80,3 +80,9 @@ data/zoning-area-4326.geojson
 data/zoning-building-setback-overlay-4326.geojson
 data/zoning-height-overlay-4326.geojson
 output/playwright/
+
+# ChromaDB vector store (generated at runtime)
+chroma_db/
+
+# Large infrastructure GIS data (ingest via CKAN or download separately)
+water-system-data/*.geojson
