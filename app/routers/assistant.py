@@ -1,13 +1,15 @@
+import asyncio
 import json
 import logging
 import re
+import uuid
 
 import httpx
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.factory import get_ai_provider
 from app.config import settings
-from app.data.infrastructure_policy import ONTARIO_INFRASTRUCTURE_HIERARCHY, INFRASTRUCTURE_APPROVAL_PROCESS
 from app.data.ontario_policy import (
     MINOR_VARIANCE_FOUR_TESTS,
     ONTARIO_POLICY_HIERARCHY,
@@ -16,6 +18,7 @@ from app.data.ontario_policy import (
     TORONTO_ZONING_KEY_RULES,
 )
 from app.data.toronto_zoning import ZONE_STANDARDS
+from app.dependencies import get_db_session
 from app.schemas.assistant import (
     AssistantChatRequest, AssistantChatResponse, ContractorRecommendation,
     InfraModelParseRequest, InfraModelParseResponse,
@@ -48,13 +51,14 @@ Help development analysts, planners, and architects understand:
 - Ontario planning policy hierarchy and how it applies
 - Development potential, massing, FSI, setbacks, lot coverage
 - Committee of Adjustment (CoA), ZBA, OPA, and site plan processes
+- Infrastructure capacity — electrical, water, sewer — and whether nearby grid/pipes can support a project
 
 ## Ontario Planning Law Reference
 {_POLICY_CONTEXT}
 
 ## Two modes
 
-**Answering mode** (default): Answer the user's question using the policy reference above and the parcel context provided. Be precise — cite by-law sections and specific numbers. Distinguish as-of-right permissions from what needs approval. If information is uncertain or missing, say so.
+**Answering mode** (default): Answer the user's question using the policy reference above, the parcel context, and the LIVE SITE DATA provided. Be precise — cite by-law sections and specific numbers. When infrastructure data is provided, reference actual nearby substations, power line voltages, water main diameters, etc. Distinguish as-of-right permissions from what needs approval. If information is uncertain or missing, say so.
 
 **Generation mode**: When the user explicitly asks you to generate a planning document, OR when you determine that generating a document is the most useful response to their question, propose it.
 
@@ -117,14 +121,8 @@ Maximum 4 trades. You MUST include this marker whenever contractors or professio
 - Cite by-law sections (e.g. "§10.5.10.20 of By-law 569-2013") and policy clauses when confident
 - Distinguish as-of-right from what needs a variance or higher approval
 - Never fabricate data — if parcel data is not provided, say so clearly
+- When LIVE SITE DATA is provided, USE IT. Reference actual infrastructure scores, distances, voltages, diameters.
 - Plain text only, no markdown headers in responses (the ACTION, MODEL, and CONTRACTORS markers are not visible to the user — always include them when applicable)
-
-## Infrastructure Knowledge
-You also have knowledge of civil infrastructure standards (pipelines, bridges) for Ontario:
-- Water mains, sanitary sewers, storm sewers, gas lines — OPSD/OPSS/AWWA/MTO standards
-- Bridges and culverts — CSA S6:19, CL-625 loading
-- Environmental Compliance Approvals (ECA), Class EA, TSSA authorization
-- When asked about infrastructure, apply the same precision and citation style as for building compliance.
 """
 
 
@@ -158,7 +156,6 @@ def _detect_contractor_trades(user_text: str, ai_response: str) -> list[str] | N
     if not _CONTRACTOR_USER_TRIGGERS.search(user_text):
         return None
 
-    # Scan the AI response for mentioned trades
     response_lower = ai_response.lower()
     trades: list[str] = []
     seen: set[str] = set()
@@ -169,7 +166,6 @@ def _detect_contractor_trades(user_text: str, ai_response: str) -> list[str] | N
             if len(trades) >= 4:
                 break
 
-    # If user asked about contractors but AI didn't mention specific ones, default
     if not trades:
         trades = ["general contractor", "structural engineer"]
 
@@ -274,6 +270,286 @@ def _parse_response(raw: str, zone_constraints: dict | None = None, zone_code: s
     return text.strip(), action, model_update, contractor_trades
 
 
+# ---------------------------------------------------------------------------
+# Data gathering — pull real site data in parallel before AI call
+# ---------------------------------------------------------------------------
+
+async def _gather_site_data(
+    parcel_id: str | None,
+    lat: float | None,
+    lng: float | None,
+    zone_code: str | None,
+    db: AsyncSession,
+) -> str:
+    """Fetch zoning analysis, electrical capacity, water infrastructure, and
+    policy RAG data in parallel. Returns a formatted context string."""
+
+    sections: list[str] = []
+
+    # Parse parcel_id to UUID if provided
+    pid = None
+    if parcel_id:
+        try:
+            pid = uuid.UUID(parcel_id)
+        except ValueError:
+            pass
+
+    # Default coords
+    site_lat = lat or 43.6532
+    site_lng = lng or -79.3832
+
+    # Launch parallel data fetches
+    async def _noop():
+        return None
+    zoning_task = _fetch_zoning(pid, db) if pid else _noop()
+    electrical_task = _fetch_electrical(site_lat, site_lng, db)
+    watermain_task = _fetch_watermains(site_lat, site_lng)
+    rag_task = _fetch_policy_rag(zone_code, parcel_id)
+
+    zoning_result, electrical_result, watermain_result, rag_result = await asyncio.gather(
+        zoning_task, electrical_task, watermain_task, rag_task,
+        return_exceptions=True,
+    )
+
+    # Format zoning data
+    if isinstance(zoning_result, dict) and zoning_result:
+        z = zoning_result
+        lines = ["## LIVE ZONING ANALYSIS"]
+        if z.get("zone_string"):
+            lines.append(f"Zone: {z['zone_string']}")
+        if z.get("address"):
+            lines.append(f"Address: {z['address']}")
+        stds = z.get("standards")
+        if stds:
+            lines.append(f"Max height: {stds.get('max_height_m')}m | Max storeys: {stds.get('max_storeys')}")
+            lines.append(f"Max FSI: {stds.get('max_fsi')} | Max lot coverage: {stds.get('max_lot_coverage_pct')}%")
+            lines.append(f"Setbacks — front: {stds.get('min_front_setback_m')}m, rear: {stds.get('min_rear_setback_m')}m, side: {stds.get('min_interior_side_setback_m')}m")
+            if stds.get("permitted_uses"):
+                lines.append(f"Permitted uses: {', '.join(stds['permitted_uses'][:10])}")
+            if stds.get("bylaw_section"):
+                lines.append(f"By-law section: {stds['bylaw_section']}")
+        overlays = z.get("overlay_constraints", [])
+        if overlays:
+            lines.append("Overlays:")
+            for ov in overlays[:5]:
+                lines.append(f"  - {ov.get('layer_name', 'Unknown')}: {ov.get('impact', '')}")
+        warnings = z.get("warnings", [])
+        if warnings:
+            lines.append("Warnings: " + "; ".join(warnings[:5]))
+        sections.append("\n".join(lines))
+
+    # Format electrical data
+    if isinstance(electrical_result, dict) and electrical_result:
+        e = electrical_result
+        lines = ["## LIVE ELECTRICAL INFRASTRUCTURE"]
+        lines.append(f"Infrastructure score: {e.get('infrastructure_score', 'N/A')}/100")
+        lines.append(f"Verdict: {e.get('verdict', 'unknown')} (confidence: {e.get('confidence', 0):.0%})")
+        sub = e.get("nearest_substation")
+        if sub:
+            lines.append(f"Nearest substation: {sub.get('name', 'Unknown')} — {sub.get('distance_m', '?')}m away, {sub.get('voltage', 'unknown voltage')}")
+        pline = e.get("nearest_power_line")
+        if pline:
+            lines.append(f"Nearest power line: {pline.get('distance_m', '?')}m away, {pline.get('voltage_kv', '?')} kV")
+        detail = e.get("infra_detail", {})
+        lines.append(f"Nearby: {detail.get('substations_nearby', 0)} substations, {detail.get('power_lines_nearby', 0)} power lines, {detail.get('transformers_nearby', 0)} transformers")
+        recs = e.get("recommendations", [])
+        if recs:
+            lines.append("Recommendations:")
+            for r in recs[:4]:
+                lines.append(f"  - {r}")
+        sections.append("\n".join(lines))
+
+    # Format watermain data
+    if isinstance(watermain_result, list) and watermain_result:
+        lines = ["## LIVE WATER INFRASTRUCTURE"]
+        lines.append(f"Water mains within 500m: {len(watermain_result)}")
+        # Summarize by diameter
+        diameters = {}
+        materials = {}
+        for feat in watermain_result:
+            p = feat.get("properties", {})
+            d = p.get("diameter_mm")
+            m = p.get("material", "Unknown")
+            if d:
+                diameters[d] = diameters.get(d, 0) + 1
+            materials[m] = materials.get(m, 0) + 1
+        if diameters:
+            sorted_d = sorted(diameters.items(), key=lambda x: -x[1])
+            lines.append("Diameters: " + ", ".join(f"{d}mm ({n} segments)" for d, n in sorted_d[:5]))
+        if materials:
+            sorted_m = sorted(materials.items(), key=lambda x: -x[1])
+            lines.append("Materials: " + ", ".join(f"{m} ({n})" for m, n in sorted_m[:5]))
+        # Nearest/largest
+        largest = max((f for f in watermain_result if f.get("properties", {}).get("diameter_mm")),
+                       key=lambda f: f["properties"]["diameter_mm"], default=None)
+        if largest:
+            p = largest["properties"]
+            lines.append(f"Largest nearby main: {p['diameter_mm']}mm {p.get('material', '')} (installed {p.get('install_year', 'unknown')})")
+        sections.append("\n".join(lines))
+
+    # Format RAG results
+    if isinstance(rag_result, list) and rag_result:
+        lines = ["## RELEVANT POLICY EXTRACTS (from RAG)"]
+        for r in rag_result[:5]:
+            source = r.get("metadata", {}).get("source", "Unknown")
+            content = r.get("content", "")[:300]
+            score = r.get("score")
+            score_str = f" (relevance: {score:.2f})" if score is not None else ""
+            lines.append(f"[{source}{score_str}]: {content}")
+        sections.append("\n".join(lines))
+
+    return "\n\n".join(sections) if sections else ""
+
+
+async def _fetch_zoning(parcel_id: uuid.UUID, db: AsyncSession) -> dict | None:
+    """Fetch full zoning analysis for a parcel."""
+    try:
+        from app.services.geospatial import get_active_parcel_by_id, list_active_snapshot_ids
+        from app.services.overlay_service import get_parcel_overlays_response
+        from app.services.zoning_service import build_zoning_analysis
+        from sqlalchemy import func, select
+        from app.models.geospatial import ParcelZoningAssignment
+
+        active_snapshot_ids = await list_active_snapshot_ids(db, "parcel_base")
+        parcel = await get_active_parcel_by_id(db, parcel_id, active_snapshot_ids=active_snapshot_ids)
+        if not parcel:
+            return None
+
+        overlay_response = await get_parcel_overlays_response(db, parcel)
+        active_zoning_ids = await list_active_snapshot_ids(db, "zoning_geometry")
+
+        zoning_count = None
+        if active_zoning_ids:
+            zoning_count = await db.scalar(
+                select(func.count())
+                .select_from(ParcelZoningAssignment)
+                .where(ParcelZoningAssignment.parcel_id == parcel_id)
+                .where(ParcelZoningAssignment.source_snapshot_id.in_(list(active_zoning_ids)))
+            )
+
+        analysis = build_zoning_analysis(
+            parcel,
+            overlay_data=[o.model_dump() for o in overlay_response.overlays],
+            zoning_assignment_count=zoning_count,
+        )
+
+        result = {
+            "zone_string": analysis.zone_string,
+            "address": analysis.address,
+            "overlay_constraints": [
+                {"layer_name": c.get("layer_name"), "impact": c.get("impact")}
+                for c in analysis.overlay_constraints
+            ],
+            "warnings": list(analysis.warnings),
+        }
+        if analysis.standards:
+            s = analysis.standards
+            result["standards"] = {
+                "max_height_m": s.max_height_m,
+                "max_storeys": s.max_storeys,
+                "max_fsi": s.max_fsi,
+                "max_lot_coverage_pct": s.max_lot_coverage_pct,
+                "min_front_setback_m": s.min_front_setback_m,
+                "min_rear_setback_m": s.min_rear_setback_m,
+                "min_interior_side_setback_m": s.min_interior_side_setback_m,
+                "permitted_uses": list(s.permitted_uses),
+                "bylaw_section": s.bylaw_section,
+            }
+        return result
+    except Exception:
+        logger.warning("Failed to fetch zoning analysis", exc_info=True)
+        return None
+
+
+async def _fetch_electrical(lat: float, lng: float, db: AsyncSession) -> dict | None:
+    """Fetch electrical capacity analysis for a location."""
+    try:
+        from app.services.electrical_capacity import check_capacity, score_infrastructure
+        from app.routers.infrastructure import _query_electrical_bbox
+
+        # Get features from in-memory cache (fast, no DB needed)
+        # Use a 2km bbox around the point
+        delta = 0.018  # ~2km
+        features = _query_electrical_bbox(
+            lng - delta, lat - delta, lng + delta, lat + delta,
+            limit=200, include_poles=False,
+        )
+
+        if not features:
+            return None
+
+        result = check_capacity(
+            lat=lat, lng=lng, features=features,
+            building_type="residential", num_units=1,
+        )
+        return result
+    except Exception:
+        logger.warning("Failed to fetch electrical data", exc_info=True)
+        return None
+
+
+async def _fetch_watermains(lat: float, lng: float) -> list | None:
+    """Fetch nearby watermain segments from the in-memory cache."""
+    try:
+        from app.routers.infrastructure import _load_watermains, _geom_intersects_bbox
+
+        features = _load_watermains()
+        delta = 0.005  # ~500m
+        min_lng, min_lat = lng - delta, lat - delta
+        max_lng, max_lat = lng + delta, lat + delta
+
+        nearby = []
+        for feat in features:
+            if len(nearby) >= 50:
+                break
+            geom = feat.get("geometry")
+            if not geom:
+                continue
+            if _geom_intersects_bbox(geom, min_lng, min_lat, max_lng, max_lat):
+                p = feat.get("properties", {})
+                nearby.append({
+                    "type": "Feature",
+                    "geometry": None,  # Don't include geometry in context
+                    "properties": {
+                        "diameter_mm": int(p.get("Watermain Diameter")) if p.get("Watermain Diameter") else None,
+                        "material": p.get("Watermain Material") or "Unknown",
+                        "install_year": int(p.get("Watermain Construction Year")) if p.get("Watermain Construction Year") and str(p.get("Watermain Construction Year")).isdigit() else None,
+                    },
+                })
+        return nearby if nearby else None
+    except Exception:
+        logger.warning("Failed to fetch watermain data", exc_info=True)
+        return None
+
+
+async def _fetch_policy_rag(zone_code: str | None, parcel_id: str | None) -> list | None:
+    """Fetch relevant policy chunks from ChromaDB RAG."""
+    try:
+        import sys
+        from pathlib import Path
+        rag_dir = str(Path(__file__).resolve().parents[2] / "fine-tuned-RAG")
+        if rag_dir not in sys.path:
+            sys.path.insert(0, rag_dir)
+        from retriever import search
+
+        query_parts = []
+        if zone_code:
+            query_parts.append(f"zoning {zone_code}")
+        query_parts.append("Ontario planning policy development standards")
+        query = " ".join(query_parts)
+
+        # Run sync search in thread pool to not block event loop
+        results = await asyncio.to_thread(search, query, 5)
+        return results if results else None
+    except Exception:
+        logger.warning("Failed to fetch RAG results", exc_info=True)
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Endpoints
+# ---------------------------------------------------------------------------
+
 @router.post("/assistant/parse-model", response_model=ModelParseResponse, status_code=status.HTTP_200_OK)
 async def parse_model_description(body: ModelParseRequest) -> ModelParseResponse:
     """Parse a natural-language building description into 3D model parameters."""
@@ -360,7 +636,10 @@ Return only valid JSON, no explanation."""
 
 
 @router.post("/assistant/chat", response_model=AssistantChatResponse, status_code=status.HTTP_200_OK)
-async def chat_with_assistant(body: AssistantChatRequest) -> AssistantChatResponse:
+async def chat_with_assistant(
+    body: AssistantChatRequest,
+    db: AsyncSession = Depends(get_db_session),
+) -> AssistantChatResponse:
     if not settings.AI_API_KEY:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -374,9 +653,23 @@ async def chat_with_assistant(body: AssistantChatRequest) -> AssistantChatRespon
         speaker = "User" if message.role == "user" else "Assistant"
         transcript_lines.append(f"{speaker}: {message.text.strip()}")
 
+    # ── Gather real site data in parallel ──
+    site_data = await _gather_site_data(
+        parcel_id=body.parcel_id,
+        lat=body.lat,
+        lng=body.lng,
+        zone_code=body.zone_code,
+        db=db,
+    )
+
+    # ── Build prompt with real data ──
     prompt_parts = []
+
     if body.parcel_context:
         prompt_parts.append(f"Current site context:\n{body.parcel_context.strip()}")
+
+    if site_data:
+        prompt_parts.append(f"LIVE SITE DATA (real-time from municipal databases):\n{site_data}")
 
     # If a 3D model is active, give the AI the tool to update it
     zone_constraints = None
@@ -412,7 +705,7 @@ async def chat_with_assistant(body: AssistantChatRequest) -> AssistantChatRespon
             "Always include a brief conversational response before the marker."
         )
 
-    # Include uploaded file context so the assistant can reference blueprints, plans, etc.
+    # Include uploaded file context
     if body.upload_context:
         upload_lines = []
         for item in body.upload_context:
@@ -433,7 +726,6 @@ async def chat_with_assistant(body: AssistantChatRequest) -> AssistantChatRespon
                         details.append(f"{val} {label}")
                 if details:
                     parts.append(f"  Extracted: {', '.join(details)}")
-                # Include setbacks if present
                 setback_info = []
                 for key, label in [("setback_front_m", "front"), ("setback_rear_m", "rear"), ("setback_side_m", "side")]:
                     val = dimensions.get(key)
@@ -441,7 +733,6 @@ async def chat_with_assistant(body: AssistantChatRequest) -> AssistantChatRespon
                         setback_info.append(f"{label} {val}m")
                 if setback_info:
                     parts.append(f"  Setbacks: {', '.join(setback_info)}")
-                # Include any raw text/notes
                 notes = item.extracted_data.get("notes") or item.extracted_data.get("description")
                 if notes:
                     parts.append(f"  Notes: {notes}")
@@ -451,8 +742,9 @@ async def chat_with_assistant(body: AssistantChatRequest) -> AssistantChatRespon
     prompt_parts.append("Conversation:\n" + "\n\n".join(transcript_lines))
     prompt_parts.append("Respond to the latest user message.")
 
+    # ── Single AI call with rich context ──
     try:
-        rag_response = await provider.generate(
+        response = await provider.generate(
             prompt="\n\n".join(prompt_parts),
             system=SYSTEM_PROMPT,
             max_tokens=1500,
@@ -463,51 +755,8 @@ async def chat_with_assistant(body: AssistantChatRequest) -> AssistantChatRespon
             detail=f"Assistant generation failed: {exc}",
         ) from exc
 
-    # Fine-tuned model step
-    user_query = history[-1].text.strip() if history else ""
-    ft_advice = ""
-    FINE_TUNED_MODEL_ID = "ft:gpt-4o-2024-08-06:personal:hack-canada:DH3gbrwx" 
-    
-    try:
-        from openai import AsyncOpenAI
-        client = AsyncOpenAI()
-        ft_res = await client.chat.completions.create(
-            model=FINE_TUNED_MODEL_ID,
-            messages=[
-                {"role": "system", "content": "You provide strategic advice based on the user's goals and preliminary RAG analysis."},
-                {"role": "user", "content": f"User Query: {user_query}\n\nInitial RAG Answer:\n{rag_response.content}"}
-            ],
-            max_tokens=500
-        )
-        ft_advice = ft_res.choices[0].message.content
-    except Exception as e:
-        logger.warning(f"FT model error: {e}")
-        ft_advice = "No additional strategic advice."
-
-    # Final logic pass taking inputs, adding more processing variables, then passing into AI query
-    final_prompt = (
-        "Re-evaluate and finalize the response for the user.\n\n"
-        f"User Query: {user_query}\n\n"
-        f"Initial Analysis (RAG):\n{rag_response.content}\n\n"
-        f"Strategic Advice:\n{ft_advice}\n\n"
-        "Synthesize all the above information. Provide the final, accurate answer. "
-        "Remember to adhere to your SYSTEM PROMPT rules and append any necessary ACTION, MODEL, or CONTRACTORS markers."
-    )
-
-    try:
-        final_response = await provider.generate(
-            prompt=final_prompt,
-            system=SYSTEM_PROMPT,
-            max_tokens=1500,
-        )
-    except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Assistant final generation failed: {exc}",
-        ) from exc
-
     message, proposed_action, model_update, contractor_trades = _parse_response(
-        final_response.content, zone_constraints, zone_label
+        response.content, zone_constraints, zone_label
     )
 
     # If the AI didn't emit a CONTRACTORS marker, detect from context
@@ -520,20 +769,9 @@ async def chat_with_assistant(body: AssistantChatRequest) -> AssistantChatRespon
     # Fetch real contractor data
     contractors = None
     if contractor_trades:
-        lat, lng = 43.6532, -79.3832  # Default Toronto
-        if body.parcel_context:
-            for line in body.parcel_context.split("\n"):
-                if "lat" in line.lower():
-                    try:
-                        lat = float(re.search(r"[-+]?\d+\.?\d*", line).group())
-                    except (AttributeError, ValueError):
-                        pass
-                if "lng" in line.lower() or "lon" in line.lower():
-                    try:
-                        lng = float(re.search(r"[-+]?\d+\.?\d*", line).group())
-                    except (AttributeError, ValueError):
-                        pass
-        contractors = await _fetch_contractors(contractor_trades, lat, lng)
+        c_lat = body.lat or 43.6532
+        c_lng = body.lng or -79.3832
+        contractors = await _fetch_contractors(contractor_trades, c_lat, c_lng)
 
     return AssistantChatResponse(
         message=message,

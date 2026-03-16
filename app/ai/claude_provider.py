@@ -15,6 +15,15 @@ class ClaudeProvider(AIProvider):
         self.api_key = api_key
         self.model = model
         self.base_url = "https://api.anthropic.com/v1"
+        self._client = httpx.AsyncClient(
+            base_url=self.base_url,
+            headers={
+                "x-api-key": self.api_key,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json",
+            },
+            timeout=120.0,
+        )
 
     async def generate(self, prompt: str, system: str | None = None, max_tokens: int = 4096) -> AIResponse:
         messages = [{"role": "user", "content": prompt}]
@@ -22,19 +31,9 @@ class ClaudeProvider(AIProvider):
         if system:
             payload["system"] = system
 
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"{self.base_url}/messages",
-                headers={
-                    "x-api-key": self.api_key,
-                    "anthropic-version": "2023-06-01",
-                    "content-type": "application/json",
-                },
-                json=payload,
-                timeout=120.0,
-            )
-            response.raise_for_status()
-            data = response.json()
+        response = await self._client.post("/messages", json=payload)
+        response.raise_for_status()
+        data = response.json()
 
         return AIResponse(
             content=data["content"][0]["text"],

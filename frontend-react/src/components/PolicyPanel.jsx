@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { getParcelOverlays, getParcelZoningAnalysis, getPolicyStack, getNearbyApplications, getParcelFinancialSummary, uploadDocument, getUpload, getPlanDocuments, regeneratePlanDocument } from '../api.js';
+import { getParcelOverlays, getParcelZoningAnalysis, getPolicyStack, getNearbyApplications, getParcelFinancialSummary, uploadDocument, getUpload, getPlanDocuments, regeneratePlanDocument, getElectricalStandards, checkElectricalCapacity } from '../api.js';
 import { isResolvedParcel, isUnresolvedParcel } from '../lib/parcelState.js';
 import useResizable from '../hooks/useResizable.js';
 
@@ -1235,6 +1235,14 @@ const TAB_TITLES = {
     inspections: 'Inspection Records',
 };
 
+const ELECTRICAL_TAB_TITLES = {
+    overview: 'Electrical Overview',
+    standards: 'Electrical Standards',
+    network: 'Grid Map',
+    datasets: 'Electrical Datasets',
+    compliance: 'Electrical Compliance',
+};
+
 const ZONING_TABS = new Set(['overview']);
 
 function InfraStandardsTab({ asset }) {
@@ -1753,8 +1761,293 @@ function InfraHistoryTab({ asset }) {
     );
 }
 
+// ─── Electrical tab components ───────────────────────────────────────────────
 
-export default function PolicyPanel({ parcel, isOpen, onClose, activeNav, savedParcels, onSaveParcel, onUploadAnalyzed, activePlanId, assetType, selectedPipelineAsset }) {
+const VOLTAGE_TIERS_LEGEND = [
+    { key: '500kV', label: '500 kV Transmission', color: '#e74c3c' },
+    { key: '115kV', label: '115 kV Transmission', color: '#e67e22' },
+    { key: '27kV', label: '27.6 kV Distribution', color: '#3498db' },
+    { key: '13kV', label: '13.8 kV Distribution', color: '#2ecc71' },
+    { key: 'local', label: 'Local Secondary', color: '#f1c40f' },
+    { key: 'unknown', label: 'Unknown (Distribution)', color: '#9b59b6' },
+];
+
+function ElectricalOverviewTab({ electricalData, mapCenter }) {
+    const [capForm, setCapForm] = useState({ building_type: 'residential', num_units: 1 });
+    const [capResult, setCapResult] = useState(null);
+    const [capLoading, setCapLoading] = useState(false);
+
+    const stats = useMemo(() => {
+        const features = electricalData?.features || [];
+        const lines = features.filter(f => f.properties?.layer_type === 'power_line');
+        const subs = features.filter(f => f.properties?.layer_type === 'electrical_substation');
+        const transformers = features.filter(f => (f.properties?.power_type || '').toLowerCase().includes('transformer'));
+        return { totalLines: lines.length, totalSubs: subs.length, totalTransformers: transformers.length };
+    }, [electricalData]);
+
+    // Compute nearest substation and feeding lines for service trace
+    const serviceTrace = useMemo(() => {
+        if (!mapCenter || !electricalData?.features?.length) return null;
+        const features = electricalData.features;
+        const subs = features.filter(f => f.properties?.layer_type === 'electrical_substation');
+        const lines = features.filter(f => f.properties?.layer_type === 'power_line');
+
+        // Find nearest substation by point distance to map center
+        let nearest = null;
+        let minDist = Infinity;
+        for (const sub of subs) {
+            const geom = sub.geometry;
+            if (!geom) continue;
+            let pts = [];
+            if (geom.type === 'Point') pts = [geom.coordinates];
+            else if (geom.type === 'LineString') pts = geom.coordinates;
+            else if (geom.type === 'MultiPoint') pts = geom.coordinates;
+            for (const pt of pts) {
+                const dx = pt[0] - mapCenter.lng;
+                const dy = pt[1] - mapCenter.lat;
+                const d = Math.sqrt(dx * dx + dy * dy);
+                if (d < minDist) { minDist = d; nearest = sub; }
+            }
+        }
+
+        // Find lines that pass near the nearest substation (within ~500m in degrees ≈ 0.005)
+        const feedingLines = [];
+        if (nearest) {
+            const subCoord = nearest.geometry?.type === 'Point'
+                ? nearest.geometry.coordinates
+                : nearest.geometry?.coordinates?.[0] || [0, 0];
+            for (const line of lines) {
+                const coords = line.geometry?.coordinates || [];
+                for (const pt of coords) {
+                    const dx = pt[0] - subCoord[0];
+                    const dy = pt[1] - subCoord[1];
+                    if (Math.sqrt(dx * dx + dy * dy) < 0.015) {
+                        feedingLines.push(line);
+                        break;
+                    }
+                }
+            }
+        }
+
+        return {
+            nearestSub: nearest,
+            distKm: minDist * 111, // rough degree-to-km
+            feedingLines,
+        };
+    }, [electricalData, mapCenter]);
+
+    const handleCapCheck = useCallback(async () => {
+        if (!mapCenter) return;
+        setCapLoading(true);
+        try {
+            const result = await checkElectricalCapacity({ ...capForm, lat: mapCenter.lat, lng: mapCenter.lng });
+            setCapResult(result);
+        } catch { setCapResult(null); }
+        finally { setCapLoading(false); }
+    }, [capForm, mapCenter]);
+
+    return (
+        <div className="tab-content">
+            <Section title="Service Trace" icon={<><circle cx="12" cy="12" r="3" /><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83" /></>}>
+                {serviceTrace?.nearestSub ? (
+                    <>
+                        <Row label="Nearest Substation" value={serviceTrace.nearestSub.properties?.name || serviceTrace.nearestSub.properties?.operator || 'Unnamed'} />
+                        <Row label="Distance" value={`${serviceTrace.distKm.toFixed(1)} km`} />
+                        {serviceTrace.nearestSub.properties?.operator && <Row label="Operator" value={serviceTrace.nearestSub.properties.operator} />}
+                        {serviceTrace.nearestSub.properties?.voltage && <Row label="Voltage" value={serviceTrace.nearestSub.properties.voltage} />}
+                        <Row label="Feeding Lines" value={serviceTrace.feedingLines.length} />
+                        {serviceTrace.feedingLines.map((line, i) => {
+                            const p = line.properties || {};
+                            return (
+                                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, marginTop: 3 }}>
+                                    <span style={{ width: 16, height: 3, background: p.voltage_color || '#9b59b6', borderRadius: 1, flexShrink: 0 }} />
+                                    <span style={{ color: '#ccc' }}>{p.name || p.voltage_tier || 'Power Line'}</span>
+                                    {p.voltage_kv > 0 && <span style={{ color: '#888' }}>({p.voltage_kv} kV)</span>}
+                                </div>
+                            );
+                        })}
+                    </>
+                ) : (
+                    <p style={{ color: '#888', fontSize: 12 }}>Pan the map to trace nearest electrical service.</p>
+                )}
+            </Section>
+            <Section title="Grid Stats" icon={<path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />}>
+                <Row label="Power Lines in View" value={stats.totalLines} />
+                <Row label="Substations" value={stats.totalSubs} />
+                <Row label="Transformers" value={stats.totalTransformers} />
+                {mapCenter && <Row label="Map Center" value={`${mapCenter.lat.toFixed(4)}, ${mapCenter.lng.toFixed(4)}`} mono />}
+            </Section>
+            <Section title="Capacity Check" icon={<><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" /></>}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, fontSize: 13 }}>
+                    <label>Building Type
+                        <select value={capForm.building_type} onChange={e => setCapForm(p => ({ ...p, building_type: e.target.value }))} style={{ marginLeft: 8, background: '#1a1a1a', color: '#ddd', border: '1px solid #333', borderRadius: 4, padding: '2px 6px' }}>
+                            <option value="residential">Residential</option>
+                            <option value="commercial">Commercial</option>
+                            <option value="industrial">Industrial</option>
+                        </select>
+                    </label>
+                    <label>Units
+                        <input type="number" min={1} value={capForm.num_units} onChange={e => setCapForm(p => ({ ...p, num_units: parseInt(e.target.value) || 1 }))} style={{ marginLeft: 8, width: 60, background: '#1a1a1a', color: '#ddd', border: '1px solid #333', borderRadius: 4, padding: '2px 6px' }} />
+                    </label>
+                    <button onClick={handleCapCheck} disabled={capLoading} style={{ padding: '6px 12px', background: '#c8a24e', color: '#111', border: 'none', borderRadius: 4, cursor: 'pointer', fontWeight: 600, opacity: capLoading ? 0.6 : 1 }}>
+                        {capLoading ? 'Checking...' : 'Check Capacity'}
+                    </button>
+                </div>
+                {capResult && (
+                    <div style={{ marginTop: 10 }}>
+                        <Pill text={capResult.verdict || 'Complete'} color={capResult.verdict === 'adequate' ? '#27ae60' : capResult.verdict === 'marginal' ? '#f39c12' : '#e74c3c'} />
+                        {capResult.estimated_demand_amps && <Row label="Estimated Demand" value={`${capResult.estimated_demand_amps} A`} />}
+                        {capResult.nearest_substation && <Row label="Nearest Substation" value={`${capResult.nearest_substation.distance_m?.toFixed(0)} m`} />}
+                    </div>
+                )}
+            </Section>
+        </div>
+    );
+}
+
+function ElectricalStandardsTab() {
+    const [standards, setStandards] = useState(null);
+    const [loading, setLoading] = useState(true);
+    const [openSections, setOpenSections] = useState({});
+
+    useEffect(() => {
+        let cancelled = false;
+        getElectricalStandards().then(data => { if (!cancelled) setStandards(data); }).catch(() => {}).finally(() => { if (!cancelled) setLoading(false); });
+        return () => { cancelled = true; };
+    }, []);
+
+    const toggle = useCallback((key) => setOpenSections(p => ({ ...p, [key]: !p[key] })), []);
+
+    if (loading) return <div className="tab-content"><p style={{ color: '#888', padding: 16 }}>Loading standards...</p></div>;
+    if (!standards) return <div className="tab-content"><p style={{ color: '#888', padding: 16 }}>Standards unavailable.</p></div>;
+
+    return (
+        <div className="tab-content">
+            <Section title="Regulatory Hierarchy" icon={<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />}>
+                {(standards.regulatory_hierarchy || []).map((r, i) => (
+                    <div key={i} style={{ marginBottom: 6 }}>
+                        <Row label={r.code || r.name} value={r.jurisdiction || ''} />
+                        {r.description && <p style={{ fontSize: 11, color: '#888', margin: '2px 0 0 0' }}>{r.description}</p>}
+                    </div>
+                ))}
+            </Section>
+            <Section title="OESC Requirements" icon={<path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />} defaultOpen={false}>
+                {Object.entries(standards.oesc_requirements || {}).map(([key, val]) => (
+                    <div key={key} style={{ marginBottom: 8 }}>
+                        <div onClick={() => toggle(key)} style={{ cursor: 'pointer', fontWeight: 600, fontSize: 12, color: '#c8a24e' }}>{openSections[key] ? '▾' : '▸'} {key.replace(/_/g, ' ')}</div>
+                        {openSections[key] && typeof val === 'object' && (
+                            <div style={{ paddingLeft: 12, fontSize: 11, color: '#aaa' }}>
+                                {Object.entries(val).map(([k, v]) => <Row key={k} label={k.replace(/_/g, ' ')} value={typeof v === 'object' ? JSON.stringify(v) : String(v)} />)}
+                            </div>
+                        )}
+                    </div>
+                ))}
+            </Section>
+            <Section title="OBC Electrical Facilities" icon={<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />} defaultOpen={false}>
+                {Object.entries(standards.obc_facilities || {}).map(([key, val]) => (
+                    <div key={key} style={{ marginBottom: 4 }}>
+                        <Row label={key.replace(/_/g, ' ')} value={typeof val === 'object' ? JSON.stringify(val) : String(val)} />
+                    </div>
+                ))}
+            </Section>
+            <Section title="ESA Inspections" icon={<><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /></>} defaultOpen={false}>
+                {(standards.esa_inspections || []).map((stage, i) => (
+                    <div key={i} style={{ marginBottom: 6 }}>
+                        <Row label={stage.stage || stage.name || `Stage ${i + 1}`} value={stage.description || ''} />
+                    </div>
+                ))}
+            </Section>
+            <Section title="Toronto Hydro Service Ratings" icon={<path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />} defaultOpen={false}>
+                {Object.entries(standards.toronto_hydro_ratings || {}).map(([key, val]) => (
+                    <div key={key} style={{ marginBottom: 4 }}>
+                        <Row label={key.replace(/_/g, ' ')} value={typeof val === 'object' ? JSON.stringify(val) : String(val)} />
+                    </div>
+                ))}
+            </Section>
+        </div>
+    );
+}
+
+function ElectricalNetworkTab({ electricalData }) {
+    const features = electricalData?.features || [];
+    const subs = useMemo(() => features.filter(f => f.properties?.layer_type === 'electrical_substation'), [features]);
+    const transformers = useMemo(() => features.filter(f => (f.properties?.power_type || '').toLowerCase().includes('transformer')), [features]);
+
+    return (
+        <div className="tab-content">
+            <Section title="Voltage Tiers" icon={<path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />}>
+                {VOLTAGE_TIERS_LEGEND.map(t => (
+                    <div key={t.key} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, fontSize: 12 }}>
+                        <span style={{ width: 24, height: 3, background: t.color, borderRadius: 1, flexShrink: 0 }} />
+                        <span style={{ color: '#ccc' }}>{t.label}</span>
+                    </div>
+                ))}
+            </Section>
+            <Section title={`Substations (${subs.length})`} icon={<circle cx="12" cy="12" r="10" />} defaultOpen={subs.length <= 20}>
+                {subs.length === 0 ? <p style={{ color: '#888', fontSize: 12 }}>No substations in viewport.</p> : subs.slice(0, 50).map((f, i) => (
+                    <Row key={i} label={f.properties?.name || f.properties?.source_id || `Substation ${i + 1}`} value={f.properties?.voltage || '—'} />
+                ))}
+            </Section>
+            <Section title={`Transformers (${transformers.length})`} icon={<circle cx="12" cy="12" r="8" />} defaultOpen={false}>
+                {transformers.length === 0 ? <p style={{ color: '#888', fontSize: 12 }}>No transformers in viewport.</p> : transformers.slice(0, 30).map((f, i) => (
+                    <Row key={i} label={f.properties?.name || `Transformer ${i + 1}`} value={f.properties?.voltage || '—'} />
+                ))}
+            </Section>
+        </div>
+    );
+}
+
+function ElectricalDatasetsTab() {
+    const DATASETS = [
+        { name: 'Toronto Hydro Grid Data', source: 'Toronto Open Data', desc: 'Power lines, substations, transformers' },
+        { name: 'Street Light Poles', source: 'Toronto Open Data', desc: '225K+ pole locations with type classification' },
+        { name: 'Ontario Electrical Safety Code', source: 'ESA Ontario', desc: 'OESC 28th Edition requirements' },
+        { name: 'Ontario Building Code', source: 'Province of Ontario', desc: 'OBC Part 9/Part 3 electrical provisions' },
+        { name: 'CEC Demand Tables', source: 'CSA C22.1', desc: 'Canadian Electrical Code Rule 8-200 calculations' },
+    ];
+    return (
+        <div className="tab-content">
+            <Section title="Electrical Data Sources" icon={<><ellipse cx="12" cy="5" rx="9" ry="3" /><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" /></>}>
+                {DATASETS.map((ds, i) => (
+                    <div key={i} style={{ marginBottom: 10, paddingBottom: 8, borderBottom: '1px solid #222' }}>
+                        <div style={{ fontWeight: 600, fontSize: 13, color: '#e0e0e0' }}>{ds.name}</div>
+                        <div style={{ fontSize: 11, color: '#888' }}>{ds.source}</div>
+                        <div style={{ fontSize: 11, color: '#aaa', marginTop: 2 }}>{ds.desc}</div>
+                    </div>
+                ))}
+            </Section>
+        </div>
+    );
+}
+
+function ElectricalComplianceTab() {
+    const OBC_ITEMS = [
+        { label: 'Electrical room: min 1.0 m clear working space', status: 'info' },
+        { label: 'Service entrance ≤ 3 m from point of entry', status: 'info' },
+        { label: 'Panel located on same floor as service entrance (Part 9)', status: 'info' },
+        { label: 'Emergency power for buildings > 3 storeys or 600 m²', status: 'info' },
+        { label: 'Fire alarm system connection per OBC 3.2.4', status: 'info' },
+    ];
+    const OESC_ITEMS = [
+        { label: 'Conductor sizing per CEC Rule 8-200 demand calculation', status: 'info' },
+        { label: 'Grounding electrode per OESC Rule 10-700', status: 'info' },
+        { label: 'AFCI protection for bedrooms (residential)', status: 'info' },
+        { label: 'GFCI protection for bathrooms, kitchens, outdoors', status: 'info' },
+        { label: 'Tamper-resistant receptacles in dwelling units', status: 'info' },
+    ];
+    return (
+        <div className="tab-content">
+            <Section title="OBC Electrical Requirements" icon={<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />}>
+                <Checklist items={OBC_ITEMS.map(it => ({ ...it, checked: false }))} />
+            </Section>
+            <Section title="OESC Key Requirements" icon={<path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />}>
+                <Checklist items={OESC_ITEMS.map(it => ({ ...it, checked: false }))} />
+            </Section>
+        </div>
+    );
+}
+
+export default function PolicyPanel({ parcel, isOpen, onClose, activeNav, savedParcels, onSaveParcel, onUploadAnalyzed, activePlanId, assetType, selectedPipelineAsset, electricalData, mapCenter }) {
     const { isResizing, handleProps: resizeHandleProps } = useResizable({
         defaultSize: 380,
         minSize: 280,
@@ -1834,6 +2127,24 @@ export default function PolicyPanel({ parcel, isOpen, onClose, activeNav, savedP
     const visibleZoningLoading = isResolvedParcel(parcel) ? loadingZoning : false;
 
     const renderTab = () => {
+        // ── Electrical mode tabs ────────────────────────────────
+        if (assetType === 'electrical') {
+            switch (activeNav) {
+                case 'overview':
+                    return <ElectricalOverviewTab electricalData={electricalData} mapCenter={mapCenter} />;
+                case 'standards':
+                    return <ElectricalStandardsTab />;
+                case 'network':
+                    return <ElectricalNetworkTab electricalData={electricalData} />;
+                case 'datasets':
+                    return <ElectricalDatasetsTab />;
+                case 'compliance':
+                    return <ElectricalComplianceTab />;
+                default:
+                    return <ElectricalOverviewTab electricalData={electricalData} mapCenter={mapCenter} />;
+            }
+        }
+
         // Pipeline mode: show asset detail when a segment is clicked
         if (assetType === 'pipeline' && selectedPipelineAsset && activeNav === 'overview') {
             return <PipelineAssetPanel asset={selectedPipelineAsset} />;
@@ -1893,7 +2204,9 @@ export default function PolicyPanel({ parcel, isOpen, onClose, activeNav, savedP
             <div {...resizeHandleProps} style={{ ...resizeHandleProps.style, left: -2 }} />
             <div id="policy-panel-header">
                 <h2 id="policy-panel-title">
-                    {assetType === 'pipeline' && selectedPipelineAsset
+                    {assetType === 'electrical'
+                        ? (ELECTRICAL_TAB_TITLES[activeNav] || 'Electrical')
+                        : assetType === 'pipeline' && selectedPipelineAsset
                         ? (selectedPipelineAsset.location || 'Water Main')
                         : (TAB_TITLES[activeNav] || 'Project Information')}
                 </h2>

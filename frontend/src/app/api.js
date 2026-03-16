@@ -130,8 +130,11 @@ export async function parseModel(text, currentParams = null, zoneCode = null, lo
     });
 }
 
-export async function chatWithAssistant({ messages, parcelContext = null, modelParams = null, zoneCode = null, uploadContext = null }) {
+export async function chatWithAssistant({ messages, parcelContext = null, parcelId = null, lat = null, lng = null, modelParams = null, zoneCode = null, uploadContext = null }) {
     const payload = { messages, parcel_context: parcelContext };
+    if (parcelId) payload.parcel_id = parcelId;
+    if (lat != null) payload.lat = lat;
+    if (lng != null) payload.lng = lng;
     if (modelParams) payload.model_params = modelParams;
     if (zoneCode) payload.zone_code = zoneCode;
     if (uploadContext?.length) payload.upload_context = uploadContext;

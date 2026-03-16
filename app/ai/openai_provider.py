@@ -16,6 +16,11 @@ class OpenAIProvider(AIProvider):
         self.model = model
         self.embedding_model = embedding_model
         self.base_url = "https://api.openai.com/v1"
+        self._client = httpx.AsyncClient(
+            base_url=self.base_url,
+            headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
+            timeout=120.0,
+        )
 
     async def generate(self, prompt: str, system: str | None = None, max_tokens: int = 4096) -> AIResponse:
         messages = []
@@ -25,15 +30,9 @@ class OpenAIProvider(AIProvider):
 
         payload = {"model": self.model, "max_tokens": max_tokens, "messages": messages}
 
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"{self.base_url}/chat/completions",
-                headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
-                json=payload,
-                timeout=120.0,
-            )
-            response.raise_for_status()
-            data = response.json()
+        response = await self._client.post("/chat/completions", json=payload)
+        response.raise_for_status()
+        data = response.json()
 
         choice = data["choices"][0]
         return AIResponse(
@@ -64,13 +63,7 @@ class OpenAIProvider(AIProvider):
 
     async def embed(self, text: str) -> list[float]:
         payload = {"model": self.embedding_model, "input": text}
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"{self.base_url}/embeddings",
-                headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
-                json=payload,
-                timeout=60.0,
-            )
-            response.raise_for_status()
-            data = response.json()
+        response = await self._client.post("/embeddings", json=payload)
+        response.raise_for_status()
+        data = response.json()
         return data["data"][0]["embedding"]

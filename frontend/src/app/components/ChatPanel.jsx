@@ -427,9 +427,26 @@ export default function ChatPanel({ parcelContext, onPlanComplete, onToggleExpan
                 filename: u.filename,
                 extracted_data: u.extractedData || null,
             }));
+            // Extract lat/lng from parcel geometry for infrastructure queries
+            let parcelLat = null, parcelLng = null;
+            const geom = parcelContext?.geom;
+            if (geom?.coordinates) {
+                const coords = geom.type === 'Point' ? geom.coordinates
+                    : geom.type === 'Polygon' ? geom.coordinates[0]?.[0]
+                    : geom.type === 'MultiPolygon' ? geom.coordinates[0]?.[0]?.[0]
+                    : null;
+                if (coords && coords.length >= 2) {
+                    parcelLng = coords[0];
+                    parcelLat = coords[1];
+                }
+            }
+
             const { message, proposedAction, modelUpdate, contractors } = await chatWithAssistant({
                 messages: nextHistory.slice(-20),
                 parcelContext: parcelContextStr,
+                parcelId: parcelContext?.id || null,
+                lat: parcelLat,
+                lng: parcelLng,
                 modelParams: modelParams || null,
                 zoneCode,
                 uploadContext: uploadContext.length ? uploadContext : null,

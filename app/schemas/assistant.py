@@ -18,6 +18,9 @@ class UploadContextItem(BaseModel):
 class AssistantChatRequest(BaseModel):
     messages: list[AssistantChatMessage] = Field(min_length=1, max_length=20)
     parcel_context: str | None = Field(default=None, max_length=2000)
+    parcel_id: str | None = None
+    lat: float | None = None
+    lng: float | None = None
     model_params: dict | None = None
     zone_code: str | None = None
     upload_context: list[UploadContextItem] | None = None

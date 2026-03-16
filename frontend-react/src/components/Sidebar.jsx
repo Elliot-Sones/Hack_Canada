@@ -19,14 +19,24 @@ const PIPELINE_NAV_ITEMS = [
     { id: 'history', label: 'History', icon: (<><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></>) },
 ];
 
+const ELECTRICAL_NAV_ITEMS = [
+    { id: 'overview', label: 'Overview', icon: (<><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" /></>) },
+    { id: 'standards', label: 'Standards', icon: (<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />) },
+    { id: 'network', label: 'Grid Map', icon: (<><circle cx="5" cy="6" r="2" /><circle cx="19" cy="6" r="2" /><circle cx="12" cy="18" r="2" /><line x1="5" y1="8" x2="12" y2="16" /><line x1="19" y1="8" x2="12" y2="16" /></>) },
+    { id: 'datasets', label: 'Datasets', icon: (<><ellipse cx="12" cy="5" rx="9" ry="3" /><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" /><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" /></>) },
+    { id: 'compliance', label: 'Compliance', icon: (<><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="16" y1="13" x2="8" y2="13" /><line x1="16" y1="17" x2="8" y2="17" /></>) },
+];
+
 const NAV_BY_ASSET_TYPE = {
     building: BUILDING_NAV_ITEMS,
     pipeline: PIPELINE_NAV_ITEMS,
+    electrical: ELECTRICAL_NAV_ITEMS,
 };
 
 const ASSET_TYPES = [
     { id: 'building', label: 'Buildings' },
     { id: 'pipeline', label: 'Pipelines' },
+    { id: 'electrical', label: 'Electrical' },
 ];
 
 const COLLAPSED_WIDTH = 52;
