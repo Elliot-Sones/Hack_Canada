@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useSession, signOut } from '../lib/auth-client.js';
 import { clearFastApiToken } from '../api.js';
 import maplibregl from 'maplibre-gl';
+import '../styles/landing.css';
 
 const QUERIES = [
     "What's the max building height at 100 Queen St W?",
