@@ -7,7 +7,7 @@ import DashboardView from '../components/DashboardView';
 function DashboardContent() {
   const searchParams = useSearchParams();
   const address = searchParams.get('address');
-  return <DashboardView initialAddress={address || undefined} />;
+  return <DashboardView initialAddress={address || undefined} parcelId={undefined} />;
 }
 
 export default function DashboardPage() {
