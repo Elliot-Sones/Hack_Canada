@@ -11,7 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_current_user, get_db_session
 from app.models.entitlement import BuildingPermit, DevelopmentApplication
-from app.models.geospatial import Jurisdiction
+from app.models.facts import ParcelBuildingFact, ParcelConstraintFact, ParcelCurrentFact, ParcelZoningFact
+from app.models.geospatial import Jurisdiction, Parcel
 from app.models.ingestion import IngestionJob
 
 router = APIRouter()
@@ -101,6 +102,110 @@ async def ingest_bridges(
     return {
         "status": "accepted",
         "message": "Bridge inventory ingestion started",
+    }
+
+
+@router.post("/admin/ingest/arcgis/parcels")
+async def ingest_arcgis_parcels(
+    user: dict = Depends(get_current_user),
+):
+    """Phase 1: Ingest Toronto parcels + addresses from ArcGIS, populate current facts."""
+    from app.tasks.arcgis_ingestion import ingest_arcgis_parcels_task
+
+    ingest_arcgis_parcels_task.delay()
+    return {"status": "accepted", "message": "ArcGIS parcel ingestion started (Phase 1)"}
+
+
+@router.post("/admin/ingest/arcgis/buildings")
+async def ingest_arcgis_buildings(
+    user: dict = Depends(get_current_user),
+):
+    """Phase 2: Ingest Toronto building footprints from ArcGIS, populate building facts."""
+    from app.tasks.arcgis_ingestion import ingest_arcgis_buildings_task
+
+    ingest_arcgis_buildings_task.delay()
+    return {"status": "accepted", "message": "ArcGIS building ingestion started (Phase 2)"}
+
+
+@router.post("/admin/ingest/arcgis/zoning")
+async def ingest_arcgis_zoning(
+    user: dict = Depends(get_current_user),
+):
+    """Phase 3: Ingest Toronto zoning areas from ArcGIS, populate zoning facts."""
+    from app.tasks.arcgis_ingestion import ingest_arcgis_zoning_task
+
+    ingest_arcgis_zoning_task.delay()
+    return {"status": "accepted", "message": "ArcGIS zoning ingestion started (Phase 3)"}
+
+
+@router.post("/admin/ingest/arcgis/constraints")
+async def ingest_arcgis_constraints(
+    user: dict = Depends(get_current_user),
+):
+    """Phase 4: Ingest Toronto constraint overlays from ArcGIS, populate constraint facts."""
+    from app.tasks.arcgis_ingestion import ingest_arcgis_constraints_task
+
+    ingest_arcgis_constraints_task.delay()
+    return {"status": "accepted", "message": "ArcGIS constraint ingestion started (Phase 4)"}
+
+
+@router.post("/admin/ingest/arcgis/full")
+async def ingest_arcgis_full(
+    user: dict = Depends(get_current_user),
+):
+    """Run all 4 ArcGIS ingestion phases sequentially."""
+    from app.tasks.arcgis_ingestion import ingest_arcgis_full_task
+
+    ingest_arcgis_full_task.delay()
+    return {"status": "accepted", "message": "Full ArcGIS ingestion started (all 4 phases)"}
+
+
+@router.get("/admin/ingest/arcgis/status")
+async def get_arcgis_ingestion_status(
+    user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+):
+    """Return latest ArcGIS ingestion job status per phase + fact table counts."""
+    arcgis_job_types = [
+        "arcgis_parcel_base", "arcgis_address_points",
+        "arcgis_building_footprints", "arcgis_zoning",
+        "arcgis_heritage", "arcgis_ravine", "arcgis_esa",
+    ]
+
+    jobs = {}
+    for jt in arcgis_job_types:
+        last_job = (
+            await db.execute(
+                select(IngestionJob)
+                .where(IngestionJob.job_type == jt)
+                .order_by(IngestionJob.created_at.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if last_job:
+            jobs[jt] = {
+                "status": last_job.status,
+                "records_processed": last_job.records_processed,
+                "records_failed": last_job.records_failed,
+                "started_at": str(last_job.started_at) if last_job.started_at else None,
+                "completed_at": str(last_job.completed_at) if last_job.completed_at else None,
+            }
+
+    parcel_count = await db.scalar(select(func.count()).select_from(Parcel))
+    current_facts = await db.scalar(select(func.count()).select_from(ParcelCurrentFact))
+    building_facts = await db.scalar(select(func.count()).select_from(ParcelBuildingFact))
+    zoning_facts = await db.scalar(select(func.count()).select_from(ParcelZoningFact))
+    constraint_facts = await db.scalar(select(func.count()).select_from(ParcelConstraintFact))
+
+    return {
+        "jobs": jobs,
+        "counts": {
+            "parcels": parcel_count or 0,
+            "parcel_current_facts": current_facts or 0,
+            "parcel_building_facts": building_facts or 0,
+            "parcel_zoning_facts": zoning_facts or 0,
+            "parcel_constraint_facts": constraint_facts or 0,
+        },
     }
 
 

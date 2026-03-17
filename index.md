@@ -1,7 +1,7 @@
 # CoCivil — AI-Powered Civil Development Platform
 
 > **Auto-maintained**: Updated after every file edit/creation. See `.claude/CLAUDE.md` for rules.
-> **Last updated**: 2026-03-16 (auth bridge, app router restructure, two-service deployment) | **PRD**: [`.claude/docs/PRD.md`](.claude/docs/PRD.md)
+> **Last updated**: 2026-03-16 (added ArcGIS ingestion pipeline + fact table population) | **PRD**: [`.claude/docs/PRD.md`](.claude/docs/PRD.md)
 
 ---
 
@@ -37,7 +37,7 @@
 │  MapLibre GL · Three.js · Konva.js                       │
 ├─────────────────────────────────────────────────────────┤
 │  Backend (FastAPI + SQLAlchemy async)                    │
-│  21 API routers · 98 endpoints · 39 services · 9 tasks   │
+│  21 API routers · 105 endpoints · 41 services · 10 tasks  │
 ├─────────────────────────────────────────────────────────┤
 │  PostgreSQL + PostGIS    │  ChromaDB (RAG vectors)      │
 │  Toronto Open Data CKAN  │  Claude / OpenAI LLM         │
@@ -84,6 +84,12 @@
 | `app/devtools.py` | Preflight connectivity checks (DB, Redis, S3, Docker) |
 | `app/celery_app.py` | Celery application config (broker=Redis, JSON serialization, 9 task modules) |
 
+### HTTP Clients (`app/clients/`)
+
+| File | Purpose |
+|------|---------|
+| `arcgis_rest.py` | Generic ArcGIS REST FeatureServer client (pagination via objectIds, metadata, retry with exponential backoff) |
+
 ### Middleware (`app/middleware/`)
 
 | File | Purpose |
@@ -106,6 +112,7 @@
 | `upload.py` | File upload records |
 | `export.py` | Document export records |
 | `dataset.py` | Dataset catalog |
+| `facts.py` | Materialized parcel fact tables (ParcelCurrentFact, ParcelBuildingFact, ParcelConstraintFact w/ esa_flag, ParcelZoningFact) + parser traceability (ParserVersion, ParseRun) |
 | `design_version.py` | Design version tracking |
 | `simulation.py` | Scenario simulation |
 | `tenant.py` | Multi-tenant isolation |
@@ -125,7 +132,7 @@
 | `finance.py` | `/api/v1/finance` | Pro formas, cost estimates |
 | `assistant.py` | `/api/v1/assistant` | AI chat — single-call with live zoning, electrical, water, and RAG context |
 | `exports.py` | `/api/v1/exports` | PDF/Docx generation |
-| `ingestion.py` | `/api/v1/ingestion` | CKAN/GeoJSON import |
+| `ingestion.py` | `/api/v1/ingestion` | CKAN/GeoJSON/ArcGIS import + fact population |
 | `uploads.py` | `/api/v1/uploads` | File upload handling |
 | `auth.py` | `/api/v1/auth` | Authentication (login, register, session-exchange for Better Auth bridge) |
 | `jobs.py` | `/api/v1/jobs` | Async task tracking |
@@ -151,6 +158,8 @@
 | `policy_stack.py` | RAG-backed policy retrieval (ChromaDB) |
 | `geospatial_ingestion.py` | GeoJSON import |
 | `ckan_ingestion.py` | Toronto Open Data CKAN integration |
+| `arcgis_ingestion.py` | Toronto ArcGIS FeatureServer ingestion (parcels, addresses, buildings, zoning, constraints) |
+| `fact_population.py` | Fact table population scripts (SQL UPSERTs from normalized → fact tables) |
 | `geospatial.py` | PostGIS spatial operations |
 | `overlay_service.py` | Zoning overlay analysis |
 | `dxf_parser.py` | Building floor plan DXF parsing |
@@ -222,6 +231,7 @@
 |------|---------|
 | `plan.py` | Main plan generation pipeline |
 | `ingestion.py` | CKAN/GeoJSON import |
+| `arcgis_ingestion.py` | ArcGIS ingestion tasks (4 phases + full pipeline) |
 | `entitlement.py` | Entitlement analysis |
 | `infrastructure_ingestion.py` | Infrastructure data import |
 | `massing.py` | 3D massing generation |
@@ -267,7 +277,7 @@
 | File | Purpose |
 |------|---------|
 | `DashboardView.jsx` | Main dashboard shell (map, sidebar, panels, models) |
-| `LandingPage.jsx` | Home page / onboarding |
+| `LandingPage.jsx` | Home page with hero, product demo mockup, How It Works, feature cards, story/vision, CTA |
 | `MapView.jsx` | Interactive parcel/zoning map (MapLibre GL) |
 | `SearchBar.jsx` | Address/parcel search |
 | `Sidebar.jsx` | Navigation & context panel |
@@ -396,7 +406,6 @@ Address → source-discovery → parcel-zoning-research → buildability-analysi
 
 | Skill | Section | Purpose |
 |-------|---------|---------|
-| `neon-postgres` | — | Neon serverless Postgres reference guide |
 | `ontario-planning-framework` | 1 | Foundational legal hierarchy and data sources |
 | `ontario-planning-appendices` | 15 | Reference compendium (11 appendices: legislation, fees, glossary, QA) |
 
@@ -549,7 +558,7 @@ Address → source-discovery → parcel-zoning-research → buildability-analysi
 | `frontend/src/app/api/auth/exchange/route.ts` | Next.js route: exchanges Better Auth session cookie for FastAPI JWT |
 | `railway.toml` | Railway API service config (pre-deploy: alembic migrate, health: /api/v1/health) |
 | `alembic.ini` | Alembic migration config |
-| `alembic/` | 9 migrations: initial 34-table schema → infrastructure assets → infra data refactor (electrical_assets table, pipeline_assets columns) |
+| `alembic/` | 11 migrations: initial 34-table schema → infrastructure assets → infra data refactor → fact tables → esa_flag |
 | `pyproject.toml` | Python project config (uv), Python ≥3.11, pytest asyncio_mode=auto |
 | `Makefile` | 12 targets: infra-up/down, doctor, migrate, run-api/frontend, seed, test |
 | `.env.example` | Environment variable template (localhost targets) |
@@ -561,7 +570,7 @@ Address → source-discovery → parcel-zoning-research → buildability-analysi
 
 ---
 
-## API Endpoint Reference (98 endpoints)
+## API Endpoint Reference (105 endpoints)
 
 ### Auth & Health
 
@@ -665,7 +674,7 @@ Address → source-discovery → parcel-zoning-research → buildability-analysi
 | `POST` | `/api/v1/uploads/{id}/generate-plan` | Feed extracted data into plan pipeline |
 | `POST` | `/api/v1/uploads/{id}/generate-response` | Generate response doc from findings |
 
-### Ingestion (7 endpoints)
+### Ingestion (14 endpoints)
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
@@ -676,6 +685,12 @@ Address → source-discovery → parcel-zoning-research → buildability-analysi
 | `POST` | `/api/v1/admin/ingest/storm-sewers` | Trigger storm sewer ingestion |
 | `POST` | `/api/v1/admin/ingest/bridges` | Trigger bridge inventory ingestion |
 | `GET` | `/api/v1/admin/ingest/status` | Ingestion status + dataset counts |
+| `POST` | `/api/v1/admin/ingest/arcgis/parcels` | ArcGIS Phase 1: parcels + addresses + current facts |
+| `POST` | `/api/v1/admin/ingest/arcgis/buildings` | ArcGIS Phase 2: building footprints + building facts |
+| `POST` | `/api/v1/admin/ingest/arcgis/zoning` | ArcGIS Phase 3: zoning areas + zoning facts |
+| `POST` | `/api/v1/admin/ingest/arcgis/constraints` | ArcGIS Phase 4: heritage, ravine, ESA + constraint facts |
+| `POST` | `/api/v1/admin/ingest/arcgis/full` | All 4 ArcGIS phases sequentially |
+| `GET` | `/api/v1/admin/ingest/arcgis/status` | ArcGIS job status + fact table counts |
 
 ### Infrastructure (8 endpoints)
 

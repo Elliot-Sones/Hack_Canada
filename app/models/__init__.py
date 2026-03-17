@@ -10,6 +10,14 @@ from app.models.entitlement import (
     RationaleExtract,
 )
 from app.models.export import AuditEvent, ExportJob
+from app.models.facts import (
+    ParcelBuildingFact,
+    ParcelConstraintFact,
+    ParcelCurrentFact,
+    ParcelZoningFact,
+    ParseRun,
+    ParserVersion,
+)
 from app.models.infrastructure import BridgeAsset, PipelineAsset
 from app.models.finance import FinancialAssumptionSet, FinancialRun, MarketComparable
 from app.models.geospatial import (
@@ -63,6 +71,8 @@ __all__ = [
     "ExportJob", "AuditEvent",
     "SourceSnapshot", "IngestionJob", "SnapshotManifest", "SnapshotManifestItem", "ParseArtifact", "ReviewQueueItem",
     "RefreshSchedule",
+    "ParcelCurrentFact", "ParcelBuildingFact", "ParcelConstraintFact", "ParcelZoningFact",
+    "ParserVersion", "ParseRun",
     "DevelopmentPlan", "SubmissionDocument",
     "UploadedDocument", "DocumentPage",
     "PipelineAsset", "BridgeAsset",
