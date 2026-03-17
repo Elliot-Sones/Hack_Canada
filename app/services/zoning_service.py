@@ -35,7 +35,6 @@ def build_zoning_analysis(
     parcel: Parcel,
     parking_policy_area: str = "PA3",
     overlay_data: list[dict] | None = None,
-    zoning_assignment_count: int | None = None,
 ) -> ZoningAnalysis:
     """Build a complete deterministic zoning analysis for a parcel.
 
@@ -55,11 +54,6 @@ def build_zoning_analysis(
             warnings.append(f"Zone parsing failed: {e}")
     else:
         warnings.append("Parcel has no zone_code — zoning standards unavailable")
-
-    if zoning_assignment_count and zoning_assignment_count > 1:
-        warnings.append(
-            "Multiple zoning areas intersect this parcel — verify the parcel map and by-law schedule before relying on a single primary zone"
-        )
 
     if standards and standards.exception_number:
         warnings.append(
@@ -128,7 +122,6 @@ def get_zoning_analysis_sync(
     parcel: Parcel,
     parking_policy_area: str = "PA3",
     overlay_data: list[dict] | None = None,
-    zoning_assignment_count: int | None = None,
 ) -> ZoningAnalysis:
     """Sync compatibility wrapper for existing task code."""
     del db
@@ -136,5 +129,4 @@ def get_zoning_analysis_sync(
         parcel,
         parking_policy_area=parking_policy_area,
         overlay_data=overlay_data,
-        zoning_assignment_count=zoning_assignment_count,
     )

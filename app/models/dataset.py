@@ -12,7 +12,6 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .base import Base, UUIDPrimaryKey
 
 if TYPE_CHECKING:
-    from app.models.geospatial import ParcelZoningAssignment
     from app.models.ingestion import SourceSnapshot
 
 
@@ -80,8 +79,8 @@ class DatasetFeature(Base, UUIDPrimaryKey):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     dataset_layer: Mapped["DatasetLayer"] = relationship(back_populates="features")
-    parcel_links: Mapped[list["FeatureToParcelLink"]] = relationship(back_populates="feature")
-    zoning_assignments: Mapped[list[ParcelZoningAssignment]] = relationship(back_populates="dataset_feature")
+    # Note: feature_to_parcel_links and parcel_zoning_assignments tables dropped at DB level.
+    # Model classes kept for Alembic migration history; relationships removed.
 
 
 class FeatureToParcelLink(Base, UUIDPrimaryKey):
@@ -100,4 +99,4 @@ class FeatureToParcelLink(Base, UUIDPrimaryKey):
         String, nullable=False, default="intersects", server_default="intersects"
     )
 
-    feature: Mapped["DatasetFeature"] = relationship(back_populates="parcel_links")
+    # Note: table dropped at DB level; model kept for Alembic migration history.

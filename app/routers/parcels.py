@@ -1,3 +1,4 @@
+import json
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -5,9 +6,10 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_db_session
-from app.models.geospatial import Parcel, ParcelZoningAssignment
 from app.models.entitlement import DevelopmentApplication
+from app.models.facts import ParcelBuildingFact, ParcelConstraintFact, ParcelZoningFact
 from app.models.finance import FinancialAssumptionSet, MarketComparable
+from app.models.geospatial import Parcel
 from app.schemas.geospatial import (
     NearbyApplicationsResponse,
     ParcelDetailResponse,
@@ -86,22 +88,6 @@ def _serialize_zoning_analysis(analysis: ZoningAnalysis) -> ZoningAnalysisRespon
     )
 
 
-async def _get_active_zoning_assignment_count(
-    db: AsyncSession,
-    parcel_id: uuid.UUID,
-    active_zoning_snapshot_ids: list[uuid.UUID],
-) -> int | None:
-    if not active_zoning_snapshot_ids:
-        return None
-
-    return await db.scalar(
-        select(func.count())
-        .select_from(ParcelZoningAssignment)
-        .where(ParcelZoningAssignment.parcel_id == parcel_id)
-        .where(ParcelZoningAssignment.source_snapshot_id.in_(list(active_zoning_snapshot_ids)))
-    )
-
-
 @router.get("/parcels/search", response_model=list[ParcelResponse])
 async def search_parcels(
     params: ParcelSearchParams = Depends(),
@@ -114,12 +100,10 @@ async def search_parcels(
 
     active_snapshot_ids = await list_active_snapshot_ids(db, "parcel_base")
     query = build_parcel_search_statement(params, active_snapshot_ids=active_snapshot_ids)
-    
-    import json
-    
+
     query = query.add_columns(func.ST_AsGeoJSON(Parcel.geom).label("geom_json"))
     result = await db.execute(query)
-    
+
     response = []
     for parcel, geom_json in result:
         p_dict = {
@@ -143,19 +127,47 @@ async def get_parcel(
     db: AsyncSession = Depends(get_db_session),
 ):
     active_snapshot_ids = await list_active_snapshot_ids(db, "parcel_base")
-    import json
-    
+
     query = select(Parcel, func.ST_AsGeoJSON(Parcel.geom).label("geom_json")).where(Parcel.id == parcel_id)
     if active_snapshot_ids:
         query = query.where(Parcel.source_snapshot_id.in_(list(active_snapshot_ids)))
-        
+
     result = await db.execute(query)
     row = result.first()
     if not row:
         raise HTTPException(status_code=404, detail="Parcel not found")
-        
+
     parcel, geom_json = row
-    p_dict = {
+
+    # Fetch fact tables in parallel
+    bld_result = await db.execute(
+        select(ParcelBuildingFact).where(ParcelBuildingFact.parcel_id == parcel_id)
+    )
+    bld = bld_result.scalar_one_or_none()
+
+    zf_result = await db.execute(
+        select(ParcelZoningFact).where(ParcelZoningFact.parcel_id == parcel_id)
+    )
+    zf = zf_result.scalar_one_or_none()
+
+    cf_result = await db.execute(
+        select(ParcelConstraintFact).where(ParcelConstraintFact.parcel_id == parcel_id)
+    )
+    cf = cf_result.scalar_one_or_none()
+
+    # Parse permitted uses from JSON
+    permitted_uses = None
+    if zf and zf.permitted_use_groups_json:
+        uses = zf.permitted_use_groups_json
+        if isinstance(uses, list):
+            permitted_uses = uses
+        elif isinstance(uses, str):
+            try:
+                permitted_uses = json.loads(uses)
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+    return {
         "id": parcel.id,
         "jurisdiction_id": parcel.jurisdiction_id,
         "pin": parcel.pin,
@@ -167,9 +179,26 @@ async def get_parcel(
         "lot_depth_m": parcel.lot_depth_m,
         "assessed_value": parcel.assessed_value,
         "created_at": parcel.created_at,
-        "geom": json.loads(geom_json) if geom_json else None
+        "geom": json.loads(geom_json) if geom_json else None,
+        # Building facts
+        "building_count": bld.building_count if bld else None,
+        "total_building_footprint_m2": bld.total_building_footprint_m2 if bld else None,
+        "building_coverage_pct": bld.building_coverage_pct if bld else None,
+        "vacant_lot_flag": bld.vacant_lot_flag if bld else None,
+        "underutilized_flag": bld.underutilized_flag if bld else None,
+        # Zoning facts
+        "zone_family": zf.zone_family if zf else None,
+        "max_height_m": zf.max_height_m if zf else None,
+        "max_storeys": zf.max_storeys if zf else None,
+        "max_fsi": zf.max_fsi if zf else None,
+        "max_lot_coverage_pct": zf.max_lot_coverage_pct if zf else None,
+        "permitted_uses": permitted_uses,
+        # Constraint facts
+        "heritage_flag": cf.heritage_flag if cf else None,
+        "ravine_flag": cf.ravine_flag if cf else None,
+        "esa_flag": cf.esa_flag if cf else None,
+        "overlay_count": cf.overlay_count if cf else None,
     }
-    return p_dict
 
 
 @router.get("/parcels/{parcel_id}/zoning-analysis", response_model=ZoningAnalysisResponse)
@@ -178,17 +207,14 @@ async def get_parcel_zoning_analysis(
     db: AsyncSession = Depends(get_db_session),
 ):
     active_snapshot_ids = await list_active_snapshot_ids(db, "parcel_base")
-    active_zoning_snapshot_ids = await list_active_snapshot_ids(db, "zoning_geometry")
     parcel = await get_active_parcel_by_id(db, parcel_id, active_snapshot_ids=active_snapshot_ids)
     if not parcel:
         raise HTTPException(status_code=404, detail="Parcel not found")
 
     overlay_response = await get_parcel_overlays_response(db, parcel)
-    zoning_assignment_count = await _get_active_zoning_assignment_count(db, parcel.id, active_zoning_snapshot_ids)
     analysis = build_zoning_analysis(
         parcel,
         overlay_data=[overlay.model_dump() for overlay in overlay_response.overlays],
-        zoning_assignment_count=zoning_assignment_count,
     )
     return _serialize_zoning_analysis(analysis)
 
@@ -341,23 +367,28 @@ async def get_parcel_financial_summary(
                 "effective_date": str(comp.effective_date) if comp.effective_date else None,
             })
 
-    # Build quick estimate based on zone standards
-    from app.services.zoning_service import build_zoning_analysis
-    from app.services.overlay_service import get_parcel_overlays_response
-
-    overlay_response = await get_parcel_overlays_response(db, parcel)
-    active_zoning_snapshot_ids = await list_active_snapshot_ids(db, "zoning_geometry")
-    zoning_assignment_count = await _get_active_zoning_assignment_count(db, parcel.id, active_zoning_snapshot_ids)
-    zoning = build_zoning_analysis(
-        parcel,
-        overlay_data=[o.model_dump() for o in overlay_response.overlays],
-        zoning_assignment_count=zoning_assignment_count,
+    # Use zoning facts if available, otherwise compute on-the-fly
+    zf_result = await db.execute(
+        select(ParcelZoningFact).where(ParcelZoningFact.parcel_id == parcel_id)
     )
+    zf = zf_result.scalar_one_or_none()
+
+    if zf:
+        max_fsi = zf.max_fsi
+        max_height = zf.max_height_m
+        max_storeys = zf.max_storeys
+    else:
+        from app.services.overlay_service import get_parcel_overlays_response
+        overlay_response = await get_parcel_overlays_response(db, parcel)
+        zoning = build_zoning_analysis(
+            parcel,
+            overlay_data=[o.model_dump() for o in overlay_response.overlays],
+        )
+        max_fsi = zoning.standards.max_fsi if zoning.standards and zoning.standards.max_fsi else None
+        max_height = zoning.standards.max_height_m if zoning.standards else None
+        max_storeys = zoning.standards.max_storeys if zoning.standards else None
 
     lot_area = parcel.lot_area_m2 or parcel.geom_area_m2 or 0
-    max_fsi = zoning.standards.max_fsi if zoning.standards and zoning.standards.max_fsi else None
-    max_height = zoning.standards.max_height_m if zoning.standards else None
-    max_storeys = zoning.standards.max_storeys if zoning.standards else None
 
     # Build feasibility estimate
     estimated_gfa = lot_area * max_fsi if max_fsi and lot_area else None

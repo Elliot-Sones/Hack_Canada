@@ -35,11 +35,7 @@ async def test_get_parcel_zoning_analysis_returns_backend_analysis(client, monke
         yield DummySession()
 
     async def fake_list_active_snapshot_ids(_db, snapshot_type):
-        if snapshot_type == "parcel_base":
-            return []
-        if snapshot_type == "zoning_geometry":
-            return ["zoning-snapshot"]
-        raise AssertionError(f"unexpected snapshot type {snapshot_type}")
+        return []
 
     async def fake_get_active_parcel_by_id(_db, requested_id, active_snapshot_ids=None):
         assert str(requested_id) == parcel_id
@@ -65,13 +61,9 @@ async def test_get_parcel_zoning_analysis_returns_backend_analysis(client, monke
             ]
         )
 
-    async def fake_get_active_zoning_assignment_count(*_args, **_kwargs):
-        return 2
-
     monkeypatch.setattr("app.routers.parcels.list_active_snapshot_ids", fake_list_active_snapshot_ids)
     monkeypatch.setattr("app.routers.parcels.get_active_parcel_by_id", fake_get_active_parcel_by_id)
     monkeypatch.setattr("app.routers.parcels.get_parcel_overlays_response", fake_get_parcel_overlays_response)
-    monkeypatch.setattr("app.routers.parcels._get_active_zoning_assignment_count", fake_get_active_zoning_assignment_count)
 
     app.dependency_overrides[get_db_session] = override_db
     try:
@@ -89,5 +81,4 @@ async def test_get_parcel_zoning_analysis_returns_backend_analysis(client, monke
     assert payload["standards"]["residential_fsi"] == 2.5
     assert payload["overlay_constraints"][0]["layer_type"] == "heritage"
     assert any("Site-specific exception" in warning for warning in payload["warnings"])
-    assert any("Multiple zoning areas intersect this parcel" in warning for warning in payload["warnings"])
     assert any("Parcel frontage/depth data is missing" in warning for warning in payload["warnings"])

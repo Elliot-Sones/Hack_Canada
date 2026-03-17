@@ -328,6 +328,26 @@ async def _gather_site_data(
                 lines.append(f"Permitted uses: {', '.join(stds['permitted_uses'][:10])}")
             if stds.get("bylaw_section"):
                 lines.append(f"By-law section: {stds['bylaw_section']}")
+        # Building facts
+        bf = z.get("building_facts")
+        if bf:
+            lines.append(f"Buildings: {bf.get('building_count', 0)} on site | Coverage: {bf.get('building_coverage_pct', 'N/A')}%")
+            if bf.get("vacant_lot"):
+                lines.append("Status: VACANT LOT")
+            elif bf.get("underutilized"):
+                lines.append("Status: UNDERUTILIZED (coverage < 15%)")
+        # Constraint facts
+        cfl = z.get("constraint_facts")
+        if cfl:
+            flags = []
+            if cfl.get("heritage"):
+                flags.append("HERITAGE DESIGNATED")
+            if cfl.get("ravine"):
+                flags.append("RAVINE PROTECTION")
+            if cfl.get("esa"):
+                flags.append("ENVIRONMENTALLY SIGNIFICANT AREA")
+            if flags:
+                lines.append("Constraints: " + " | ".join(flags))
         overlays = z.get("overlay_constraints", [])
         if overlays:
             lines.append("Overlays:")
@@ -402,13 +422,13 @@ async def _gather_site_data(
 
 
 async def _fetch_zoning(parcel_id: uuid.UUID, db: AsyncSession) -> dict | None:
-    """Fetch full zoning analysis for a parcel."""
+    """Fetch zoning analysis using fact tables with fallback to on-the-fly computation."""
     try:
+        from sqlalchemy import select
+        from app.models.facts import ParcelBuildingFact, ParcelConstraintFact, ParcelZoningFact
         from app.services.geospatial import get_active_parcel_by_id, list_active_snapshot_ids
         from app.services.overlay_service import get_parcel_overlays_response
         from app.services.zoning_service import build_zoning_analysis
-        from sqlalchemy import func, select
-        from app.models.geospatial import ParcelZoningAssignment
 
         active_snapshot_ids = await list_active_snapshot_ids(db, "parcel_base")
         parcel = await get_active_parcel_by_id(db, parcel_id, active_snapshot_ids=active_snapshot_ids)
@@ -416,21 +436,9 @@ async def _fetch_zoning(parcel_id: uuid.UUID, db: AsyncSession) -> dict | None:
             return None
 
         overlay_response = await get_parcel_overlays_response(db, parcel)
-        active_zoning_ids = await list_active_snapshot_ids(db, "zoning_geometry")
-
-        zoning_count = None
-        if active_zoning_ids:
-            zoning_count = await db.scalar(
-                select(func.count())
-                .select_from(ParcelZoningAssignment)
-                .where(ParcelZoningAssignment.parcel_id == parcel_id)
-                .where(ParcelZoningAssignment.source_snapshot_id.in_(list(active_zoning_ids)))
-            )
-
         analysis = build_zoning_analysis(
             parcel,
             overlay_data=[o.model_dump() for o in overlay_response.overlays],
-            zoning_assignment_count=zoning_count,
         )
 
         result = {
@@ -455,6 +463,31 @@ async def _fetch_zoning(parcel_id: uuid.UUID, db: AsyncSession) -> dict | None:
                 "permitted_uses": list(s.permitted_uses),
                 "bylaw_section": s.bylaw_section,
             }
+
+        # Enrich with building and constraint facts
+        bld = (await db.execute(
+            select(ParcelBuildingFact).where(ParcelBuildingFact.parcel_id == parcel_id)
+        )).scalar_one_or_none()
+        if bld:
+            result["building_facts"] = {
+                "building_count": bld.building_count,
+                "total_footprint_m2": bld.total_building_footprint_m2,
+                "building_coverage_pct": bld.building_coverage_pct,
+                "vacant_lot": bld.vacant_lot_flag,
+                "underutilized": bld.underutilized_flag,
+            }
+
+        cf = (await db.execute(
+            select(ParcelConstraintFact).where(ParcelConstraintFact.parcel_id == parcel_id)
+        )).scalar_one_or_none()
+        if cf:
+            result["constraint_facts"] = {
+                "heritage": cf.heritage_flag,
+                "ravine": cf.ravine_flag,
+                "esa": cf.esa_flag,
+                "overlay_count": cf.overlay_count,
+            }
+
         return result
     except Exception:
         logger.warning("Failed to fetch zoning analysis", exc_info=True)

@@ -62,9 +62,8 @@ class Parcel(Base, UUIDPrimaryKey, TimestampMixin):
     source_snapshot: Mapped[Optional[SourceSnapshot]] = relationship(foreign_keys=[source_snapshot_id])
     metrics: Mapped[list["ParcelMetric"]] = relationship(back_populates="parcel")
     addresses: Mapped[list["ParcelAddress"]] = relationship(back_populates="parcel", cascade="all, delete-orphan")
-    zoning_assignments: Mapped[list["ParcelZoningAssignment"]] = relationship(
-        back_populates="parcel", cascade="all, delete-orphan"
-    )
+    # Note: parcel_zoning_assignments table was dropped in favour of parcel_zoning_facts.
+    # Model class kept for Alembic migration history.
 
 
 class ParcelMetric(Base, UUIDPrimaryKey):
@@ -144,9 +143,8 @@ class ParcelZoningAssignment(Base, UUIDPrimaryKey):
     is_primary: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
-    parcel: Mapped["Parcel"] = relationship(back_populates="zoning_assignments")
-    dataset_feature: Mapped[DatasetFeature] = relationship(back_populates="zoning_assignments")
-    source_snapshot: Mapped[SourceSnapshot] = relationship(foreign_keys=[source_snapshot_id])
+    # Note: table dropped at DB level; model kept for Alembic migration history.
+    # Relationships removed to prevent runtime errors.
 
 
 class ProjectParcel(Base, UUIDPrimaryKey):

@@ -54,6 +54,27 @@ class ParcelDetailResponse(ParcelResponse):
     assessed_value: float | None = None
     created_at: datetime | None = None
 
+    # Building facts
+    building_count: int | None = None
+    total_building_footprint_m2: float | None = None
+    building_coverage_pct: float | None = None
+    vacant_lot_flag: bool | None = None
+    underutilized_flag: bool | None = None
+
+    # Zoning facts
+    zone_family: str | None = None
+    max_height_m: float | None = None
+    max_storeys: int | None = None
+    max_fsi: float | None = None
+    max_lot_coverage_pct: float | None = None
+    permitted_uses: list[str] | None = None
+
+    # Constraint facts
+    heritage_flag: bool | None = None
+    ravine_flag: bool | None = None
+    esa_flag: bool | None = None
+    overlay_count: int | None = None
+
 
 class SnapshotReferenceResponse(BaseModel):
     id: uuid.UUID | None = None

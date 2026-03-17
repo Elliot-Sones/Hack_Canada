@@ -7,7 +7,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
-from app.models.dataset import DatasetFeature, DatasetLayer, FeatureToParcelLink
+from app.models.dataset import DatasetFeature, DatasetLayer
 from app.models.geospatial import Parcel, ParcelMetric
 from app.models.ingestion import SourceSnapshot
 from app.schemas.geospatial import (
