@@ -98,7 +98,7 @@
   border-radius: 8px;
   cursor: pointer;
   letter-spacing: 0.04em;
-  transition: background 0.15s, border-color 0.15s;
+  transition: background 0.15s, border-color 0.15s, right 0.3s ease;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
 }
 

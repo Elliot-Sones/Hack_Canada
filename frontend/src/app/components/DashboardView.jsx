@@ -300,6 +300,28 @@ export default function DashboardView({ initialAddress, parcelId }) {
     return () => { cancelled = true; map.off('moveend', onMoveEnd); };
   }, [infraOverlayLayers]);
 
+  // Track actual chat panel height for button positioning (expand/collapse + drag-resize)
+  const chatPanelRef = useRef(49);
+  const [chatPanelHeight, setChatPanelHeight] = useState(49);
+  useEffect(() => {
+    const measure = () => {
+      const panel = document.getElementById('chat-panel');
+      if (!panel) return;
+      const h = panel.offsetHeight;
+      if (h !== chatPanelRef.current) {
+        chatPanelRef.current = h;
+        setChatPanelHeight(h);
+      }
+    };
+    // Watch :root style changes (useResizable sets --chat-height there during drag)
+    const mo = new MutationObserver(measure);
+    mo.observe(document.documentElement, { attributes: true, attributeFilter: ['style'] });
+    // Measure after DOM settles (handles expand/collapse toggle)
+    requestAnimationFrame(measure);
+    const t = setTimeout(measure, 300);
+    return () => { mo.disconnect(); clearTimeout(t); };
+  }, [isChatExpanded]);
+
   useEffect(() => {
     if (typeof document === 'undefined') return undefined;
 
@@ -332,6 +354,7 @@ export default function DashboardView({ initialAddress, parcelId }) {
         isPanelOpen={isPanelOpen}
         isSidebarCollapsed={isSidebarCollapsed}
         isChatExpanded={isChatExpanded}
+        chatPanelHeight={chatPanelHeight}
         isModelOpen={isModelOpen}
         infraOverlayLayers={infraOverlayLayers}
         onParcelClick={handleMapParcelClick}
@@ -339,6 +362,7 @@ export default function DashboardView({ initialAddress, parcelId }) {
       <InfrastructureLayerControl mapRef={mapRef}
         infraLayerCounts={infraLayerCounts}
         isChatExpanded={isChatExpanded}
+        chatPanelHeight={chatPanelHeight}
         isSidebarCollapsed={isSidebarCollapsed}
         onInfraLayerToggle={(layerId, enabled) => {
           setInfraOverlayLayers(prev => {

@@ -7,18 +7,18 @@ const DB_INFRA_LAYERS = [
   { id: 'electrical', label: 'Electrical Grid', color: '#ddaa22', icon: '\u26A1' },
 ];
 
-export default function InfrastructureLayerControl({ mapRef, onInfraLayerToggle, infraLayerCounts = {}, isChatExpanded = false, isSidebarCollapsed = false }) {
+export default function InfrastructureLayerControl({ mapRef, onInfraLayerToggle, infraLayerCounts = {}, isChatExpanded = false, chatPanelHeight = 49, isSidebarCollapsed = false }) {
   const [isOpen, setIsOpen] = useState(false);
   const [activeDbLayers, setActiveDbLayers] = useState(new Set());
 
   return (
     <div style={{
       position: 'fixed',
-      bottom: isChatExpanded ? 'calc(var(--chat-height, 280px) + 49px + 16px)' : 64,
+      bottom: chatPanelHeight + 16,
       left: (isSidebarCollapsed ? 56 : 140) + 16,
       zIndex: 19,
       fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
-      transition: 'bottom 0.3s ease, left 0.3s ease',
+      transition: 'left 0.3s ease',
     }}>
       {/* Toggle Button */}
       <button
