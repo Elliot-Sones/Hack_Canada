@@ -27,6 +27,8 @@ import {
     createConversation,
     WELCOME_MESSAGE,
 } from '../lib/chatHistory.js';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import ChatContextHeader from './ChatContextHeader.jsx';
 import useResizable from '../hooks/useResizable.js';
 
@@ -350,6 +352,7 @@ export default function ChatPanel({ parcelContext, onPlanComplete, onToggleExpan
         setMessages((prev) => [...prev, {
             role: 'assistant',
             text: `Starting: ${action.label}...`,
+            isGenerating: true,
         }]);
 
         const docTypes = action.doc_types;
@@ -365,6 +368,7 @@ export default function ChatPanel({ parcelContext, onPlanComplete, onToggleExpan
                     results.push(doc);
                 }
                 const docList = results.map((d) => `- ${d.title || d.doc_type}`).join('\n');
+                setMessages((prev) => prev.map(m => m.isGenerating ? { ...m, isGenerating: false } : m));
                 setMessages((prev) => [...prev, {
                     role: 'assistant',
                     text: `Documents generated from existing plan:\n\n${docList}`,
@@ -372,9 +376,11 @@ export default function ChatPanel({ parcelContext, onPlanComplete, onToggleExpan
             } else {
                 // No existing plan or large batch — run full pipeline
                 const result = await generatePlan(action.query, docTypes, activeProjectId);
+                setMessages((prev) => prev.map(m => m.isGenerating ? { ...m, isGenerating: false } : m));
                 pollPlan(result.job_id);
             }
         } catch (err) {
+            setMessages((prev) => prev.map(m => m.isGenerating ? { ...m, isGenerating: false } : m));
             setMessages((prev) => [...prev, {
                 role: 'assistant',
                 text: planStartErrorMessage(err),
@@ -891,7 +897,15 @@ export default function ChatPanel({ parcelContext, onPlanComplete, onToggleExpan
                         <div key={idx} className={`chat-message ${msg.role}`}>
                             <div className="message-avatar">{msg.role === 'assistant' ? 'AI' : 'You'}</div>
                             <div className="message-content">
-                                <div className="extract-markdown" style={{ margin: 0 }} dangerouslySetInnerHTML={{ __html: inlineMarkdown(msg.text) }} />
+                                <div className="extract-markdown" style={{ margin: 0 }}>
+                                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.text || ''}</ReactMarkdown>
+                                </div>
+                                {msg.isGenerating && (
+                                    <div className="upload-status" style={{ marginTop: 8 }}>
+                                        <div className="upload-spinner"></div>
+                                        <span>Generating report&hellip;</span>
+                                    </div>
+                                )}
                                 {msg.documents?.length > 0 && (
                                     <div className="chat-doc-list">
                                         {msg.documents.map((doc) => (

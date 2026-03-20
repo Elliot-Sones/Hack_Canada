@@ -16,7 +16,7 @@ export default function InfrastructureLayerControl({ mapRef, onInfraLayerToggle,
       position: 'fixed',
       bottom: (isChatExpanded ? 328 : 48) + 16,
       left: (isSidebarCollapsed ? 56 : 140) + 16,
-      zIndex: 11,
+      zIndex: 19,
       fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
       transition: 'bottom 0.3s ease, left 0.3s ease',
     }}>

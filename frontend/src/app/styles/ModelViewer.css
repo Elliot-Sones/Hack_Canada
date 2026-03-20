@@ -88,7 +88,7 @@
 .map-model-btn {
   position: fixed;
   right: 16px;
-  z-index: 11;
+  z-index: 19;
   background: #1a1a1a;
   color: #c8a55c;
   border: 1px solid #c8a55c55;
