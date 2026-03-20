@@ -1,18 +1,18 @@
 """
 retriever.py - Vector store retrieval logic for the Hack Canada RAG system.
 """
-from langchain_openai import OpenAIEmbeddings
+from langchain_voyageai import VoyageAIEmbeddings
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
 
-from config import CHROMA_DIR, COLLECTION_NAME, EMBEDDING_MODEL, OPENAI_API_KEY
+from config import CHROMA_DIR, COLLECTION_NAME, EMBEDDING_MODEL, VOYAGE_API_KEY
 
 
 def get_vectorstore() -> Chroma:
     """Load the persisted ChromaDB vectorstore."""
-    embeddings = OpenAIEmbeddings(
+    embeddings = VoyageAIEmbeddings(
         model=EMBEDDING_MODEL,
-        openai_api_key=OPENAI_API_KEY
+        voyage_api_key=VOYAGE_API_KEY
     )
     return Chroma(
         persist_directory=CHROMA_DIR,
@@ -37,7 +37,6 @@ def search(query: str, k: int = 5, use_mmr: bool = False) -> list[dict]:
 
     if use_mmr:
         docs = vs.max_marginal_relevance_search(query, k=k, fetch_k=k * 3)
-        # MMR doesn't return scores directly
         return [
             {
                 "content": doc.page_content,
@@ -73,7 +72,6 @@ def get_collection_stats() -> dict:
     collection = vs._collection
     count = collection.count()
 
-    # Sample some metadata to show source distribution
     sample = collection.peek(min(count, 50))
     source_types = {}
     filenames = set()

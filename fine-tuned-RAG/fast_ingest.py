@@ -1,10 +1,10 @@
 import os
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_openai import OpenAIEmbeddings
+from langchain_voyageai import VoyageAIEmbeddings
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
 
-from config import CHROMA_DIR, COLLECTION_NAME, EMBEDDING_MODEL, OPENAI_API_KEY
+from config import CHROMA_DIR, COLLECTION_NAME, EMBEDDING_MODEL, VOYAGE_API_KEY
 from ingest import md_to_text
 
 print("Loading test file...")
@@ -28,7 +28,7 @@ chunks = splitter.split_documents([doc])
 print(f"Created {len(chunks)} chunks.")
 
 print("Embedding...")
-embeddings = OpenAIEmbeddings(model=EMBEDDING_MODEL, openai_api_key=OPENAI_API_KEY)
+embeddings = VoyageAIEmbeddings(model=EMBEDDING_MODEL, voyage_api_key=VOYAGE_API_KEY)
 
 vectorstore = Chroma.from_documents(
     documents=chunks,
