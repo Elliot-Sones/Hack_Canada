@@ -14,7 +14,7 @@ export default function InfrastructureLayerControl({ mapRef, onInfraLayerToggle,
   return (
     <div style={{
       position: 'fixed',
-      bottom: (isChatExpanded ? 328 : 48) + 16,
+      bottom: isChatExpanded ? 'calc(var(--chat-height, 280px) + 49px + 16px)' : 64,
       left: (isSidebarCollapsed ? 56 : 140) + 16,
       zIndex: 19,
       fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",

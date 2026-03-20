@@ -617,7 +617,7 @@ const MapView = forwardRef(function MapView({ isParcelResolved, onModelOpen, isP
                     title="Open 3D Model"
                     style={{
                         right: `${(isPanelOpen ? 380 : 0) + 16}px`,
-                        bottom: `${(isChatExpanded ? 328 : 48) + 16}px`,
+                        bottom: isChatExpanded ? 'calc(var(--chat-height, 280px) + 49px + 16px)' : '64px',
                         transition: 'right 0.3s ease, bottom 0.3s ease',
                     }}
                 >
