@@ -1,28 +1,27 @@
-import { useEffect, useRef, useImperativeHandle, forwardRef, useState } from 'react';
+import { useEffect, useRef, useImperativeHandle, forwardRef, useState, useCallback } from 'react';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import '../styles/ModelViewer.css';
+import { searchParcelsBbox } from '../api.js';
 
 const DEFAULT_CENTER = [-79.3832, 43.6532];
 const DEFAULT_ZOOM = 13;
 
 const EMPTY_FC = { type: 'FeatureCollection', features: [] };
 
-const PIPE_COLORS = {
-    water_main: '#2277bb',
-    sanitary_sewer: '#886644',
-    storm_sewer: '#44aa66',
-    gas_line: '#ddaa22',
-};
-
-const MapView = forwardRef(function MapView({ isParcelResolved, onModelOpen, isPanelOpen, isSidebarCollapsed, isChatExpanded, isModelOpen, assetType, onInfraAssetClick }, ref) {
+const MapView = forwardRef(function MapView({ isParcelResolved, onModelOpen, isPanelOpen, isSidebarCollapsed, isChatExpanded, isModelOpen, infraOverlayLayers = new Set(), onParcelClick }, ref) {
     const containerRef = useRef(null);
     const mapInstanceRef = useRef(null);
     const markerRef = useRef(null);
     const popupRef = useRef(null);
+    const hoverPopupRef = useRef(null);
     const [mapLoaded, setMapLoaded] = useState(false);
-    const onInfraAssetClickRef = useRef(onInfraAssetClick);
-    useEffect(() => { onInfraAssetClickRef.current = onInfraAssetClick; }, [onInfraAssetClick]);
+    const onParcelClickRef = useRef(onParcelClick);
+    useEffect(() => { onParcelClickRef.current = onParcelClick; }, [onParcelClick]);
+    const hoveredParcelIdRef = useRef(null);
+    const selectedParcelIdsRef = useRef([]);
+    const bboxAbortRef = useRef(null);
+    const bboxDebounceRef = useRef(null);
 
     // Store geojson safely if set before map loads
     const pendingParcelRef = useRef(null);
@@ -105,50 +104,70 @@ const MapView = forwardRef(function MapView({ isParcelResolved, onModelOpen, isP
                 }
             }
         },
-        /** Load pipeline GeoJSON onto the map */
-        setPipelines(geojson) {
+        /** Load water main GeoJSON onto the map */
+        setWatermains(geojson) {
             const map = mapInstanceRef.current;
             if (!map || !mapLoaded) return;
             const fc = geojson || EMPTY_FC;
-            if (map.getSource('pipelines')) {
-                map.getSource('pipelines').setData(fc);
+            if (map.getSource('watermains')) {
+                map.getSource('watermains').setData(fc);
             }
-            setInfraEmpty(!fc.features || fc.features.length === 0);
+        },
+        /** Load sewer GeoJSON onto the map */
+        setSewers(geojson) {
+            const map = mapInstanceRef.current;
+            if (!map || !mapLoaded) return;
+            if (map.getSource('sewers')) {
+                map.getSource('sewers').setData(geojson || EMPTY_FC);
+            }
+        },
+        /** Load electrical GeoJSON onto the map */
+        setElectrical(geojson) {
+            const map = mapInstanceRef.current;
+            if (!map || !mapLoaded) return;
+            if (map.getSource('electrical')) {
+                map.getSource('electrical').setData(geojson || EMPTY_FC);
+            }
+        },
+        /** Sync selected parcel highlights on the bbox layer */
+        setSelectedParcelIds(ids) {
+            const map = mapInstanceRef.current;
+            if (!map || !mapLoaded || !map.getSource('parcels-bbox')) return;
+            // Clear previous selections
+            for (const prevId of selectedParcelIdsRef.current) {
+                try { map.setFeatureState({ source: 'parcels-bbox', id: prevId }, { selected: false }); } catch {}
+            }
+            // Apply new selections
+            for (const id of ids) {
+                try { map.setFeatureState({ source: 'parcels-bbox', id }, { selected: true }); } catch {}
+            }
+            selectedParcelIdsRef.current = ids;
         },
     }));
 
-    // Track whether infra data has been loaded
-    const [infraEmpty, setInfraEmpty] = useState(false);
-
-    // Toggle layer visibility and camera based on asset type
+    // Toggle infrastructure overlay layers based on infraOverlayLayers set
     useEffect(() => {
         const map = mapInstanceRef.current;
         if (!map || !mapLoaded) return;
 
-        const pipelineLayers = ['pipelines-line', 'pipelines-line-casing', 'pipelines-label'];
+        const pipelineLayers = ['watermains-line', 'watermains-line-casing', 'watermains-label'];
+        const sewerLayers = ['sewers-line', 'sewers-line-casing'];
+        const electricalLayers = ['electrical-line'];
 
-        // Buildings: always visible but dimmer in pipeline mode to give 3D context
-        if (map.getLayer('osm-buildings-3d')) {
-            map.setLayoutProperty('osm-buildings-3d', 'visibility', 'visible');
-            map.setPaintProperty('osm-buildings-3d', 'fill-extrusion-opacity', assetType === 'pipeline' ? 0.25 : 0.6);
-            map.setPaintProperty('osm-buildings-3d', 'fill-extrusion-color', assetType === 'pipeline' ? '#aaaaaa' : '#e0e0e0');
-        }
-        for (const id of ['parcel-fill', 'parcel-line', 'proposed-massing-extrusion']) {
-            if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', assetType === 'building' ? 'visible' : 'none');
-        }
+        const showPipes = infraOverlayLayers?.has('watermains');
+        const showSewers = infraOverlayLayers?.has('sewers');
+        const showElectrical = infraOverlayLayers?.has('electrical');
+
         for (const id of pipelineLayers) {
-            if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', assetType === 'pipeline' ? 'visible' : 'none');
+            if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', showPipes ? 'visible' : 'none');
         }
-
-        // Camera
-        if (assetType === 'pipeline') {
-            map.easeTo({ pitch: 55, bearing: -20, duration: 1200 });
-            setInfraEmpty(true);
-        } else {
-            map.easeTo({ pitch: 0, bearing: 0, duration: 800 });
-            setInfraEmpty(false);
+        for (const id of sewerLayers) {
+            if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', showSewers ? 'visible' : 'none');
         }
-    }, [assetType, mapLoaded]);
+        for (const id of electricalLayers) {
+            if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', showElectrical ? 'visible' : 'none');
+        }
+    }, [infraOverlayLayers, mapLoaded]);
 
     useEffect(() => {
         if (mapInstanceRef.current) return;
@@ -227,7 +246,12 @@ const MapView = forwardRef(function MapView({ isParcelResolved, onModelOpen, isP
                     'fill-extrusion-color': '#e0e0e0',
                     'fill-extrusion-height': ['get', 'render_height'],
                     'fill-extrusion-base': ['get', 'render_min_height'],
-                    'fill-extrusion-opacity': 0.6
+                    'fill-extrusion-opacity': [
+                        'interpolate', ['linear'], ['zoom'],
+                        14, 0.6,
+                        15, 0.35,
+                        17, 0.25,
+                    ],
                 }
             });
 
@@ -274,14 +298,156 @@ const MapView = forwardRef(function MapView({ isParcelResolved, onModelOpen, isP
                 }
             });
 
-            // ─── Pipeline Layers ───────────────────────────
-            map.addSource('pipelines', { type: 'geojson', data: EMPTY_FC });
+            // ─── Bbox Parcel Layer (click-to-select) ────────
+            map.addSource('parcels-bbox', {
+                type: 'geojson',
+                data: EMPTY_FC,
+                promoteId: 'id',
+            });
+
+            // Parcel bbox fill layer (rendered below 3D buildings — used for queryRenderedFeatures)
+            map.addLayer({
+                id: 'parcels-bbox-fill',
+                type: 'fill',
+                source: 'parcels-bbox',
+                minzoom: 15,
+                paint: {
+                    'fill-color': [
+                        'case',
+                        ['boolean', ['feature-state', 'selected'], false], '#c8a55c',
+                        ['boolean', ['feature-state', 'hover'], false], '#c8a55c',
+                        'rgba(200,165,92,0.06)',
+                    ],
+                    'fill-opacity': [
+                        'case',
+                        ['boolean', ['feature-state', 'selected'], false], 0.35,
+                        ['boolean', ['feature-state', 'hover'], false], 0.25,
+                        1,
+                    ],
+                },
+            });
+
+            // Parcel bbox outlines — add BEFORE 3D buildings so they peek through gaps
+            map.addLayer({
+                id: 'parcels-bbox-line',
+                type: 'line',
+                source: 'parcels-bbox',
+                minzoom: 15,
+                paint: {
+                    'line-color': [
+                        'case',
+                        ['boolean', ['feature-state', 'selected'], false], '#c8a55c',
+                        ['boolean', ['feature-state', 'hover'], false], '#c8a55c',
+                        'rgba(200,165,92,0.5)',
+                    ],
+                    'line-width': [
+                        'case',
+                        ['boolean', ['feature-state', 'selected'], false], 2.5,
+                        ['boolean', ['feature-state', 'hover'], false], 2,
+                        1.2,
+                    ],
+                },
+            });
+
+            // Map-level mousemove — uses queryRenderedFeatures so it works through 3D buildings
+            map.on('mousemove', (e) => {
+                if (map.getZoom() < 15) return;
+                const features = map.queryRenderedFeatures(e.point, { layers: ['parcels-bbox-fill'] });
+                if (!features.length) {
+                    // Clear hover when not on a parcel
+                    if (hoveredParcelIdRef.current) {
+                        try { map.setFeatureState({ source: 'parcels-bbox', id: hoveredParcelIdRef.current }, { hover: false }); } catch {}
+                        hoveredParcelIdRef.current = null;
+                    }
+                    map.getCanvas().style.cursor = '';
+                    if (hoverPopupRef.current) { hoverPopupRef.current.remove(); hoverPopupRef.current = null; }
+                    return;
+                }
+                const feat = features[0];
+                const fid = feat.properties.id || feat.id;
+
+                // Clear previous hover
+                if (hoveredParcelIdRef.current && hoveredParcelIdRef.current !== fid) {
+                    try { map.setFeatureState({ source: 'parcels-bbox', id: hoveredParcelIdRef.current }, { hover: false }); } catch {}
+                }
+                hoveredParcelIdRef.current = fid;
+                try { map.setFeatureState({ source: 'parcels-bbox', id: fid }, { hover: true }); } catch {}
+                map.getCanvas().style.cursor = 'pointer';
+
+                // Tooltip popup
+                const props = feat.properties;
+                if (hoverPopupRef.current) hoverPopupRef.current.remove();
+                const area = props.lot_area_m2 ? `${Math.round(props.lot_area_m2).toLocaleString()} m\u00B2` : '';
+                hoverPopupRef.current = new maplibregl.Popup({ closeButton: false, closeOnClick: false, maxWidth: '220px', className: 'parcel-hover-popup' })
+                    .setLngLat(e.lngLat)
+                    .setHTML(`
+                        <div style="font-family:Inter,sans-serif;font-size:11px;color:#f0ece4;background:rgba(26,26,26,0.92);backdrop-filter:blur(12px);padding:8px 12px;border-radius:8px;border:1px solid rgba(200,165,92,0.3)">
+                            ${props.address ? `<div style="font-weight:600;margin-bottom:3px">${props.address}</div>` : ''}
+                            <div style="display:flex;gap:8px;color:#aaa">
+                                ${props.zone_code ? `<span style="color:#c8a55c;font-weight:600">${props.zone_code}</span>` : ''}
+                                ${area ? `<span>${area}</span>` : ''}
+                            </div>
+                        </div>
+                    `)
+                    .addTo(map);
+            });
+
+            // Map-level click — uses queryRenderedFeatures so it works through 3D buildings
+            map.on('click', (e) => {
+                if (map.getZoom() < 15) return;
+                const features = map.queryRenderedFeatures(e.point, { layers: ['parcels-bbox-fill'] });
+                if (!features.length) return;
+                const feat = features[0];
+                const props = feat.properties;
+                const isMultiSelect = e.originalEvent.metaKey || e.originalEvent.ctrlKey;
+                const parcelData = {
+                    id: props.id || feat.id,
+                    address: props.address || '',
+                    zone_code: props.zone_code || '',
+                    lot_area_m2: props.lot_area_m2 || 0,
+                    geom: feat.geometry,
+                };
+                if (onParcelClickRef.current) onParcelClickRef.current(parcelData, isMultiSelect);
+            });
+
+            // ─── Bbox data loading on moveend ────────────────
+            const loadBboxParcels = () => {
+                if (bboxDebounceRef.current) clearTimeout(bboxDebounceRef.current);
+                bboxDebounceRef.current = setTimeout(async () => {
+                    const zoom = map.getZoom();
+                    if (zoom < 15) {
+                        if (map.getSource('parcels-bbox')) map.getSource('parcels-bbox').setData(EMPTY_FC);
+                        return;
+                    }
+                    if (bboxAbortRef.current) bboxAbortRef.current.abort();
+                    const controller = new AbortController();
+                    bboxAbortRef.current = controller;
+                    try {
+                        const fc = await searchParcelsBbox(map.getBounds(), zoom, { signal: controller.signal });
+                        if (controller.signal.aborted) return;
+                        if (map.getSource('parcels-bbox')) {
+                            map.getSource('parcels-bbox').setData(fc);
+                            // Re-apply feature-state for selected parcels
+                            for (const id of selectedParcelIdsRef.current) {
+                                try { map.setFeatureState({ source: 'parcels-bbox', id }, { selected: true }); } catch {}
+                            }
+                        }
+                    } catch {
+                        // silently ignore (aborted or network error)
+                    }
+                }, 300);
+            };
+
+            map.on('moveend', loadBboxParcels);
+
+            // ─── Water Main Layers ───────────────────────────
+            map.addSource('watermains', { type: 'geojson', data: EMPTY_FC });
 
             // Dark casing line (wider, behind) — scales with diameter like the fill
             map.addLayer({
-                id: 'pipelines-line-casing',
+                id: 'watermains-line-casing',
                 type: 'line',
-                source: 'pipelines',
+                source: 'watermains',
                 layout: { visibility: 'none', 'line-cap': 'round', 'line-join': 'round' },
                 paint: {
                     'line-color': '#0a0a0a',
@@ -297,9 +463,9 @@ const MapView = forwardRef(function MapView({ isParcelResolved, onModelOpen, isP
 
             // Colored pipe line — color by material, width by diameter
             map.addLayer({
-                id: 'pipelines-line',
+                id: 'watermains-line',
                 type: 'line',
-                source: 'pipelines',
+                source: 'watermains',
                 layout: { visibility: 'none', 'line-cap': 'round', 'line-join': 'round' },
                 paint: {
                     'line-color': [
@@ -324,11 +490,11 @@ const MapView = forwardRef(function MapView({ isParcelResolved, onModelOpen, isP
                 },
             });
 
-            // Pipeline labels at higher zoom
+            // Water main labels at higher zoom
             map.addLayer({
-                id: 'pipelines-label',
+                id: 'watermains-label',
                 type: 'symbol',
-                source: 'pipelines',
+                source: 'watermains',
                 minzoom: 15,
                 layout: {
                     visibility: 'none',
@@ -351,12 +517,65 @@ const MapView = forwardRef(function MapView({ isParcelResolved, onModelOpen, isP
                 },
             });
 
+            // ─── Sewer Layers ───────────────────────────
+            map.addSource('sewers', { type: 'geojson', data: EMPTY_FC });
+
+            map.addLayer({
+                id: 'sewers-line-casing',
+                type: 'line',
+                source: 'sewers',
+                layout: { visibility: 'none', 'line-cap': 'round', 'line-join': 'round' },
+                paint: {
+                    'line-color': '#0a0a0a',
+                    'line-width': ['interpolate', ['linear'], ['zoom'],
+                        12, 2, 16, 4, 19, 8],
+                    'line-opacity': 0.45,
+                },
+            });
+
+            map.addLayer({
+                id: 'sewers-line',
+                type: 'line',
+                source: 'sewers',
+                layout: { visibility: 'none', 'line-cap': 'round', 'line-join': 'round' },
+                paint: {
+                    'line-color': [
+                        'match', ['get', 'pipe_type'],
+                        'sanitary_sewer', '#886644',
+                        'storm_sewer', '#44aa66',
+                        '#886644'
+                    ],
+                    'line-width': ['interpolate', ['linear'], ['zoom'],
+                        12, 1, 16, 3, 19, 6],
+                    'line-opacity': 0.9,
+                },
+            });
+
+            // ─── Electrical Layers ───────────────────────────
+            map.addSource('electrical', { type: 'geojson', data: EMPTY_FC });
+
+            map.addLayer({
+                id: 'electrical-line',
+                type: 'line',
+                source: 'electrical',
+                layout: { visibility: 'none', 'line-cap': 'round', 'line-join': 'round' },
+                paint: {
+                    'line-color': ['coalesce', ['get', 'voltage_color'], '#ddaa22'],
+                    'line-width': ['interpolate', ['linear'], ['zoom'],
+                        12, ['*', ['coalesce', ['get', 'line_width_factor'], 1], 1],
+                        16, ['*', ['coalesce', ['get', 'line_width_factor'], 1], 2],
+                        19, ['*', ['coalesce', ['get', 'line_width_factor'], 1], 4]
+                    ],
+                    'line-opacity': 0.85,
+                },
+            });
+
             // ─── Click handlers for infrastructure ─────────
-            map.on('click', 'pipelines-line', (e) => {
+            const infraClickHandler = (layerId) => (e) => {
                 if (!e.features?.length) return;
                 const props = e.features[0].properties;
                 if (popupRef.current) popupRef.current.remove();
-                const label = (props.pipe_type || '').replace(/_/g, ' ');
+                const label = (props.pipe_type || props.asset_type || '').replace(/_/g, ' ');
                 popupRef.current = new maplibregl.Popup({ closeButton: true, maxWidth: '260px' })
                     .setLngLat(e.lngLat)
                     .setHTML(`
@@ -364,20 +583,21 @@ const MapView = forwardRef(function MapView({ isParcelResolved, onModelOpen, isP
                             <strong style="text-transform:capitalize">${label}</strong><br/>
                             ${props.location ? `<span style="color:#555">${props.location}</span><br/>` : ''}
                             ${props.diameter_mm ? `Diameter: ${props.diameter_mm}mm<br/>` : ''}
+                            ${props.voltage_kv ? `Voltage: ${props.voltage_kv} kV<br/>` : ''}
                             ${props.material ? `Material: ${props.material}<br/>` : ''}
                             ${props.install_year ? `Installed: ${props.install_year}<br/>` : ''}
-                            ${props.length_m ? `Length: ${props.length_m}m<br/>` : ''}
-                            ${props.depth_m ? `Depth: ${props.depth_m}m<br/>` : ''}
+                            ${props.operator ? `Operator: ${props.operator}<br/>` : ''}
                             ${props.distance_m ? `<span style="color:#888">${props.distance_m}m away</span>` : ''}
                         </div>
                     `)
                     .addTo(map);
-                if (onInfraAssetClickRef.current) onInfraAssetClickRef.current({ type: 'pipeline', ...props });
-            });
+            };
 
-            // Cursor styling for interactive layers
-            map.on('mouseenter', 'pipelines-line', () => { map.getCanvas().style.cursor = 'pointer'; });
-            map.on('mouseleave', 'pipelines-line', () => { map.getCanvas().style.cursor = ''; });
+            for (const layerId of ['watermains-line', 'sewers-line', 'electrical-line']) {
+                map.on('click', layerId, infraClickHandler(layerId));
+                map.on('mouseenter', layerId, () => { map.getCanvas().style.cursor = 'pointer'; });
+                map.on('mouseleave', layerId, () => { map.getCanvas().style.cursor = ''; });
+            }
         });
 
         return () => {
@@ -386,55 +606,9 @@ const MapView = forwardRef(function MapView({ isParcelResolved, onModelOpen, isP
         };
     }, []);
 
-    const MODE_LABELS = { building: null, pipeline: 'Pipeline Network' };
-    const MODE_ICONS = { pipeline: '⏣' };
-    const MODE_COLORS = { pipeline: '#44aa66' };
-
     return (
         <>
             <div id="map" ref={containerRef} style={{ width: '100%', height: '100%', minHeight: '400px' }} />
-
-            {/* Infrastructure mode banner */}
-            {assetType !== 'building' && (
-                <div style={{
-                    position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)',
-                    background: '#1a1a1a', border: `1px solid ${MODE_COLORS[assetType]}`,
-                    borderRadius: 8, padding: '8px 20px', zIndex: 20,
-                    display: 'flex', alignItems: 'center', gap: 8,
-                    fontFamily: 'Inter, sans-serif', fontSize: 13, color: '#f0ece4',
-                    boxShadow: '0 4px 20px rgba(0,0,0,0.5)', pointerEvents: 'none',
-                }}>
-                    <span style={{ fontSize: 18 }}>{MODE_ICONS[assetType]}</span>
-                    <span style={{ color: MODE_COLORS[assetType], fontWeight: 600 }}>{MODE_LABELS[assetType]}</span>
-                    <span style={{ display: 'flex', gap: 10, marginLeft: 4, alignItems: 'center' }}>
-                        {[['CI/CICL', '#e67e22'], ['DIP/DICL', '#2277bb'], ['PVC', '#27ae60'], ['AC', '#e74c3c'], ['COP', '#f1c40f']].map(([label, color]) => (
-                            <span key={label} style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: 10, color: '#ccc' }}>
-                                <span style={{ width: 16, height: 3, background: color, borderRadius: 2, display: 'inline-block' }} />
-                                {label}
-                            </span>
-                        ))}
-                    </span>
-                </div>
-            )}
-
-            {/* Empty state for infrastructure */}
-            {assetType !== 'building' && infraEmpty && (
-                <div style={{
-                    position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
-                    background: 'rgba(26,26,26,0.92)', borderRadius: 12, padding: '32px 40px',
-                    zIndex: 15, textAlign: 'center', maxWidth: 360,
-                    fontFamily: 'Inter, sans-serif', color: '#f0ece4',
-                    boxShadow: '0 8px 32px rgba(0,0,0,0.6)', border: '1px solid #333',
-                }}>
-                    <div style={{ fontSize: 36, marginBottom: 12, opacity: 0.6 }}>⏣</div>
-                    <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 8 }}>
-                        No pipeline data in this area
-                    </div>
-                    <div style={{ fontSize: 12, color: '#888', lineHeight: 1.5 }}>
-                        Pan or zoom the map to load Toronto watermain data.
-                    </div>
-                </div>
-            )}
 
             {isParcelResolved && !isModelOpen && (
                 <button

@@ -88,11 +88,14 @@ class Project(Base, UUIDPrimaryKey, TimestampMixin):
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String, nullable=False, default="active", server_default="active")
     asset_type: Mapped[str] = mapped_column(String(50), nullable=False, default="building", server_default="building")
+    map_state: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
 
     organization: Mapped["Organization"] = relationship(back_populates="projects")
     creator: Mapped["User"] = relationship(foreign_keys=[created_by])
     shares: Mapped[list["ProjectShare"]] = relationship(back_populates="project")
     scenario_runs: Mapped[list["ScenarioRun"]] = relationship(back_populates="project")
+    notes: Mapped[list["ProjectNote"]] = relationship(back_populates="project", cascade="all, delete-orphan")
+    conversations: Mapped[list["ProjectConversation"]] = relationship(back_populates="project", cascade="all, delete-orphan")
 
 
 class ProjectShare(Base, UUIDPrimaryKey):
@@ -166,3 +169,35 @@ class AnalysisSnapshotManifest(Base, UUIDPrimaryKey):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     scenario_run: Mapped["ScenarioRun"] = relationship(back_populates="snapshot_manifest")
+
+
+class ProjectNote(Base, UUIDPrimaryKey, TimestampMixin):
+    __tablename__ = "project_notes"
+
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    created_by: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=False
+    )
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    pinned: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+
+    project: Mapped["Project"] = relationship(back_populates="notes")
+    creator: Mapped["User"] = relationship(foreign_keys=[created_by])
+
+
+class ProjectConversation(Base, UUIDPrimaryKey, TimestampMixin):
+    __tablename__ = "project_conversations"
+
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    created_by: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=False
+    )
+    title: Mapped[str] = mapped_column(String, nullable=False, default="New conversation")
+    messages: Mapped[list] = mapped_column(JSON, nullable=False, server_default="[]")
+
+    project: Mapped["Project"] = relationship(back_populates="conversations")
+    creator: Mapped["User"] = relationship(foreign_keys=[created_by])

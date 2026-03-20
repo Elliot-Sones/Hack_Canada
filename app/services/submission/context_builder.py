@@ -22,7 +22,7 @@ from app.services.compliance_engine import ComplianceResult, render_compliance_m
 from app.services.zoning_service import ZoningAnalysis
 
 
-_NOT_AVAILABLE = "[NOT AVAILABLE — requires manual input]"
+_NOT_AVAILABLE = ""  # Empty string — templates skip blank fields rather than showing placeholders
 
 
 def _fmt_number(value: float | int | None, decimals: int = 0, prefix: str = "", suffix: str = "") -> str:
@@ -208,6 +208,7 @@ def build_document_context(
     organization_name: str = "",
     parsed_parameters: dict | None = None,
     source_filename: str = "",
+    infrastructure: dict | None = None,
 ) -> dict[str, Any]:
     """Assemble complete context dict for all 10 document templates.
 
@@ -352,6 +353,12 @@ def build_document_context(
         "pac_requirements": _build_pac_requirements(),
         "submission_checklist_data": _NOT_AVAILABLE,
         "refusal_reasons": _or(params.get("refusal_reasons")),
+
+        # Infrastructure / servicing
+        "servicing_summary": _build_servicing_summary(infrastructure),
+        "water_servicing": _build_system_servicing(infrastructure, "water"),
+        "sewer_servicing": _build_system_servicing(infrastructure, "sewer"),
+        "electrical_servicing": _build_system_servicing(infrastructure, "electrical"),
     }
 
     return context
@@ -630,6 +637,69 @@ def _build_pac_requirements() -> str:
         "- List of questions for city planning staff\n"
         "- Survey or legal description of the property\n\n"
         "The city has 45 days to hold the PAC meeting after request."
+    )
+
+
+def _build_servicing_summary(infrastructure: dict | None) -> str:
+    """Build a markdown table summarizing nearby infrastructure for all systems."""
+    if not infrastructure:
+        return _NOT_AVAILABLE
+
+    lines = [
+        "| System | Status | Nearest Asset | Distance | Key Facts |",
+        "|--------|--------|---------------|----------|-----------|",
+    ]
+
+    for system_key, label in [("water", "Water"), ("sanitary", "Sanitary Sewer"),
+                               ("storm", "Storm Sewer"), ("electrical", "Electrical")]:
+        fc = infrastructure.get(system_key)
+        features = (fc or {}).get("features", [])
+        if not features:
+            lines.append(f"| {label} | No Data | — | — | — |")
+            continue
+
+        nearest = features[0].get("properties", {})
+        dist = nearest.get("distance_m")
+        status = "Adequate" if dist and dist < 100 else "Review Needed" if dist and dist <= 500 else "Insufficient"
+
+        if system_key == "electrical":
+            asset_desc = f"{nearest.get('voltage_kv', '?')} kV {nearest.get('asset_type', 'line').replace('_', ' ')}"
+            facts = nearest.get("operator", "—")
+        else:
+            asset_desc = f"{nearest.get('diameter_mm', '?')}mm {nearest.get('material', '?')}"
+            facts = f"Installed {nearest.get('install_year', 'N/A')}"
+
+        dist_str = f"{round(dist)}m" if dist else "N/A"
+        lines.append(f"| {label} | {status} | {asset_desc} | {dist_str} | {facts} |")
+
+    return "\n".join(lines)
+
+
+def _build_system_servicing(infrastructure: dict | None, system: str) -> str:
+    """Build a text summary for a single infrastructure system."""
+    if not infrastructure:
+        return _NOT_AVAILABLE
+
+    fc = infrastructure.get(system if system != "sewer" else "sanitary")
+    features = (fc or {}).get("features", [])
+    if not features:
+        return f"No {system} infrastructure data available within 500m of the site."
+
+    nearest = features[0].get("properties", {})
+    dist = nearest.get("distance_m")
+    count = len(features)
+
+    if system == "electrical":
+        return (
+            f"{count} electrical asset(s) within 500m. "
+            f"Nearest: {nearest.get('voltage_kv', '?')} kV {nearest.get('asset_type', 'line').replace('_', ' ')}, "
+            f"{round(dist)}m from site. Operator: {nearest.get('operator', 'Unknown')}."
+        )
+
+    return (
+        f"{count} {system} asset(s) within 500m. "
+        f"Nearest: {nearest.get('diameter_mm', '?')}mm {nearest.get('material', '?')}, "
+        f"{round(dist)}m from site, installed {nearest.get('install_year', 'N/A')}."
     )
 
 

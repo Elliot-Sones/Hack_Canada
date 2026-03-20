@@ -77,11 +77,40 @@ export function clearFastApiToken() { localStorage.removeItem('token'); }
 
 // ─── Parcels ───
 
-export async function searchParcels(address) {
+export async function searchParcels(address, { lat, lng } = {}) {
     try {
-        return await apiFetch(`${API_BASE}/parcels/search?address=${encodeURIComponent(address)}`);
+        let url = `${API_BASE}/parcels/search?address=${encodeURIComponent(address)}`;
+        if (lat != null && lng != null) url += `&lat=${lat}&lng=${lng}`;
+        return await apiFetch(url);
     } catch {
         return [];
+    }
+}
+
+export async function searchParcelsBbox(bounds, zoom, options = {}) {
+    if (zoom < 15) return { type: 'FeatureCollection', features: [] };
+    try {
+        const sw = bounds.getSouthWest();
+        const ne = bounds.getNorthEast();
+        const url = `${API_BASE}/parcels/search?bbox=${sw.lng},${sw.lat},${ne.lng},${ne.lat}&page_size=500`;
+        const parcels = await apiFetch(url, options);
+        return {
+            type: 'FeatureCollection',
+            features: (parcels || []).filter(p => p.geom).map(p => ({
+                type: 'Feature',
+                id: p.id,
+                properties: {
+                    id: p.id,
+                    address: (p.address && p.address !== 'None None' && p.address !== 'None') ? p.address : '',
+                    zone_code: p.zone_code || '',
+                    lot_area_m2: p.lot_area_m2 || 0,
+                },
+                geometry: p.geom,
+            })),
+        };
+    } catch (error) {
+        if (isAbortError(error)) throw error;
+        return { type: 'FeatureCollection', features: [] };
     }
 }
 
@@ -151,13 +180,14 @@ export async function parseModel(text, currentParams = null, zoneCode = null, lo
     });
 }
 
-export async function chatWithAssistant({ messages, parcelContext = null, parcelId = null, lat = null, lng = null, modelParams = null, zoneCode = null, uploadContext = null }) {
+export async function chatWithAssistant({ messages, parcelContext = null, parcelId = null, lat = null, lng = null, modelParams = null, zoneCode = null, zoneCodes = null, uploadContext = null }) {
     const payload = { messages, parcel_context: parcelContext };
     if (parcelId) payload.parcel_id = parcelId;
     if (lat != null) payload.lat = lat;
     if (lng != null) payload.lng = lng;
     if (modelParams) payload.model_params = modelParams;
     if (zoneCode) payload.zone_code = zoneCode;
+    if (zoneCodes?.length) payload.zone_codes = zoneCodes;
     if (uploadContext?.length) payload.upload_context = uploadContext;
     const data = await apiFetch(`${API_BASE}/assistant/chat`, {
         method: 'POST',
@@ -174,11 +204,12 @@ export async function chatWithAssistant({ messages, parcelContext = null, parcel
 
 // ─── Plans ───
 
-export async function generatePlan(query, generateSubset = null) {
+export async function generatePlan(query, generateSubset = null, projectId = null) {
     const body = { query, auto_run: true };
     if (generateSubset && generateSubset !== 'all') {
         body.generate_subset = generateSubset;
     }
+    if (projectId) body.project_id = projectId;
     return apiFetch(`${API_BASE}/plans/generate`, {
         method: 'POST',
         body: JSON.stringify(body),
@@ -328,6 +359,176 @@ export async function triggerSanitarySewerIngestion() {
 
 export async function triggerStormSewerIngestion() {
     return apiFetch(`${API_BASE}/admin/ingest/storm-sewers`, { method: 'POST' });
+}
+
+export async function getElectricalNearby(lat, lng, radius = 500, options = {}) {
+    try {
+        const url = `${API_BASE}/infrastructure/electrical/nearby?lat=${lat}&lng=${lng}&radius_m=${radius}`;
+        return await apiFetch(url, options);
+    } catch (error) {
+        if (isAbortError(error)) throw error;
+        return { type: 'FeatureCollection', features: [] };
+    }
+}
+
+export async function checkElectricalCapacity(params) {
+    return apiFetch(`${API_BASE}/infrastructure/electrical/capacity-check`, {
+        method: 'POST',
+        body: JSON.stringify(params),
+    });
+}
+
+export async function getSewersBbox(bounds, pipeType = null, options = {}) {
+    try {
+        const sw = bounds.getSouthWest();
+        const ne = bounds.getNorthEast();
+        let url = `${API_BASE}/infrastructure/sewers/bbox?min_lng=${sw.lng}&min_lat=${sw.lat}&max_lng=${ne.lng}&max_lat=${ne.lat}`;
+        if (pipeType) url += `&pipe_type=${pipeType}`;
+        return await apiFetch(url, options);
+    } catch (error) {
+        if (isAbortError(error)) throw error;
+        return { type: 'FeatureCollection', features: [] };
+    }
+}
+
+export async function getElectricalBbox(bounds, options = {}) {
+    try {
+        const sw = bounds.getSouthWest();
+        const ne = bounds.getNorthEast();
+        const url = `${API_BASE}/infrastructure/electrical/bbox?min_lng=${sw.lng}&min_lat=${sw.lat}&max_lng=${ne.lng}&max_lat=${ne.lat}`;
+        return await apiFetch(url, options);
+    } catch (error) {
+        if (isAbortError(error)) throw error;
+        return { type: 'FeatureCollection', features: [] };
+    }
+}
+
+// ─── Projects ───
+
+export async function listProjects() {
+    return apiFetch(`${API_BASE}/projects`);
+}
+
+export async function createProject(name, description = null) {
+    return apiFetch(`${API_BASE}/projects`, {
+        method: 'POST',
+        body: JSON.stringify({ name, description }),
+    });
+}
+
+export async function getProject(projectId) {
+    return apiFetch(`${API_BASE}/projects/${projectId}`);
+}
+
+export async function updateProject(projectId, updates) {
+    return apiFetch(`${API_BASE}/projects/${projectId}`, {
+        method: 'PATCH',
+        body: JSON.stringify(updates),
+    });
+}
+
+export async function deleteProject(projectId) {
+    return apiFetch(`${API_BASE}/projects/${projectId}`, { method: 'DELETE' });
+}
+
+// Project parcels
+export async function addParcelToProject(projectId, parcelId, role = 'primary') {
+    return apiFetch(`${API_BASE}/projects/${projectId}/parcels`, {
+        method: 'POST',
+        body: JSON.stringify({ parcel_id: parcelId, role }),
+    });
+}
+
+export async function removeParcelFromProject(projectId, parcelId) {
+    return apiFetch(`${API_BASE}/projects/${projectId}/parcels/${parcelId}`, { method: 'DELETE' });
+}
+
+// Project plans
+export async function getProjectPlans(projectId) {
+    return apiFetch(`${API_BASE}/projects/${projectId}/plans`);
+}
+
+// Project notes
+export async function getProjectNotes(projectId) {
+    return apiFetch(`${API_BASE}/projects/${projectId}/notes`);
+}
+
+export async function createProjectNote(projectId, content) {
+    return apiFetch(`${API_BASE}/projects/${projectId}/notes`, {
+        method: 'POST',
+        body: JSON.stringify({ content }),
+    });
+}
+
+export async function updateProjectNote(projectId, noteId, updates) {
+    return apiFetch(`${API_BASE}/projects/${projectId}/notes/${noteId}`, {
+        method: 'PATCH',
+        body: JSON.stringify(updates),
+    });
+}
+
+export async function deleteProjectNote(projectId, noteId) {
+    return apiFetch(`${API_BASE}/projects/${projectId}/notes/${noteId}`, { method: 'DELETE' });
+}
+
+// Project conversations
+export async function getProjectConversations(projectId) {
+    return apiFetch(`${API_BASE}/projects/${projectId}/conversations`);
+}
+
+export async function getProjectConversation(projectId, convId) {
+    return apiFetch(`${API_BASE}/projects/${projectId}/conversations/${convId}`);
+}
+
+export async function saveProjectConversation(projectId, { title, messages }) {
+    return apiFetch(`${API_BASE}/projects/${projectId}/conversations`, {
+        method: 'POST',
+        body: JSON.stringify({ title, messages }),
+    });
+}
+
+export async function updateProjectConversation(projectId, convId, updates) {
+    return apiFetch(`${API_BASE}/projects/${projectId}/conversations/${convId}`, {
+        method: 'PUT',
+        body: JSON.stringify(updates),
+    });
+}
+
+export async function deleteProjectConversation(projectId, convId) {
+    return apiFetch(`${API_BASE}/projects/${projectId}/conversations/${convId}`, { method: 'DELETE' });
+}
+
+// Project uploads
+export async function getProjectUploads(projectId) {
+    return apiFetch(`${API_BASE}/projects/${projectId}/uploads`);
+}
+
+export async function uploadProjectFile(projectId, file) {
+    const formData = new FormData();
+    formData.append('file', file);
+    const token = localStorage.getItem('token');
+    const headers = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const res = await fetch(`${API_BASE}/projects/${projectId}/uploads`, {
+        method: 'POST',
+        headers,
+        body: formData,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+        const error = new Error(getErrorMessage(data, res.status));
+        error.status = res.status;
+        throw error;
+    }
+    return data;
+}
+
+// Project map state
+export async function saveProjectMapState(projectId, mapState) {
+    return apiFetch(`${API_BASE}/projects/${projectId}/map-state`, {
+        method: 'PATCH',
+        body: JSON.stringify(mapState),
+    });
 }
 
 // ─── Design Version Control ───

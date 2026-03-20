@@ -1,10 +1,10 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import {
     chatWithAssistant,
+    downloadPlanDocument,
     generatePlan,
     generatePlanFromUpload,
     generateResponseFromUpload,
-    getContractorRecommendations,
     getPlan,
     getPlanDocuments,
     regeneratePlanDocument,
@@ -12,13 +12,34 @@ import {
     getUpload,
     parseModel,
     parseInfraModel,
+    saveProjectConversation,
+    updateProjectConversation,
 } from '../api.js';
 import ContractorCards from './ContractorCards.jsx';
 import { parseChatCommand } from '../lib/chatCommands.js';
-import { formatParcelContext } from '../lib/parcelState.js';
+import { formatParcelContext, formatMultiParcelContext } from '../lib/parcelState.js';
+import { extractCentroid } from '../lib/geoUtils.js';
+import {
+    getConversations,
+    getConversation,
+    saveConversation,
+    deleteConversation,
+    createConversation,
+    WELCOME_MESSAGE,
+} from '../lib/chatHistory.js';
+import ChatContextHeader from './ChatContextHeader.jsx';
 import useResizable from '../hooks/useResizable.js';
 
 const POLL_INTERVAL_MS = 3000;
+
+/** Convert basic markdown (bold, italic, line breaks) to HTML for chat messages. */
+function inlineMarkdown(text) {
+    if (!text) return '';
+    return text
+        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+        .replace(/\*(.+?)\*/g, '<em>$1</em>')
+        .replace(/\n/g, '<br/>');
+}
 
 function sleep(ms, signal) {
     if (signal?.aborted) {
@@ -55,7 +76,7 @@ function planStartErrorMessage(error, filename = null) {
         : `Failed to start generation: ${error.message}`;
 }
 
-export default function ChatPanel({ parcelContext, onPlanComplete, onToggleExpand, modelParams, onModelUpdate, analyzedUploads, activePlanId, assetType }) {
+export default function ChatPanel({ parcelContext, onPlanComplete, onToggleExpand, modelParams, onModelUpdate, analyzedUploads, activePlanId, selectedParcels, isComparisonMode, activeProjectId, activeProjectName }) {
     const { isResizing: isChatResizing, handleProps: chatResizeProps } = useResizable({
         defaultSize: 280,
         minSize: 150,
@@ -78,14 +99,19 @@ export default function ChatPanel({ parcelContext, onPlanComplete, onToggleExpan
     const [uploadProgress, setUploadProgress] = useState(null);
     const [planProgress, setPlanProgress] = useState(null);
     const [latestAnalyzedUpload, setLatestAnalyzedUpload] = useState(null);
+    const [currentConversationId, setCurrentConversationId] = useState(null);
+    const [showHistory, setShowHistory] = useState(false);
 
     const conversationHistoryRef = useRef([]);
     const messagesEndRef = useRef(null);
     const fileInputRef = useRef(null);
-    const planPollControllerRef = useRef(null);
+    const planPollControllersRef = useRef(new Map());
     const uploadPollControllerRef = useRef(null);
+    const projectConvIdRef = useRef(null);
 
-    const parcelContextStr = formatParcelContext(parcelContext);
+    const parcelContextStr = isComparisonMode
+        ? formatMultiParcelContext(selectedParcels, parcelContext?.id)
+        : formatParcelContext(parcelContext);
 
     const scrollToBottom = useCallback(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -99,13 +125,93 @@ export default function ChatPanel({ parcelContext, onPlanComplete, onToggleExpan
         scrollToBottom();
     }, [messages, isTyping, scrollToBottom]);
 
+    // Initialize conversation on mount
+    useEffect(() => {
+        const conv = createConversation();
+        setCurrentConversationId(conv.id);
+        setMessages(conv.messages);
+    }, []);
+
+    // Auto-save messages (debounced) — localStorage + project backend
+    useEffect(() => {
+        if (!currentConversationId) return;
+        // Only save if we have more than the welcome message
+        if (messages.length <= 1) return;
+        const timer = setTimeout(() => {
+            saveConversation(currentConversationId, messages);
+            // Also persist to project backend if a project is active
+            if (activeProjectId) {
+                const firstUserMsg = messages.find((m) => m.role === 'user');
+                const title = firstUserMsg?.text?.slice(0, 80) || 'Chat';
+                const payload = messages.map((m) => ({ role: m.role, text: m.text, timestamp: m.timestamp || new Date().toISOString() }));
+                if (projectConvIdRef.current) {
+                    updateProjectConversation(activeProjectId, projectConvIdRef.current, { messages: payload }).catch(() => {});
+                } else {
+                    saveProjectConversation(activeProjectId, { title, messages: payload })
+                        .then((conv) => { projectConvIdRef.current = conv.id; })
+                        .catch(() => {});
+                }
+            }
+        }, 500);
+        return () => clearTimeout(timer);
+    }, [messages, currentConversationId, activeProjectId]);
+
+    const handleNewChat = useCallback(() => {
+        // Save current conversation if it has user messages
+        if (currentConversationId && messages.length > 1) {
+            saveConversation(currentConversationId, messages);
+        }
+        const conv = createConversation();
+        setCurrentConversationId(conv.id);
+        setMessages(conv.messages);
+        conversationHistoryRef.current = [];
+        projectConvIdRef.current = null;
+        setPlanProgress(null);
+        setShowHistory(false);
+    }, [currentConversationId, messages]);
+
+    const handleLoadConversation = useCallback((id) => {
+        // Save current first
+        if (currentConversationId && messages.length > 1) {
+            saveConversation(currentConversationId, messages);
+        }
+        const conv = getConversation(id);
+        if (conv) {
+            setCurrentConversationId(conv.id);
+            setMessages(conv.messages);
+            // Rebuild conversation history for AI context
+            conversationHistoryRef.current = conv.messages
+                .filter((m) => m.role === 'user' || m.role === 'assistant')
+                .map(({ role, text }) => ({ role, text }));
+            setPlanProgress(null);
+        }
+        setShowHistory(false);
+    }, [currentConversationId, messages]);
+
+    const handleDeleteConversation = useCallback((id) => {
+        deleteConversation(id);
+        // If deleting the active conversation, start a new one
+        if (id === currentConversationId) {
+            const conv = createConversation();
+            setCurrentConversationId(conv.id);
+            setMessages(conv.messages);
+            conversationHistoryRef.current = [];
+            setPlanProgress(null);
+        }
+    }, [currentConversationId]);
+
     const handleToggle = useCallback(() => {
         setIsExpanded((prev) => !prev);
     }, []);
 
-    const cancelPlanPoll = useCallback(() => {
-        planPollControllerRef.current?.abort();
-        planPollControllerRef.current = null;
+    const cancelPlanPoll = useCallback((key) => {
+        if (key != null) {
+            const ctrl = planPollControllersRef.current.get(key);
+            if (ctrl) { ctrl.abort(); planPollControllersRef.current.delete(key); }
+        } else {
+            planPollControllersRef.current.forEach((ctrl) => ctrl.abort());
+            planPollControllersRef.current.clear();
+        }
     }, []);
 
     const cancelUploadPoll = useCallback(() => {
@@ -114,7 +220,7 @@ export default function ChatPanel({ parcelContext, onPlanComplete, onToggleExpan
     }, []);
 
     useEffect(() => () => {
-        cancelPlanPoll();
+        cancelPlanPoll(); // abort all
         cancelUploadPoll();
     }, [cancelPlanPoll, cancelUploadPoll]);
 
@@ -131,17 +237,36 @@ export default function ChatPanel({ parcelContext, onPlanComplete, onToggleExpan
     };
     const STEP_ORDER = Object.keys(STEP_LABELS);
 
-    const pollPlan = useCallback(async (planId) => {
-        cancelPlanPoll();
+    const pollPlan = useCallback(async (planId, pollKey) => {
+        const key = pollKey ?? planId;
+        cancelPlanPoll(key);
         const controller = new AbortController();
         const { signal } = controller;
-        planPollControllerRef.current = controller;
+        planPollControllersRef.current.set(key, controller);
         const maxAttempts = 120;
 
         try {
+            let consecutiveErrors = 0;
             for (let i = 0; i < maxAttempts; i++) {
                 await sleep(POLL_INTERVAL_MS, signal);
-                const plan = await getPlan(planId, { signal });
+
+                let plan;
+                try {
+                    plan = await getPlan(planId, { signal });
+                    consecutiveErrors = 0;
+                } catch (pollErr) {
+                    if (isAbortError(pollErr)) return;
+                    consecutiveErrors++;
+                    console.warn(`Plan poll attempt ${i + 1} failed (${consecutiveErrors} consecutive):`, pollErr.message);
+                    if (consecutiveErrors >= 5) {
+                        setMessages((prev) => [...prev, {
+                            role: 'assistant',
+                            text: `Lost connection to the server while checking plan progress. The plan may still be generating — try refreshing the page.`,
+                        }]);
+                        return;
+                    }
+                    continue;
+                }
                 if (signal.aborted) return;
 
                 // Update progress
@@ -165,21 +290,14 @@ export default function ChatPanel({ parcelContext, onPlanComplete, onToggleExpan
 
                 if (plan.status === 'completed' || plan.status === 'done') {
                     setPlanProgress(null);
-                    const docs = await getPlanDocuments(planId, { signal });
+                    const docs = await getPlanDocuments(planId, { signal }).catch(() => []);
                     if (signal.aborted) return;
-                    const docList = docs.length > 0
-                        ? docs.map((d) => `- ${d.title || d.document_type}`).join('\n')
-                        : 'No documents generated yet.';
-
-                    // Fetch contractor recommendations
-                    const lat = parcelContext?.latitude ?? parcelContext?.lat ?? 43.6532;
-                    const lng = parcelContext?.longitude ?? parcelContext?.lng ?? -79.3832;
-                    const contractorData = await getContractorRecommendations(planId, lat, lng);
 
                     setMessages((prev) => [...prev, {
                         role: 'assistant',
-                        text: `Plan generation complete! Generated documents:\n\n${docList}`,
-                        contractors: contractorData.contractors || [],
+                        text: 'Plan generation complete!',
+                        documents: docs,
+                        planId,
                     }]);
                     if (onPlanComplete && plan.summary?.massing) {
                         onPlanComplete(plan.summary.massing, planId);
@@ -211,8 +329,8 @@ export default function ChatPanel({ parcelContext, onPlanComplete, onToggleExpan
             return;
         } finally {
             setPlanProgress(null);
-            if (planPollControllerRef.current === controller) {
-                planPollControllerRef.current = null;
+            if (planPollControllersRef.current.get(key) === controller) {
+                planPollControllersRef.current.delete(key);
             }
         }
 
@@ -253,7 +371,7 @@ export default function ChatPanel({ parcelContext, onPlanComplete, onToggleExpan
                 }]);
             } else {
                 // No existing plan or large batch — run full pipeline
-                const result = await generatePlan(action.query, docTypes);
+                const result = await generatePlan(action.query, docTypes, activeProjectId);
                 pollPlan(result.job_id);
             }
         } catch (err) {
@@ -262,7 +380,101 @@ export default function ChatPanel({ parcelContext, onPlanComplete, onToggleExpan
                 text: planStartErrorMessage(err),
             }]);
         }
-    }, [pollPlan, activePlanId]);
+    }, [pollPlan, activePlanId, activeProjectId]);
+
+    const handleGenerateReport = useCallback(async () => {
+        if (isComparisonMode && selectedParcels?.length >= 2) {
+            // Multi-parcel comparison report: generate in parallel with per-parcel try/catch
+            const parcels = selectedParcels.filter(p => p.address || p.zoneCode);
+            if (parcels.length === 0) {
+                setMessages((prev) => [...prev, {
+                    role: 'assistant',
+                    text: 'Please search for properties first so I know which parcels to generate reports for.',
+                }]);
+                return;
+            }
+            setMessages((prev) => [...prev, {
+                role: 'assistant',
+                text: `Starting comparison report for ${parcels.length} parcels...`,
+            }]);
+            let completed = 0;
+            const results = await Promise.all(parcels.map(async (p) => {
+                const addr = p.address || p.fullAddress || 'Unknown';
+                const zone = p.zoneCode || p.zone_code || p.zoning;
+                const lotArea = p.lotArea;
+                const reportQuery = [
+                    `I want to build a mixed-use development at ${addr}, Toronto, Ontario.`,
+                    zone ? `The site is zoned ${zone}.` : '',
+                    lotArea ? `Lot area is ${lotArea} m\u00B2.` : '',
+                    'Generate the full submission package.',
+                ].filter(Boolean).join(' ');
+                try {
+                    const result = await generatePlan(reportQuery, null, activeProjectId);
+                    completed++;
+                    setPlanProgress({
+                        step: `Generating reports: ${completed}/${parcels.length} started`,
+                        pct: Math.round((completed / parcels.length) * 100),
+                        completedCount: completed,
+                        totalSteps: parcels.length,
+                    });
+                    pollPlan(result.job_id, `comparison-${p.id}`);
+                    return { parcel: addr, jobId: result.job_id, error: null };
+                } catch (err) {
+                    completed++;
+                    return { parcel: addr, jobId: null, error: err.message };
+                }
+            }));
+            setPlanProgress(null);
+            const failures = results.filter(r => r.error);
+            if (failures.length > 0) {
+                const failList = failures.map(f => `- ${f.parcel}: ${f.error}`).join('\n');
+                setMessages((prev) => [...prev, {
+                    role: 'assistant',
+                    text: `Some reports failed to start:\n\n${failList}`,
+                }]);
+            }
+            const successes = results.filter(r => r.jobId);
+            if (successes.length > 0) {
+                const successList = successes.map(s => `- ${s.parcel}`).join('\n');
+                setMessages((prev) => [...prev, {
+                    role: 'assistant',
+                    text: `Report generation started for:\n\n${successList}\n\nI'll update you as each completes...`,
+                }]);
+            }
+            return;
+        }
+
+        // Single-parcel report
+        const addr = parcelContext?.address || parcelContext?.fullAddress || parcelContext?.addr;
+        const zone = parcelContext?.zoneCode || parcelContext?.zone_code || parcelContext?.zoning;
+        if (!parcelContext || (!addr && !zone)) {
+            setMessages((prev) => [...prev, {
+                role: 'assistant',
+                text: 'Please search for a property first so I know which parcel to generate the report for.',
+            }]);
+            return;
+        }
+        const lotArea = parcelContext?.lotArea;
+        const reportQuery = [
+            `I want to build a mixed-use development at ${addr}, Toronto, Ontario.`,
+            zone ? `The site is zoned ${zone}.` : '',
+            lotArea ? `Lot area is ${lotArea} m\u00B2.` : '',
+            'Generate the full submission package.',
+        ].filter(Boolean).join(' ');
+        try {
+            const result = await generatePlan(reportQuery, null, activeProjectId);
+            setMessages((prev) => [...prev, {
+                role: 'assistant',
+                text: `Report generation started for <strong>${addr}</strong>. I'll update you as each step completes...`,
+            }]);
+            pollPlan(result.job_id);
+        } catch (err) {
+            setMessages((prev) => [...prev, {
+                role: 'assistant',
+                text: planStartErrorMessage(err),
+            }]);
+        }
+    }, [isComparisonMode, selectedParcels, parcelContext, pollPlan, activeProjectId]);
 
     const sendMessage = useCallback(async () => {
         const text = inputValue.trim();
@@ -381,43 +593,9 @@ export default function ChatPanel({ parcelContext, onPlanComplete, onToggleExpan
         }
 
         if (command.type === 'generate_report') {
-            const addr = parcelContext?.address || parcelContext?.fullAddress || parcelContext?.addr;
-            const zone = parcelContext?.zoneCode || parcelContext?.zone_code || parcelContext?.zoning;
-            if (!parcelContext || (!addr && !zone)) {
-                setMessages((prev) => [...prev, {
-                    role: 'assistant',
-                    text: 'Please search for a property first so I know which parcel to generate the report for.',
-                }]);
-                setIsTyping(false);
-                return;
-            }
-            // Build a detailed, specific query so the AI parser doesn't ask for clarification
-            const lotArea = parcelContext?.lotArea;
-            const reportQuery = [
-                `I want to build a mixed-use development at ${addr}, Toronto, Ontario.`,
-                zone ? `The site is zoned ${zone}.` : '',
-                lotArea ? `Lot area is ${lotArea} m².` : '',
-                'Generate the full due diligence submission package including planning rationale,',
-                'compliance matrix, massing summary, financial feasibility, precedent report,',
-                'and all applicable documents.',
-            ].filter(Boolean).join(' ');
-            try {
-                const result = await generatePlan(reportQuery, ["cover_letter"]);
-                setMessages((prev) => [...prev, {
-                    role: 'assistant',
-                    text: `Report generation started for <strong>${addr}</strong>. I'll update you as each step completes...`,
-                }]);
-                setIsTyping(false);
-                pollPlan(result.job_id);
-                return;
-            } catch (err) {
-                setMessages((prev) => [...prev, {
-                    role: 'assistant',
-                    text: planStartErrorMessage(err),
-                }]);
-                setIsTyping(false);
-                return;
-            }
+            setIsTyping(false);
+            handleGenerateReport();
+            return;
         }
 
         // All other messages go to the AI — it decides whether to answer, propose generation, or update the model
@@ -428,18 +606,13 @@ export default function ChatPanel({ parcelContext, onPlanComplete, onToggleExpan
                 extracted_data: u.extractedData || null,
             }));
             // Extract lat/lng from parcel geometry for infrastructure queries
-            let parcelLat = null, parcelLng = null;
-            const geom = parcelContext?.geom;
-            if (geom?.coordinates) {
-                const coords = geom.type === 'Point' ? geom.coordinates
-                    : geom.type === 'Polygon' ? geom.coordinates[0]?.[0]
-                    : geom.type === 'MultiPolygon' ? geom.coordinates[0]?.[0]?.[0]
-                    : null;
-                if (coords && coords.length >= 2) {
-                    parcelLng = coords[0];
-                    parcelLat = coords[1];
-                }
-            }
+            const centroid = extractCentroid(parcelContext?.geom);
+            const parcelLng = centroid?.[0] ?? null;
+            const parcelLat = centroid?.[1] ?? null;
+
+            const zoneCodes = isComparisonMode
+                ? [...new Set(selectedParcels.filter(p => p.zoneCode).map(p => p.zoneCode))]
+                : null;
 
             const { message, proposedAction, modelUpdate, contractors } = await chatWithAssistant({
                 messages: nextHistory.slice(-20),
@@ -449,6 +622,7 @@ export default function ChatPanel({ parcelContext, onPlanComplete, onToggleExpan
                 lng: parcelLng,
                 modelParams: modelParams || null,
                 zoneCode,
+                zoneCodes,
                 uploadContext: uploadContext.length ? uploadContext : null,
             });
 
@@ -480,7 +654,7 @@ export default function ChatPanel({ parcelContext, onPlanComplete, onToggleExpan
         } finally {
             setIsTyping(false);
         }
-    }, [inputValue, latestAnalyzedUpload, modelParams, onModelUpdate, parcelContext, parcelContextStr, pollPlan]);
+    }, [inputValue, latestAnalyzedUpload, modelParams, onModelUpdate, parcelContext, parcelContextStr, pollPlan, handleGenerateReport, isComparisonMode, selectedParcels]);
 
     const pollUpload = useCallback(async (uploadId, filename) => {
         cancelUploadPoll();
@@ -625,10 +799,34 @@ export default function ChatPanel({ parcelContext, onPlanComplete, onToggleExpan
                     </svg>
                     <span>Ask the AI Agent</span>
                 </div>
+                {isExpanded && (
+                    <div className="chat-toolbar" onClick={(e) => e.stopPropagation()}>
+                        <button className="chat-toolbar-btn" title="New Chat" onClick={handleNewChat}>
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="15" height="15">
+                                <line x1="12" y1="5" x2="12" y2="19" />
+                                <line x1="5" y1="12" x2="19" y2="12" />
+                            </svg>
+                        </button>
+                        <button className="chat-toolbar-btn" title="Chat History" onClick={() => setShowHistory((v) => !v)}>
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="15" height="15">
+                                <circle cx="12" cy="12" r="10" />
+                                <polyline points="12 6 12 12 16 14" />
+                            </svg>
+                        </button>
+                    </div>
+                )}
                 <svg id="chat-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <polyline points="18 15 12 9 6 15" />
                 </svg>
             </div>
+            <ChatContextHeader
+                selectedParcels={selectedParcels}
+                primaryParcel={parcelContext}
+                analyzedUploads={analyzedUploads}
+                activePlanId={activePlanId}
+                isExpanded={isExpanded}
+                onGenerateReport={handleGenerateReport}
+            />
             <div id="chat-body" onDrop={handleDrop} onDragOver={handleDragOver} onDragLeave={handleDragLeave}>
                 {isDragOver && (
                     <div className="chat-drop-overlay">
@@ -642,12 +840,98 @@ export default function ChatPanel({ parcelContext, onPlanComplete, onToggleExpan
                         </div>
                     </div>
                 )}
+                {showHistory && (
+                    <div className="chat-history-panel">
+                        <div className="chat-history-header">
+                            <span>Chat History</span>
+                            <button className="chat-history-close" onClick={() => setShowHistory(false)}>
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="14" height="14">
+                                    <line x1="18" y1="6" x2="6" y2="18" />
+                                    <line x1="6" y1="6" x2="18" y2="18" />
+                                </svg>
+                            </button>
+                        </div>
+                        <div className="chat-history-list">
+                            {getConversations().length === 0 ? (
+                                <div className="chat-history-empty">No saved conversations yet</div>
+                            ) : (
+                                getConversations().map((conv) => (
+                                    <div
+                                        key={conv.id}
+                                        className={`chat-history-item ${conv.id === currentConversationId ? 'active' : ''}`}
+                                        onClick={() => handleLoadConversation(conv.id)}
+                                    >
+                                        <div className="chat-history-item-content">
+                                            <div className="chat-history-title">{conv.title}</div>
+                                            <div className="chat-history-date">
+                                                {new Date(conv.updatedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                                            </div>
+                                        </div>
+                                        <button
+                                            className="chat-history-delete"
+                                            title="Delete conversation"
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                handleDeleteConversation(conv.id);
+                                            }}
+                                        >
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="12" height="12">
+                                                <line x1="18" y1="6" x2="6" y2="18" />
+                                                <line x1="6" y1="6" x2="18" y2="18" />
+                                            </svg>
+                                        </button>
+                                    </div>
+                                ))
+                            )}
+                        </div>
+                    </div>
+                )}
                 <div id="chat-messages">
                     {messages.map((msg, idx) => (
                         <div key={idx} className={`chat-message ${msg.role}`}>
                             <div className="message-avatar">{msg.role === 'assistant' ? 'AI' : 'You'}</div>
                             <div className="message-content">
-                                <div className="extract-markdown" style={{ margin: 0 }} dangerouslySetInnerHTML={{ __html: msg.text }} />
+                                <div className="extract-markdown" style={{ margin: 0 }} dangerouslySetInnerHTML={{ __html: inlineMarkdown(msg.text) }} />
+                                {msg.documents?.length > 0 && (
+                                    <div className="chat-doc-list">
+                                        {msg.documents.map((doc) => (
+                                            <div key={doc.id} className="chat-doc-item">
+                                                <div className="chat-doc-icon">
+                                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" width="16" height="16">
+                                                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                                                        <polyline points="14 2 14 8 20 8" />
+                                                    </svg>
+                                                </div>
+                                                <span className="chat-doc-title">{doc.title || doc.doc_type}</span>
+                                                <button
+                                                    className="chat-doc-download"
+                                                    title="Download as Markdown"
+                                                    onClick={async () => {
+                                                        try {
+                                                            const res = await downloadPlanDocument(msg.planId, doc.id, 'markdown');
+                                                            const blob = await res.blob();
+                                                            const url = URL.createObjectURL(blob);
+                                                            const a = document.createElement('a');
+                                                            a.href = url;
+                                                            a.download = `${(doc.title || doc.doc_type).replace(/\s+/g, '_')}.md`;
+                                                            a.click();
+                                                            URL.revokeObjectURL(url);
+                                                        } catch (err) {
+                                                            console.error('Download failed:', err);
+                                                        }
+                                                    }}
+                                                >
+                                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="12" height="12">
+                                                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                                                        <polyline points="7 10 12 15 17 10" />
+                                                        <line x1="12" y1="15" x2="12" y2="3" />
+                                                    </svg>
+                                                    .md
+                                                </button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
                                 {msg.contractors?.length > 0 && (
                                     <ContractorCards contractors={msg.contractors} />
                                 )}

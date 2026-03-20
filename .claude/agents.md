@@ -33,7 +33,7 @@ Update `index.md` after:
 | New/changed frontend utility | `## Frontend — frontend-react/` → `### Utilities` |
 | New/changed config/infra file | `## Config & Infrastructure` |
 | New/changed test file | `## Tests` |
-| New/changed skill | `## .claude/ Skills Pipeline` |
+| New/changed knowledge file | `## Knowledge — knowledge/` |
 | New known issue discovered | `## Known Issues & Incomplete Features` |
 
 ### Example edit (adding a new route)

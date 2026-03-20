@@ -10,6 +10,7 @@ class PlanGenerateRequest(BaseModel):
     query: str = Field(min_length=10, description="Describe what you want to build and where")
     auto_run: bool = Field(default=True, description="Automatically run the full pipeline after parsing")
     generate_subset: list[str] | None = Field(default=None, description="Generate only these doc types (None = all)")
+    project_id: uuid.UUID | None = Field(default=None, description="Link plan to a project workspace")
 
 
 class PlanGenerateDocumentRequest(BaseModel):
@@ -118,6 +119,7 @@ class ContractorResult(BaseModel):
     website: str | None = None
     address: str | None = None
     trade: str | None = None
+    maps_url: str | None = None
 
 
 class ContractorRecommendationsResponse(BaseModel):

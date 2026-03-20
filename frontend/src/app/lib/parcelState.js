@@ -65,4 +65,62 @@ export function formatParcelContext(parcel) {
   return parts.join(', ');
 }
 
+// ─── Display helpers (DRY) ───
+
+export function getShortAddress(p) {
+  return (p?.address || '').split(',')[0] || 'Parcel';
+}
+
+export function getZoneLabel(p) {
+  return p?.zoning || p?.zoneCode || '—';
+}
+
+// ─── Multi-parcel context for AI chat ───
+
+export function formatMultiParcelContext(parcels, primaryId) {
+  if (!Array.isArray(parcels) || parcels.length === 0) return null;
+
+  const valid = parcels.filter(Boolean);
+  if (valid.length === 0) return null;
+
+  if (valid.length === 1) return formatParcelContext(valid[0]);
+
+  const lines = valid.map((p) => {
+    const tag = p.id === primaryId ? '(PRIMARY)' : '(comparison)';
+    if (!isResolvedParcel(p)) {
+      return `${tag} [${getShortAddress(p)}] — no parcel data available`;
+    }
+    const parts = [getShortAddress(p)];
+    if (p.zoneCode || p.zoning) parts.push(`Zoning: ${p.zoneCode || p.zoning}`);
+    if (Number.isFinite(p.lotArea)) parts.push(`Lot Area: ${p.lotArea}m²`);
+    return `${tag} ${parts.join(', ')}`;
+  });
+
+  lines.push('Compare and contrast these parcels.');
+  return lines.join('\n');
+}
+
+// ─── Multi-selection helpers ───
+
+export const MAX_SELECTED_PARCELS = 4;
+
+export function addParcelToSelection(selection, parcel) {
+  if (!parcel?.id) return selection;
+  if (selection.length >= MAX_SELECTED_PARCELS) return selection;
+  if (selection.some(p => p.id === parcel.id)) return selection;
+  return [...selection, parcel];
+}
+
+export function removeParcelFromSelection(selection, id) {
+  return selection.filter(p => p.id !== id);
+}
+
+export function toggleParcelInSelection(selection, parcel) {
+  if (!parcel?.id) return selection;
+  if (selection.some(p => p.id === parcel.id)) {
+    return removeParcelFromSelection(selection, parcel.id);
+  }
+  return addParcelToSelection(selection, parcel);
+}
+
 export { DEFAULT_UNRESOLVED_MESSAGE };

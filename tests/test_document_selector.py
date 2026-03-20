@@ -168,3 +168,81 @@ def test_no_compliance_result():
     # No variance docs since compliance is None
     assert "four_statutory_tests" not in docs
     assert "olt_appeal_brief" not in docs
+
+
+# --- Intent-based selection tests ---
+
+
+def test_requested_single_document():
+    """User asks for a single specific doc — only that doc is generated."""
+    docs, reasons = select_documents_for_project(
+        requested_documents=["financial_feasibility"],
+    )
+    assert docs == ["financial_feasibility"]
+    assert len(reasons) == 1
+    assert reasons[0].included is True
+
+
+def test_requested_multiple_documents():
+    """User asks for two specific docs — only those are generated."""
+    docs, reasons = select_documents_for_project(
+        requested_documents=["precedent_report", "compliance_matrix"],
+    )
+    assert docs == ["compliance_matrix", "precedent_report"]
+    assert all(r.included for r in reasons)
+
+
+def test_requested_full_package_falls_through():
+    """'full_package' in requested_documents triggers normal ALWAYS_GENERATE logic."""
+    compliance = ComplianceResult(
+        rules=[], overall_compliant=True, variances_needed=[], warnings=[]
+    )
+    docs, reasons = select_documents_for_project(
+        compliance_result=compliance,
+        massing={"height_m": 5, "storeys": 2},
+        requested_documents=["full_package"],
+    )
+    # Should contain all 14 core docs
+    for doc_type in ALWAYS_GENERATE:
+        assert doc_type in docs
+
+
+def test_requested_none_falls_through():
+    """None requested_documents triggers normal ALWAYS_GENERATE logic (backward compat)."""
+    compliance = ComplianceResult(
+        rules=[], overall_compliant=True, variances_needed=[], warnings=[]
+    )
+    docs, _ = select_documents_for_project(
+        compliance_result=compliance,
+        massing={"height_m": 5, "storeys": 2},
+        requested_documents=None,
+    )
+    for doc_type in ALWAYS_GENERATE:
+        assert doc_type in docs
+
+
+def test_requested_empty_list_falls_through():
+    """Empty requested_documents list triggers normal ALWAYS_GENERATE logic."""
+    compliance = ComplianceResult(
+        rules=[], overall_compliant=True, variances_needed=[], warnings=[]
+    )
+    docs, _ = select_documents_for_project(
+        compliance_result=compliance,
+        massing={"height_m": 5, "storeys": 2},
+        requested_documents=[],
+    )
+    for doc_type in ALWAYS_GENERATE:
+        assert doc_type in docs
+
+
+def test_requested_invalid_doc_type_filtered():
+    """Invalid doc types are excluded with a reason; valid ones still generated."""
+    docs, reasons = select_documents_for_project(
+        requested_documents=["financial_feasibility", "nonexistent_doc"],
+    )
+    assert docs == ["financial_feasibility"]
+    included = [r for r in reasons if r.included]
+    excluded = [r for r in reasons if not r.included]
+    assert len(included) == 1
+    assert len(excluded) == 1
+    assert "Unknown" in excluded[0].reason

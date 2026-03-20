@@ -194,7 +194,7 @@ def ingest_power_lines_osm(db: Session) -> dict:
                 asset = ElectricalAsset(
                     id=uuid.uuid4(),
                     asset_id=f"osm_{el_type}_{el['id']}",
-                    asset_type="substation",
+                    asset_type="electrical_substation",
                     voltage_kv=voltage_kv if voltage_kv else None,
                     voltage_tier=voltage_tier,
                     operator=operator,

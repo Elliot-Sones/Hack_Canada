@@ -260,13 +260,13 @@ class TokenLedger(UsersBase):
     Full audit trail of every token movement.
 
     txn_type values:
-        subscription_grant   — tokens granted at subscription start / renewal
-        subscription_expire  — tokens removed at renewal that exceeded rollover cap
-        purchase             — tokens bought via token package
-        auto_topup           — tokens bought via automatic top-up
-        consume_subscription — deducted from subscription_balance
-        consume_purchased    — deducted from purchased_balance
-        refund               — tokens returned (e.g. disputed charge)
+        subscription_grant   -- tokens granted at subscription start / renewal
+        subscription_expire  -- tokens removed at renewal that exceeded rollover cap
+        purchase             -- tokens bought via token package
+        auto_topup           -- tokens bought via automatic top-up
+        consume_subscription -- deducted from subscription_balance
+        consume_purchased    -- deducted from purchased_balance
+        refund               -- tokens returned (e.g. disputed charge)
         adjustment           — manual correction by support
 
     bucket values:
@@ -293,7 +293,7 @@ class TokenLedger(UsersBase):
     stripe_payment_intent_id = Column(Text)
     usage_event_id = Column(UUID(as_uuid=True), ForeignKey("usage_events.id"), nullable=True)
     description = Column(Text)
-    metadata = Column(JSONB, default=dict)
+    meta = Column("metadata", JSONB, default=dict)
     created_at = Column(DateTime(timezone=True), default=_now)
 
     account = relationship("TokenAccount", back_populates="ledger_entries")
@@ -336,7 +336,7 @@ class UsageEvent(UsersBase):
 
     request_id = Column(Text, unique=True)
     api_endpoint = Column(Text)
-    metadata = Column(JSONB, default=dict)
+    meta = Column("metadata", JSONB, default=dict)
     created_at = Column(DateTime(timezone=True), default=_now)
 
     user = relationship("User", back_populates="usage_events")
@@ -406,7 +406,7 @@ class InvoiceLineItem(UsersBase):
     unit_cost_cents = Column(BigInteger, nullable=False)
     total_cents = Column(BigInteger, nullable=False)
     usage_event_ids = Column(ARRAY(UUID(as_uuid=True)))
-    metadata = Column(JSONB, default=dict)
+    meta = Column("metadata", JSONB, default=dict)
     created_at = Column(DateTime(timezone=True), default=_now)
 
     invoice = relationship("Invoice", back_populates="line_items")

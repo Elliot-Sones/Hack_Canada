@@ -320,3 +320,843 @@
     text-align: center;
     color: var(--text-muted);
 }
+
+/* --- Comparison Grid --- */
+.comparison-grid {
+    display: grid;
+    grid-template-columns: 100px repeat(var(--compare-count, 2), minmax(90px, 1fr));
+    gap: 0;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    overflow-x: auto;
+    margin-top: var(--space-lg);
+}
+
+.comparison-label {
+    padding: 8px 10px;
+    font-size: var(--font-xs);
+    color: var(--text-muted);
+    background: rgba(255, 255, 255, 0.02);
+    border-bottom: 1px solid var(--border);
+    border-right: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+}
+
+.comparison-header-label {
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.comparison-cell {
+    padding: 8px 10px;
+    font-size: var(--font-xs);
+    color: var(--text-primary);
+    border-bottom: 1px solid var(--border);
+    border-right: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+}
+
+.comparison-cell:last-child {
+    border-right: none;
+}
+
+.comparison-header-cell {
+    background: rgba(255, 255, 255, 0.04);
+    flex-direction: column;
+    gap: 2px;
+    font-weight: 500;
+}
+
+/* Remove bottom border from last row — uses calc(count + 1) for label + columns */
+.comparison-grid > :nth-last-child(-n+5) {
+    border-bottom: none;
+}
+
+/* ========================================
+   PROJECTS PANEL
+   ======================================== */
+
+.projects-list,
+.project-create-form,
+.project-detail {
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    height: 100%;
+    overflow-y: auto;
+}
+
+.projects-list-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.projects-list-header h3 {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin: 0;
+}
+
+.projects-create-btn,
+.project-upload-btn,
+.project-add-parcel-btn {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 5px 10px;
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--accent);
+    background: rgba(var(--accent-rgb, 99, 102, 241), 0.1);
+    border: 1px solid rgba(var(--accent-rgb, 99, 102, 241), 0.2);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: all var(--transition);
+}
+
+.projects-create-btn:hover,
+.project-upload-btn:hover,
+.project-add-parcel-btn:hover {
+    background: rgba(var(--accent-rgb, 99, 102, 241), 0.18);
+}
+
+.projects-loading {
+    padding: 24px 0;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 12px;
+}
+
+.projects-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    padding: 32px 16px;
+    color: var(--text-muted);
+    text-align: center;
+}
+
+.projects-empty p {
+    font-size: 12px;
+    margin: 0;
+    max-width: 220px;
+}
+
+.projects-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+/* ─── Project Card ─── */
+
+.project-card {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 10px 12px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    text-align: left;
+    transition: all var(--transition);
+}
+
+.project-card:hover {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(255, 255, 255, 0.12);
+}
+
+.project-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.project-card-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.project-card-status {
+    font-size: 10px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.project-card-desc {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin: 0;
+    line-height: 1.4;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.project-card-counts {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.project-card-counts span {
+    font-size: 10px;
+    color: var(--text-secondary);
+    background: rgba(255, 255, 255, 0.04);
+    padding: 1px 6px;
+    border-radius: 4px;
+}
+
+.project-card-date {
+    font-size: 10px;
+    color: var(--text-muted);
+}
+
+/* ─── Create Form ─── */
+
+.project-create-form h3 {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin: 0;
+}
+
+.project-create-form label {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 11px;
+    color: var(--text-secondary);
+    font-weight: 500;
+}
+
+.project-create-form input,
+.project-create-form textarea,
+.project-edit-form input,
+.project-edit-form textarea {
+    padding: 7px 10px;
+    font-size: 12px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text-primary);
+    outline: none;
+    transition: border-color var(--transition);
+}
+
+.project-create-form input:focus,
+.project-create-form textarea:focus,
+.project-edit-form input:focus,
+.project-edit-form textarea:focus {
+    border-color: var(--accent);
+}
+
+.project-create-actions,
+.project-edit-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+}
+
+.project-cancel-btn {
+    padding: 6px 14px;
+    font-size: 11px;
+    color: var(--text-secondary);
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+}
+
+.project-save-btn {
+    padding: 6px 14px;
+    font-size: 11px;
+    font-weight: 500;
+    color: #fff;
+    background: var(--accent);
+    border: none;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: opacity var(--transition);
+}
+
+.project-save-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* ─── Detail View ─── */
+
+.project-detail-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.project-back-btn {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    padding: 4px 8px;
+    font-size: 11px;
+    color: var(--text-secondary);
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: all var(--transition);
+}
+
+.project-back-btn:hover {
+    color: var(--text-primary);
+    border-color: rgba(255, 255, 255, 0.15);
+}
+
+.project-detail-name {
+    flex: 1;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.project-delete-btn {
+    padding: 4px 6px;
+    color: var(--text-muted);
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: all var(--transition);
+}
+
+.project-delete-btn:hover {
+    color: #ef4444;
+    border-color: rgba(239, 68, 68, 0.3);
+    background: rgba(239, 68, 68, 0.08);
+}
+
+/* ─── Tabs ─── */
+
+.project-tabs {
+    display: flex;
+    gap: 2px;
+    border-bottom: 1px solid var(--border);
+    overflow-x: auto;
+    scrollbar-width: none;
+}
+
+.project-tabs::-webkit-scrollbar { display: none; }
+
+.project-tab {
+    flex-shrink: 0;
+    padding: 6px 10px;
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--text-muted);
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    cursor: pointer;
+    transition: all var(--transition);
+}
+
+.project-tab:hover {
+    color: var(--text-secondary);
+}
+
+.project-tab.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+}
+
+.project-tab-body {
+    flex: 1;
+    overflow-y: auto;
+    min-height: 0;
+}
+
+.project-tab-content {
+    padding: 12px 0;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.project-tab-empty {
+    padding: 24px 8px;
+    text-align: center;
+    font-size: 12px;
+    color: var(--text-muted);
+    line-height: 1.5;
+}
+
+/* ─── Overview Fields ─── */
+
+.project-overview-field {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.project-overview-field .field-label {
+    font-size: 10px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-muted);
+}
+
+.project-overview-field .field-value {
+    font-size: 12px;
+    color: var(--text-primary);
+}
+
+.project-edit-btn {
+    align-self: flex-start;
+    padding: 5px 12px;
+    font-size: 11px;
+    color: var(--text-secondary);
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: all var(--transition);
+}
+
+.project-edit-btn:hover {
+    background: rgba(255, 255, 255, 0.07);
+}
+
+.project-edit-form {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.project-edit-form label {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 11px;
+    color: var(--text-secondary);
+    font-weight: 500;
+}
+
+/* ─── Parcel List ─── */
+
+.project-parcel-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.project-parcel-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 8px;
+    font-size: 12px;
+    color: var(--text-primary);
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+}
+
+.project-remove-btn {
+    padding: 2px;
+    color: var(--text-muted);
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    opacity: 0.5;
+    transition: opacity var(--transition);
+}
+
+.project-remove-btn:hover {
+    opacity: 1;
+    color: #ef4444;
+}
+
+/* ─── Plan List ─── */
+
+.project-plan-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.project-plan-item {
+    padding: 8px 10px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+}
+
+.plan-item-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+}
+
+.plan-item-query {
+    font-size: 12px;
+    color: var(--text-primary);
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.plan-item-status {
+    font-size: 10px;
+    font-weight: 500;
+    padding: 1px 6px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.plan-item-status.status-completed { color: #4ade80; }
+.plan-item-status.status-running_pipeline,
+.plan-item-status.status-generating_documents { color: #fbbf24; }
+.plan-item-status.status-failed { color: #ef4444; }
+
+.plan-item-date {
+    font-size: 10px;
+    color: var(--text-muted);
+    margin-top: 2px;
+}
+
+/* ─── File List ─── */
+
+.project-file-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.project-file-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+}
+
+.file-icon {
+    flex-shrink: 0;
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 9px;
+    font-weight: 700;
+    color: var(--accent);
+    background: rgba(var(--accent-rgb, 99, 102, 241), 0.1);
+    border-radius: 4px;
+}
+
+.file-info {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
+
+.file-name {
+    font-size: 12px;
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.file-meta {
+    font-size: 10px;
+    color: var(--text-muted);
+}
+
+/* ─── Notes ─── */
+
+.project-note-input {
+    display: flex;
+    gap: 6px;
+    align-items: flex-end;
+}
+
+.project-note-input textarea {
+    flex: 1;
+    padding: 7px 10px;
+    font-size: 12px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text-primary);
+    outline: none;
+    resize: none;
+    transition: border-color var(--transition);
+}
+
+.project-note-input textarea:focus {
+    border-color: var(--accent);
+}
+
+.project-note-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.project-note-card {
+    padding: 8px 10px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+}
+
+.project-note-card.pinned {
+    border-color: rgba(var(--accent-rgb, 99, 102, 241), 0.3);
+    background: rgba(var(--accent-rgb, 99, 102, 241), 0.04);
+}
+
+.note-card-content {
+    font-size: 12px;
+    color: var(--text-primary);
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.note-card-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 6px;
+}
+
+.note-card-date {
+    font-size: 10px;
+    color: var(--text-muted);
+}
+
+.note-card-actions {
+    display: flex;
+    gap: 4px;
+}
+
+.note-card-actions button {
+    padding: 2px 4px;
+    color: var(--text-muted);
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    opacity: 0.6;
+    transition: opacity var(--transition);
+}
+
+.note-card-actions button:hover {
+    opacity: 1;
+}
+
+/* ─── Conversations ─── */
+
+.project-conv-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.project-conv-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+}
+
+.conv-item-main {
+    flex: 1;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 10px;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    text-align: left;
+    min-width: 0;
+}
+
+.conv-item-main:hover {
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.conv-item-title {
+    font-size: 12px;
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+}
+
+.conv-item-date {
+    font-size: 10px;
+    color: var(--text-muted);
+    flex-shrink: 0;
+    margin-left: 8px;
+}
+
+.conv-detail-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin: 0;
+}
+
+.conv-messages {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.conv-message {
+    padding: 8px 10px;
+    border-radius: var(--radius-sm);
+}
+
+.conv-message-user {
+    background: rgba(var(--accent-rgb, 99, 102, 241), 0.08);
+    border: 1px solid rgba(var(--accent-rgb, 99, 102, 241), 0.15);
+}
+
+.conv-message-assistant {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--border);
+}
+
+.conv-role {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-muted);
+    display: block;
+    margin-bottom: 3px;
+}
+
+.conv-message p {
+    font-size: 12px;
+    color: var(--text-primary);
+    margin: 0;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+/* ─── Project Save Indicator ─── */
+
+.project-save-indicator {
+    position: fixed;
+    top: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(20, 24, 32, 0.92);
+    border: 1px solid rgba(74, 222, 128, 0.3);
+    border-radius: 8px;
+    padding: 6px 10px 6px 12px;
+    backdrop-filter: blur(12px);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+    font-family: 'Inter', sans-serif;
+    animation: save-indicator-in 0.3s ease-out;
+}
+
+@keyframes save-indicator-in {
+    from { opacity: 0; transform: translateX(-50%) translateY(-8px); }
+    to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+.project-save-indicator > svg {
+    color: #4ade80;
+    flex-shrink: 0;
+}
+
+.project-save-name {
+    font-size: 12px;
+    font-weight: 600;
+    color: #e2e8f0;
+    white-space: nowrap;
+    max-width: 140px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.project-save-items {
+    display: flex;
+    gap: 6px;
+    margin-left: 4px;
+    padding-left: 8px;
+    border-left: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.project-save-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    font-size: 10px;
+    color: #94a3b8;
+    background: rgba(148, 163, 184, 0.08);
+    padding: 2px 6px;
+    border-radius: 4px;
+    white-space: nowrap;
+}
+
+.project-save-item svg {
+    color: #4ade80;
+    opacity: 0.7;
+}
+
+.project-save-close {
+    background: none;
+    border: none;
+    color: #64748b;
+    cursor: pointer;
+    padding: 2px;
+    border-radius: 3px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-left: 2px;
+    transition: color 0.15s, background 0.15s;
+}
+
+.project-save-close:hover {
+    color: #ef4444;
+    background: rgba(239, 68, 68, 0.1);
+}

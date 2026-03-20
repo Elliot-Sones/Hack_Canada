@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import uuid
 
+import asyncio
 import structlog
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,6 +20,39 @@ router = APIRouter()
 logger = structlog.get_logger()
 
 TORONTO_JURISDICTION = {"name": "Toronto", "province": "Ontario", "country": "CA"}
+
+
+async def _run_infra_ingestion_sync(infra_type: str) -> dict:
+    """Run infrastructure ingestion synchronously in a thread (no Celery needed)."""
+    from app.database import get_sync_db
+    from app.services.geospatial_ingestion import get_or_create_jurisdiction
+    from app.services.infrastructure_ingestion import (
+        ingest_water_mains,
+        ingest_sanitary_sewers,
+        ingest_storm_sewers,
+    )
+
+    fn_map = {
+        "water_mains": ingest_water_mains,
+        "sanitary_sewers": ingest_sanitary_sewers,
+        "storm_sewers": ingest_storm_sewers,
+    }
+    fn = fn_map[infra_type]
+
+    def _do():
+        db = get_sync_db()
+        try:
+            jurisdiction = get_or_create_jurisdiction(db, name="Toronto")
+            db.commit()
+            summary = fn(db, jurisdiction.id)
+            return {"status": "completed", "processed": summary.processed, "failed": summary.failed}
+        except Exception as e:
+            logger.error(f"ingestion.{infra_type}.sync_failed", error=str(e))
+            raise
+        finally:
+            db.close()
+
+    return await asyncio.to_thread(_do)
 
 
 @router.post("/admin/ingest/building-permits")
@@ -51,44 +85,41 @@ async def ingest_coa_applications(
 
 @router.post("/admin/ingest/water-mains")
 async def ingest_water_mains(
+    sync: bool = Query(default=False, description="Run synchronously instead of via Celery"),
     user: dict = Depends(get_current_user),
 ):
     """Trigger water main ingestion from Toronto CKAN Open Data."""
+    if sync:
+        return await _run_infra_ingestion_sync("water_mains")
     from app.tasks.infrastructure_ingestion import ingest_water_mains_task
-
     ingest_water_mains_task.delay()
-    return {
-        "status": "accepted",
-        "message": "Water main ingestion started",
-    }
+    return {"status": "accepted", "message": "Water main ingestion started"}
 
 
 @router.post("/admin/ingest/sanitary-sewers")
 async def ingest_sanitary_sewers(
+    sync: bool = Query(default=False, description="Run synchronously instead of via Celery"),
     user: dict = Depends(get_current_user),
 ):
     """Trigger sanitary sewer ingestion from Toronto CKAN Open Data."""
+    if sync:
+        return await _run_infra_ingestion_sync("sanitary_sewers")
     from app.tasks.infrastructure_ingestion import ingest_sanitary_sewers_task
-
     ingest_sanitary_sewers_task.delay()
-    return {
-        "status": "accepted",
-        "message": "Sanitary sewer ingestion started",
-    }
+    return {"status": "accepted", "message": "Sanitary sewer ingestion started"}
 
 
 @router.post("/admin/ingest/storm-sewers")
 async def ingest_storm_sewers(
+    sync: bool = Query(default=False, description="Run synchronously instead of via Celery"),
     user: dict = Depends(get_current_user),
 ):
     """Trigger storm sewer ingestion from Toronto CKAN Open Data."""
+    if sync:
+        return await _run_infra_ingestion_sync("storm_sewers")
     from app.tasks.infrastructure_ingestion import ingest_storm_sewers_task
-
     ingest_storm_sewers_task.delay()
-    return {
-        "status": "accepted",
-        "message": "Storm sewer ingestion started",
-    }
+    return {"status": "accepted", "message": "Storm sewer ingestion started"}
 
 
 @router.post("/admin/ingest/bridges")

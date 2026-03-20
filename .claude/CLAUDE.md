@@ -20,104 +20,37 @@ Generates planning submission packages (planning rationale, compliance matrix, p
 
 ```
 app/
-  data/           toronto_zoning.py (hardcoded By-law 569-2013 standards)
-                  ontario_policy.py (policy hierarchy, OP designations, OBC, four tests, legislation)
-  models/         entitlement.py, geospatial.py, plan.py, ingestion.py
-  routers/        plans, entitlement, ingestion, auth, assistant, uploads
-  services/       geospatial_ingestion.py, ckan_ingestion.py, compliance_engine.py,
-                  thin_slice_runtime.py, zoning_service.py
-                  submission/ (templates.py, context_builder.py, review.py)
-  tasks/          plan.py (main pipeline), ingestion.py (CKAN tasks)
-frontend-react/   React frontend (Vite)
+  clients/        ArcGIS REST client
+  data/           toronto_zoning.py, ontario_policy.py (runtime policy data)
+  middleware/     request_id.py, idempotency.py
+  models/         SQLAlchemy models (34 tables, PostGIS geometry)
+  routers/        FastAPI route handlers (21 routers)
+  schemas/        Pydantic request/response schemas
+  services/       Business logic + submission/ document generation
+  tasks/          Background task runners (plan pipeline, ingestion)
+frontend/         Next.js 16 App Router + Better Auth
+knowledge/        Domain knowledge for the app's AI (not coding docs)
+                  research-pipeline/  — Ontario site-feasibility skills
+                  document-templates/ — 29 planning document generators
+                  water-policy/       — Ontario water/sewer policy docs
+                  research/           — Data plans, implementation specs
+fine-tuned-RAG/   ChromaDB ingestion pipeline (reads from knowledge/)
 ```
 
 ## Tech Stack
 
-- **Backend**: FastAPI + SQLAlchemy (async) + PostgreSQL + PostGIS
-- **Background Tasks**: threading (in-process)
-- **Frontend**: React + Vite
-- **AI**: Claude (primary) or OpenAI (configurable via AI_PROVIDER)
+- **Backend**: FastAPI + SQLAlchemy 2.0 (async) + PostgreSQL + PostGIS
+- **Frontend**: Next.js 16, App Router, Better Auth, MapLibre GL, Three.js, Konva.js
+- **AI**: Claude (primary) or OpenAI (configurable via AI_PROVIDER), ChromaDB RAG
 - **Spatial**: GeoAlchemy2, PostGIS, pyproj
+- **Deploy**: Docker, Railway, AWS S3
+
+## Coding Conventions
+
+- **Async everywhere**: All DB access uses `async_session`. Services are async. Use `await` not `run_sync`.
+- **Pydantic 2**: Schemas use `model_config = ConfigDict(...)`, not `class Config`.
+- **Test naming**: `test_<module>_<behavior>.py`. Fixtures in `conftest.py`. Use `httpx.AsyncClient` via `ASGITransport`.
+- **Imports**: Group as stdlib → third-party → local. Use absolute imports (`app.services.foo`).
+- **Models**: Inherit from `Base`. Use `Mapped[T]` type annotations. GeoAlchemy2 for geometry columns.
 
 ---
-
-## Skills System
-
-The `.claude/skills/` directory contains a structured pipeline for Ontario site-feasibility research. Each skill is a self-contained agent instruction with defined inputs, outputs, and reference files.
-
-### When to Use Skills
-
-Use skills when you need to **research a real parcel** beyond what's in the database — fetching live data from official sources, interpreting policy, or classifying an approval pathway.
-
-Skills are invoked by loading the relevant `SKILL.md` as context and following its workflow. Each skill produces a JSON artifact consumed by the next.
-
-### Pipeline Order
-
-```
-Address / Parcel Input
-        │
-        ▼
-  source-discovery          → source_bundle.json
-  (finds official URLs)
-        │
-        ▼
-  parcel-zoning-research    → normalized_data.json
-  (extracts zone, OP, overlays)
-        │
-        ├─────────────────────────────┐
-        ▼                             ▼
-  buildability-analysis     precedent-research    → precedent_packet.json
-  (feasibility verdict)     (AIC, OLT, CanLII)
-        │                             │
-        ▼                             ▼
-  constraints-red-flags     approval-pathway      → approval_pathway.json
-  (OBC, risk flags)         (route + timeline)
-        │                             │
-        └──────────────┬──────────────┘
-                       ▼
-               report-generator      → final_report.md
-```
-
-### Skill Reference
-
-| Skill | When to Use | Key Output |
-|-------|------------|------------|
-| `source-discovery` | New project, need official source URLs | `source_bundle.json` |
-| `parcel-zoning-research` | Extract zone code, OP designation, overlays | `normalized_data.json` |
-| `buildability-analysis` | Feasibility verdict + compliance gaps | `analysis_packet.json` |
-| `precedent-research` | Find comparable CoA/ZBA decisions nearby | `precedent_packet.json` |
-| `constraints-red-flags` | OBC hard constraints, risk flags | `constraints_packet.json` |
-| `approval-pathway` | Classify route (as-of-right / CoA / ZBA / OPA) | `approval_pathway.json` |
-| `report-generator` | Assemble final client-facing report | `final_report.md` |
-
-### How to Invoke a Skill
-
-Read the relevant `SKILL.md` from `.claude/skills/<name>/SKILL.md`, follow its workflow, and load only the reference files it specifies in its Reference Router table. Do not load all reference files — load only what the current task requires.
-
-**Example**: To research 100 King St W:
-1. Run `source-discovery` → get URLs for parcel data, zoning, OP, AIC
-2. Run `parcel-zoning-research` with those URLs → get zone code, OP designation, overlays
-3. Run `buildability-analysis` → get feasibility verdict and compliance gaps
-4. Run `approval-pathway` → classify the entitlement route and estimate timeline
-
-### Reference Files
-
-Each skill has a `references/` subdirectory with policy and data documents:
-
-| File | What It Contains |
-|------|-----------------|
-| `parcel-zoning-research/references/ontario-policy-framework.md` | Full Ontario policy hierarchy, PPS 2024, OP designations, O.Reg 462/24, Bills 23/185/60 |
-| `parcel-zoning-research/references/toronto-zoning-guide.md` | By-law 569-2013 standards by zone type, Chapter 900, hatched areas, CR mid-rise formula |
-| `constraints-red-flags/references/obc-hard-constraints.md` | OBC requirements CoA cannot vary: fire access, limiting distances, Part 9/3 thresholds |
-| `constraints-red-flags/references/construction-risk-red-flags.md` | Subcontractor default signals, DSC risk, scope creep, stop-work triggers |
-| `approval-pathway/references/planning-approvals-process.md` | Full approval decision tree, four statutory tests, timelines, Bill 60 (2025) |
-| `approval-pathway/references/building-permit-process.md` | Building permit process detail |
-| `approval-pathway/references/external-approvals.md` | TRCA, heritage, conservation authority processes |
-| `precedent-research/references/toronto-planning-sources.md` | AIC, OLT, CanLII, TLAB — how to find and read decisions |
-| `precedent-research/references/project-history-risk-patterns.md` | Risk signals from permit history |
-| `source-discovery/references/toronto-open-data.md` | Toronto CKAN API endpoints, package IDs, geocoding |
-| `source-discovery/references/ontario-data-portals.md` | Ontario portal patterns, LIO, MPAC, TRCA, OnLand |
-| `buildability-analysis/references/analysis-framework.md` | Dimensional compliance checklist, confidence scoring |
-
----
-

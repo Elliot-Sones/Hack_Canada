@@ -388,6 +388,7 @@ def _build_context_and_generate_docs(
     policy_stack=None,
     overlays=None,
     generate_subset=None,
+    infrastructure=None,
 ) -> list[SubmissionDocument]:
     """Build document context and generate all submission documents."""
     from app.ai.factory import get_ai_provider
@@ -422,6 +423,7 @@ def _build_context_and_generate_docs(
         project_name=parsed.get("project_name", ""),
         organization_name="",
         parsed_parameters=parsed,
+        infrastructure=infrastructure,
     )
 
     # Determine which docs to generate
@@ -440,6 +442,7 @@ def _build_context_and_generate_docs(
             precedents=precedents,
             parsed=parsed,
             financial_output=financial_output,
+            requested_documents=parsed.get("requested_documents"),
         )
         docs_to_generate = [d for d in SUBMISSION_DOCUMENTS if d["doc_type"] in selected_types]
 
@@ -627,6 +630,74 @@ def _build_grounded_content(doc_spec: dict, context: dict, preamble: str) -> str
         sections.append(f"*Content generation pending for {doc_type}.*\n")
 
     return "".join(sections)
+
+
+def _fetch_nearby_infrastructure(db, parcel) -> dict | None:
+    """Fetch nearby infrastructure for all four systems using the same PostGIS queries the router uses."""
+    from sqlalchemy import text
+
+    # Get parcel centroid via PostGIS
+    try:
+        row = db.execute(
+            text("SELECT ST_Y(ST_Centroid(geom::geometry)) AS lat, ST_X(ST_Centroid(geom::geometry)) AS lng FROM parcels WHERE id = :pid"),
+            {"pid": parcel.id},
+        ).fetchone()
+        if not row:
+            return None
+        lat, lng = row.lat, row.lng
+    except Exception:
+        return None
+    radius = 500
+    result = {}
+
+    for system_key, pipe_type in [("water", "water_main"), ("sanitary", "sanitary_sewer"), ("storm", "storm_sewer")]:
+        try:
+            rows = db.execute(
+                text("""
+                    SELECT asset_id, pipe_type, material, diameter_mm, install_year, depth_m, length_m, location,
+                           ST_Distance(geom::geography, ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)::geography) AS distance_m
+                    FROM water_pipes
+                    WHERE pipe_type = :pipe_type
+                      AND ST_DWithin(geom::geography, ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)::geography, :radius)
+                    ORDER BY distance_m
+                    LIMIT 20
+                """),
+                {"lat": lat, "lng": lng, "radius": radius, "pipe_type": pipe_type},
+            ).fetchall()
+            result[system_key] = {
+                "type": "FeatureCollection",
+                "features": [
+                    {"type": "Feature", "properties": dict(row._mapping), "geometry": None}
+                    for row in rows
+                ],
+            }
+        except Exception:
+            result[system_key] = {"type": "FeatureCollection", "features": []}
+
+    # Electrical
+    try:
+        rows = db.execute(
+            text("""
+                SELECT asset_id, asset_type, voltage_kv, operator, name,
+                       ST_Distance(geom::geography, ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)::geography) AS distance_m
+                FROM electrical_assets
+                WHERE ST_DWithin(geom::geography, ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)::geography, :radius)
+                ORDER BY distance_m
+                LIMIT 20
+            """),
+            {"lat": lat, "lng": lng, "radius": radius},
+        ).fetchall()
+        result["electrical"] = {
+            "type": "FeatureCollection",
+            "features": [
+                {"type": "Feature", "properties": dict(row._mapping), "geometry": None}
+                for row in rows
+            ],
+        }
+    except Exception:
+        result["electrical"] = {"type": "FeatureCollection", "features": []}
+
+    return result if any(fc["features"] for fc in result.values()) else None
 
 
 @celery.task(bind=True, max_retries=2, soft_time_limit=300, time_limit=600)
@@ -839,6 +910,17 @@ def run_plan_generation(self, plan_id: str, query: str, auto_run: bool = True, g
         _update_plan_status(db, plan, "running_pipeline", step="document_generation",
                            progress_update={"precedent_search": "completed", "document_generation": "running"})
 
+        # --- Infrastructure fetch for servicing context ---
+        infrastructure = None
+        if parcel and parcel.geom:
+            try:
+                infrastructure = _fetch_nearby_infrastructure(db, parcel)
+                logger.info("plan.infrastructure.completed", plan_id=plan_id,
+                           systems=list(infrastructure.keys()) if infrastructure else [])
+            except Exception as e:
+                logger.warning("plan.infrastructure.failed", plan_id=plan_id, error=str(e))
+                # Non-fatal — infrastructure is supplementary
+
         # --- Step 9: Generate Submission Documents ---
         generated_documents = _build_context_and_generate_docs(
             db, plan, parcel, zoning,
@@ -847,6 +929,7 @@ def run_plan_generation(self, plan_id: str, query: str, auto_run: bool = True, g
             policy_stack=policy_stack,
             overlays=overlays,
             generate_subset=generate_subset,
+            infrastructure=infrastructure,
         )
 
         # Store summary results
@@ -867,6 +950,7 @@ def run_plan_generation(self, plan_id: str, query: str, auto_run: bool = True, g
                 "minor_variance_applicable": compliance_result.minor_variance_applicable if compliance_result else None,
             } if compliance_result else None,
             "precedents_found": len(precedents),
+            "infrastructure_checked": infrastructure is not None,
         }
         plan.summary["submission_readiness"] = evaluate_submission_readiness(plan, generated_documents)
         _update_plan_status(db, plan, "completed")

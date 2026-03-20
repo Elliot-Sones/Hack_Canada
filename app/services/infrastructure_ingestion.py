@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json as _json
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -86,11 +87,18 @@ def _content_hash(records: list[dict]) -> str:
 def _parse_geometry_linestring(rec: dict) -> WKTElement | None:
     """Parse geometry from CKAN record as LineString."""
     geom = rec.get("geometry") or rec.get("GEOMETRY")
-    if geom and isinstance(geom, dict):
-        coords = geom.get("coordinates", [])
-        if coords and geom.get("type") == "LineString":
-            coord_str = ", ".join(f"{c[0]} {c[1]}" for c in coords)
-            return WKTElement(f"LINESTRING ({coord_str})", srid=4326)
+    if geom:
+        # CKAN returns geometry as a JSON-encoded string — decode it first
+        if isinstance(geom, str):
+            try:
+                geom = _json.loads(geom)
+            except (ValueError, TypeError):
+                geom = None
+        if isinstance(geom, dict):
+            coords = geom.get("coordinates", [])
+            if coords and geom.get("type") == "LineString":
+                coord_str = ", ".join(f"{c[0]} {c[1]}" for c in coords)
+                return WKTElement(f"LINESTRING ({coord_str})", srid=4326)
 
     # Fallback: try X/Y fields as UTM for start/end point as line
     x1 = _coerce_float(rec.get("X") or rec.get("X_START"))
@@ -155,8 +163,18 @@ def ingest_water_mains(
     summary = IngestionSummary(issues=[])
     seen: set[str] = set()
 
+    # Field names from Toronto CKAN watermains dataset
+    F_ASSET = "Watermain Asset Identification"
+    F_MATERIAL = "Watermain Material"
+    F_DIAMETER = "Watermain Diameter"
+    F_YEAR = "Watermain Construction Year"
+    F_LENGTH = "Watermain Measured Length"
+    F_LOCATION = "Watermain Location Description"
+    MAPPED_KEYS = {F_ASSET, F_MATERIAL, F_DIAMETER, F_YEAR, F_LENGTH, F_LOCATION,
+                   "_id", "geometry", "Watermain Type", "Watermain Install Date"}
+
     for idx, rec in enumerate(records):
-        asset_id = str(rec.get("_id") or rec.get("OBJECTID") or idx)
+        asset_id = str(rec.get(F_ASSET) or rec.get("_id") or idx)
         if asset_id in seen:
             continue
         seen.add(asset_id)
@@ -172,28 +190,31 @@ def ingest_water_mains(
             summary.processed += 1
             continue
 
+        geom = _parse_geometry_linestring(rec)
+        if not geom:
+            summary.failed += 1
+            continue
+
         asset = PipelineAsset(
             jurisdiction_id=jurisdiction_id,
             source_snapshot_id=snapshot.id,
             asset_id=asset_id,
             pipe_type="water_main",
-            material=rec.get("MATERIAL") or rec.get("PIPE_MATERIAL"),
-            diameter_mm=_coerce_float(rec.get("DIAMETER") or rec.get("DIAMETER_MM")),
-            install_year=int(rec["INSTALL_YEAR"]) if rec.get("INSTALL_YEAR") else None,
-            depth_m=_coerce_float(rec.get("DEPTH") or rec.get("DEPTH_M")),
-            slope_pct=_coerce_float(rec.get("SLOPE") or rec.get("SLOPE_PCT")),
-            geom=_parse_geometry_linestring(rec),
-            attributes_json={
-                k: v for k, v in rec.items()
-                if k not in {"_id", "OBJECTID", "MATERIAL", "PIPE_MATERIAL",
-                             "DIAMETER", "DIAMETER_MM", "INSTALL_YEAR",
-                             "DEPTH", "DEPTH_M", "SLOPE", "SLOPE_PCT",
-                             "geometry", "GEOMETRY", "X", "Y",
-                             "X_START", "Y_START", "X_END", "Y_END"}
-            },
+            material=rec.get(F_MATERIAL),
+            diameter_mm=_coerce_float(rec.get(F_DIAMETER)),
+            install_year=int(rec[F_YEAR]) if rec.get(F_YEAR) else None,
+            length_m=_coerce_float(rec.get(F_LENGTH)),
+            location_desc=rec.get(F_LOCATION),
+            geom=geom,
+            attributes_json={k: v for k, v in rec.items() if k not in MAPPED_KEYS},
         )
         db.add(asset)
         summary.processed += 1
+
+        # Flush in batches to avoid memory buildup
+        if summary.processed % 500 == 0:
+            db.flush()
+            logger.info("ckan.water_mains.progress", processed=summary.processed)
 
     publish_snapshot(db, snapshot, validation_summary=summary.as_json())
     _finalize_job(job, summary)
@@ -232,11 +253,26 @@ def ingest_sanitary_sewers(
         job_type="sanitary_sewers_ckan",
     )
 
+    # Field names from Toronto CKAN sewer-gravity-mains dataset
+    F_ASSET = "Sewer Gravity Asset Identification"
+    F_MATERIAL = "Sewer Gravity Material"
+    F_DIAMETER = "Sewer Gravity Diameter"
+    F_DATE = "Sewer Gravity Install Date"
+    F_LENGTH = "Sewer Gravity Measured Length"
+    F_LOCATION = "Sewer Gravity Location Description"
+    F_FLOW = "Sewer Gravity Flow Type"
+    MAPPED_KEYS = {F_ASSET, F_MATERIAL, F_DIAMETER, F_DATE, F_LENGTH, F_LOCATION, F_FLOW,
+                   "_id", "geometry", "Sewer Gravity Twin Number", "Sewer Gravity Structure Type",
+                   "Sewer Gravity Owned By", "Sewer Gravity Managed By", "Sewer Gravity Main Shape",
+                   "Sewer Gravity Upstream Maintenance Hole", "Sewer Gravity Downstream Maintenance Hole",
+                   "Upstream Elevation", "Downstream Elevation",
+                   "Sewer Gravity Trunk Sewer", "Sewer Gravity Trunk Name"}
+
     summary = IngestionSummary(issues=[])
     seen: set[str] = set()
 
     for idx, rec in enumerate(records):
-        asset_id = str(rec.get("_id") or rec.get("OBJECTID") or idx)
+        asset_id = str(rec.get(F_ASSET) or rec.get("_id") or idx)
         if asset_id in seen:
             continue
         seen.add(asset_id)
@@ -252,28 +288,39 @@ def ingest_sanitary_sewers(
             summary.processed += 1
             continue
 
+        geom = _parse_geometry_linestring(rec)
+        if not geom:
+            summary.failed += 1
+            continue
+
+        # Parse year from install date like "1968-01-01T00:00:00"
+        install_year = None
+        date_str = rec.get(F_DATE)
+        if date_str and str(date_str) not in ("None", ""):
+            try:
+                install_year = int(str(date_str)[:4])
+            except (ValueError, TypeError):
+                pass
+
         asset = PipelineAsset(
             jurisdiction_id=jurisdiction_id,
             source_snapshot_id=snapshot.id,
             asset_id=asset_id,
             pipe_type="sanitary_sewer",
-            material=rec.get("MATERIAL") or rec.get("PIPE_MATERIAL"),
-            diameter_mm=_coerce_float(rec.get("DIAMETER") or rec.get("DIAMETER_MM")),
-            install_year=int(rec["INSTALL_YEAR"]) if rec.get("INSTALL_YEAR") else None,
-            depth_m=_coerce_float(rec.get("DEPTH") or rec.get("DEPTH_M")),
-            slope_pct=_coerce_float(rec.get("SLOPE") or rec.get("SLOPE_PCT")),
-            geom=_parse_geometry_linestring(rec),
-            attributes_json={
-                k: v for k, v in rec.items()
-                if k not in {"_id", "OBJECTID", "MATERIAL", "PIPE_MATERIAL",
-                             "DIAMETER", "DIAMETER_MM", "INSTALL_YEAR",
-                             "DEPTH", "DEPTH_M", "SLOPE", "SLOPE_PCT",
-                             "geometry", "GEOMETRY", "X", "Y",
-                             "X_START", "Y_START", "X_END", "Y_END"}
-            },
+            material=rec.get(F_MATERIAL),
+            diameter_mm=_coerce_float(rec.get(F_DIAMETER)),
+            install_year=install_year,
+            length_m=_coerce_float(rec.get(F_LENGTH)),
+            location_desc=rec.get(F_LOCATION),
+            geom=geom,
+            attributes_json={k: v for k, v in rec.items() if k not in MAPPED_KEYS},
         )
         db.add(asset)
         summary.processed += 1
+
+        if summary.processed % 500 == 0:
+            db.flush()
+            logger.info("ckan.sanitary_sewers.progress", processed=summary.processed)
 
     publish_snapshot(db, snapshot, validation_summary=summary.as_json())
     _finalize_job(job, summary)
@@ -312,11 +359,25 @@ def ingest_storm_sewers(
         job_type="storm_sewers_ckan",
     )
 
+    # Field names from Toronto CKAN sewer-pressurized-mains dataset
+    F_ASSET = "Sewer Pressurized Asset Identification"
+    F_MATERIAL = "Sewer Pressurized Material"
+    F_DIAMETER = "Sewer Pressurized Diameter"
+    F_DATE = "Sewer Pressurized Install Date"
+    F_LENGTH = "Sewer Pressurized Measured Length"
+    F_LOCATION = "Sewer Pressurized Location Description"
+    F_FLOW = "Sewer Pressurized Flow Type"
+    MAPPED_KEYS = {F_ASSET, F_MATERIAL, F_DIAMETER, F_DATE, F_LENGTH, F_LOCATION, F_FLOW,
+                   "_id", "geometry", "Sewer Pressurized Twin Number", "Sewer Pressurized Structure Type",
+                   "Sewer Pressurized Owned By", "Sewer Pressurized Managed By", "Sewer Pressurized Main Shape",
+                   "Sewer Pressurized Upstream Maintenance Hole", "Sewer Pressurized Downstream Maintenance Hole",
+                   "Sewer Pressurized Trunk Sewer", "Sewer Pressurized Trunk Name"}
+
     summary = IngestionSummary(issues=[])
     seen: set[str] = set()
 
     for idx, rec in enumerate(records):
-        asset_id = str(rec.get("_id") or rec.get("OBJECTID") or idx)
+        asset_id = str(rec.get(F_ASSET) or rec.get("_id") or idx)
         if asset_id in seen:
             continue
         seen.add(asset_id)
@@ -332,28 +393,38 @@ def ingest_storm_sewers(
             summary.processed += 1
             continue
 
+        geom = _parse_geometry_linestring(rec)
+        if not geom:
+            summary.failed += 1
+            continue
+
+        install_year = None
+        date_str = rec.get(F_DATE)
+        if date_str and str(date_str) not in ("None", ""):
+            try:
+                install_year = int(str(date_str)[:4])
+            except (ValueError, TypeError):
+                pass
+
         asset = PipelineAsset(
             jurisdiction_id=jurisdiction_id,
             source_snapshot_id=snapshot.id,
             asset_id=asset_id,
             pipe_type="storm_sewer",
-            material=rec.get("MATERIAL") or rec.get("PIPE_MATERIAL"),
-            diameter_mm=_coerce_float(rec.get("DIAMETER") or rec.get("DIAMETER_MM")),
-            install_year=int(rec["INSTALL_YEAR"]) if rec.get("INSTALL_YEAR") else None,
-            depth_m=_coerce_float(rec.get("DEPTH") or rec.get("DEPTH_M")),
-            slope_pct=_coerce_float(rec.get("SLOPE") or rec.get("SLOPE_PCT")),
-            geom=_parse_geometry_linestring(rec),
-            attributes_json={
-                k: v for k, v in rec.items()
-                if k not in {"_id", "OBJECTID", "MATERIAL", "PIPE_MATERIAL",
-                             "DIAMETER", "DIAMETER_MM", "INSTALL_YEAR",
-                             "DEPTH", "DEPTH_M", "SLOPE", "SLOPE_PCT",
-                             "geometry", "GEOMETRY", "X", "Y",
-                             "X_START", "Y_START", "X_END", "Y_END"}
-            },
+            material=rec.get(F_MATERIAL),
+            diameter_mm=_coerce_float(rec.get(F_DIAMETER)),
+            install_year=install_year,
+            length_m=_coerce_float(rec.get(F_LENGTH)),
+            location_desc=rec.get(F_LOCATION),
+            geom=geom,
+            attributes_json={k: v for k, v in rec.items() if k not in MAPPED_KEYS},
         )
         db.add(asset)
         summary.processed += 1
+
+        if summary.processed % 500 == 0:
+            db.flush()
+            logger.info("ckan.storm_sewers.progress", processed=summary.processed)
 
     publish_snapshot(db, snapshot, validation_summary=summary.as_json())
     _finalize_job(job, summary)

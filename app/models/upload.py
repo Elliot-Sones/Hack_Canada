@@ -19,6 +19,9 @@ class UploadedDocument(Base, UUIDPrimaryKey, TimestampMixin):
     plan_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("development_plans.id"), nullable=True
     )
+    project_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("projects.id"), nullable=True, index=True
+    )
 
     # File metadata
     original_filename: Mapped[str] = mapped_column(String(500), nullable=False)

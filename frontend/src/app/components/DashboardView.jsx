@@ -10,8 +10,9 @@ import ChatPanel from './ChatPanel.jsx';
 import InfrastructureLayerControl from './InfrastructureLayerControl.jsx';
 import SettingsModal from './SettingsModal.jsx';
 import DashboardModal from './DashboardModal.jsx';
-import { searchParcels, getWatermainsBbox, sessionExchange, hasFastApiToken, clearFastApiToken } from '../api.js';
-import { buildParcelState, isResolvedParcel } from '../lib/parcelState.js';
+import SelectionChips from './SelectionChips.jsx';
+import { searchParcels, getWatermainsBbox, getSewersBbox, getElectricalBbox, sessionExchange, hasFastApiToken, clearFastApiToken } from '../api.js';
+import { buildParcelState, createResolvedParcel, isResolvedParcel, addParcelToSelection, removeParcelFromSelection, toggleParcelInSelection } from '../lib/parcelState.js';
 import '../styles/landing.css';
 
 const ModelViewer = lazy(() => import('./ModelViewer.jsx'));
@@ -32,7 +33,9 @@ export default function DashboardView({ initialAddress, parcelId }) {
     }
   }, [isAuthenticated, isLoading]);
 
-  const [selectedParcel, setSelectedParcel] = useState(null);
+  const [selectedParcels, setSelectedParcels] = useState([]);
+  const primaryParcel = useMemo(() => selectedParcels.length > 0 ? selectedParcels[selectedParcels.length - 1] : null, [selectedParcels]);
+  const isComparisonMode = selectedParcels.length >= 2;
   const [isPanelOpen, setIsPanelOpen] = useState(true);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [activeNav, setActiveNav] = useState('overview');
@@ -45,11 +48,13 @@ export default function DashboardView({ initialAddress, parcelId }) {
   const [isModelOpen, setIsModelOpen] = useState(false);
   const [analyzedUploads, setAnalyzedUploads] = useState([]);
   const [floorPlans, setFloorPlans] = useState(null);
-  const [selectedPipelineAsset, setSelectedPipelineAsset] = useState(null);
   const [pipelineData, setPipelineData] = useState(null);
   const [projectId, setProjectId] = useState(null);
+  const [activeProjectId, setActiveProjectId] = useState(null);
+  const [activeProjectName, setActiveProjectName] = useState(null);
   const [activePlanId, setActivePlanId] = useState(null);
-  const [assetType, setAssetType] = useState('building');
+  const [infraOverlayLayers, setInfraOverlayLayers] = useState(new Set());
+  const [infraLayerCounts, setInfraLayerCounts] = useState({});
 
   const handleUploadAnalyzed = useCallback((upload) => {
     setAnalyzedUploads((prev) => {
@@ -59,14 +64,12 @@ export default function DashboardView({ initialAddress, parcelId }) {
     if (upload.extractedData?.pipeline_network) {
       setPipelineData(upload.extractedData.pipeline_network);
       setProjectId(upload.id);
-      setAssetType('pipeline');
       setIsModelOpen(true);
       return;
     }
     if (upload.extractedData?.floor_plans) {
       setFloorPlans(upload.extractedData.floor_plans);
       setProjectId(upload.id);
-      setAssetType('building');
       setIsModelOpen(true);
     }
   }, []);
@@ -97,9 +100,9 @@ export default function DashboardView({ initialAddress, parcelId }) {
       mapRef.current.setProposedMassing(null, null);
     }
 
-    const parcels = await searchParcels(location.shortAddress || location.address);
+    const parcels = await searchParcels(location.shortAddress || location.address, { lat: location.lat, lng: location.lng });
     const selected = buildParcelState(location, parcels);
-    setSelectedParcel(selected);
+    setSelectedParcels(selected ? [selected] : []);
     setIsPanelOpen(true);
 
     if (historyKey) {
@@ -123,7 +126,58 @@ export default function DashboardView({ initialAddress, parcelId }) {
     } else if (mapRef.current) {
       mapRef.current.setParcel(null);
     }
+    // Clear map multi-select highlights on search
+    if (mapRef.current?.setSelectedParcelIds) {
+      mapRef.current.setSelectedParcelIds(selected?.id ? [selected.id] : []);
+    }
   }, [historyKey]);
+
+  // Map click handler for parcel bbox layer
+  const handleMapParcelClick = useCallback((parcelData, isMultiSelect) => {
+    const resolved = createResolvedParcel(
+      { shortAddress: parcelData.address, address: parcelData.address },
+      { id: parcelData.id, zone_code: parcelData.zone_code, lot_area_m2: parcelData.lot_area_m2, geom: parcelData.geom }
+    );
+    if (isMultiSelect) {
+      setSelectedParcels(prev => toggleParcelInSelection(prev, resolved));
+    } else {
+      setSelectedParcels([resolved]);
+    }
+    setIsPanelOpen(true);
+  }, []);
+
+  const handleParcelDeselect = useCallback((id) => {
+    setSelectedParcels(prev => removeParcelFromSelection(prev, id));
+  }, []);
+
+  const handleClearSelection = useCallback(() => {
+    setSelectedParcels([]);
+    if (mapRef.current?.setSelectedParcelIds) mapRef.current.setSelectedParcelIds([]);
+    if (mapRef.current) mapRef.current.setParcel(null);
+  }, []);
+
+  const handleSetPrimary = useCallback((id) => {
+    setSelectedParcels(prev => {
+      const idx = prev.findIndex(p => p.id === id);
+      if (idx < 0 || idx === prev.length - 1) return prev;
+      const next = [...prev];
+      const [item] = next.splice(idx, 1);
+      next.push(item);
+      return next;
+    });
+  }, []);
+
+  // Sync map feature-state and primary parcel geometry when selection changes
+  useEffect(() => {
+    if (!mapRef.current) return;
+    const ids = selectedParcels.filter(p => p.id).map(p => p.id);
+    if (mapRef.current.setSelectedParcelIds) mapRef.current.setSelectedParcelIds(ids);
+    if (primaryParcel && isResolvedParcel(primaryParcel) && primaryParcel.geom) {
+      mapRef.current.setParcel(primaryParcel.geom);
+    } else {
+      mapRef.current.setParcel(null);
+    }
+  }, [selectedParcels, primaryParcel]);
 
   // Geocode initial address on mount
   useEffect(() => {
@@ -202,20 +256,38 @@ export default function DashboardView({ initialAddress, parcelId }) {
     [handleLocationSelected]
   );
 
-  // Load infrastructure data when asset type changes or map center moves
+  // Load infrastructure overlay data when layers are toggled or map moves
   useEffect(() => {
-    if (assetType === 'building') return;
+    if (infraOverlayLayers.size === 0) return;
     const map = mapRef.current?.getMap();
     if (!map) return;
 
     let cancelled = false;
     const loadInfraData = async () => {
       try {
-        if (assetType === 'pipeline') {
-          const bounds = map.getBounds();
-          const data = await getWatermainsBbox(bounds);
-          if (!cancelled && mapRef.current) mapRef.current.setPipelines(data);
+        const bounds = map.getBounds();
+        const counts = {};
+        const promises = [];
+        if (infraOverlayLayers.has('watermains')) {
+          promises.push(getWatermainsBbox(bounds).then(data => {
+            counts.watermains = data?.features?.length || 0;
+            if (!cancelled && mapRef.current) mapRef.current.setWatermains(data);
+          }));
         }
+        if (infraOverlayLayers.has('sewers')) {
+          promises.push(getSewersBbox(bounds).then(data => {
+            counts.sewers = data?.features?.length || 0;
+            if (!cancelled && mapRef.current) mapRef.current.setSewers(data);
+          }));
+        }
+        if (infraOverlayLayers.has('electrical')) {
+          promises.push(getElectricalBbox(bounds).then(data => {
+            counts.electrical = data?.features?.length || 0;
+            if (!cancelled && mapRef.current) mapRef.current.setElectrical(data);
+          }));
+        }
+        await Promise.allSettled(promises);
+        if (!cancelled) setInfraLayerCounts(prev => ({ ...prev, ...counts }));
       } catch {
         // Silently fail — infrastructure data is optional context
       }
@@ -226,7 +298,7 @@ export default function DashboardView({ initialAddress, parcelId }) {
     const onMoveEnd = () => loadInfraData();
     map.on('moveend', onMoveEnd);
     return () => { cancelled = true; map.off('moveend', onMoveEnd); };
-  }, [assetType]);
+  }, [infraOverlayLayers]);
 
   useEffect(() => {
     if (typeof document === 'undefined') return undefined;
@@ -255,17 +327,66 @@ export default function DashboardView({ initialAddress, parcelId }) {
     <>
       <MapView
         ref={mapRef}
-        isParcelResolved={selectedParcel !== null}
+        isParcelResolved={primaryParcel !== null}
         onModelOpen={() => setIsModelOpen(true)}
         isPanelOpen={isPanelOpen}
         isSidebarCollapsed={isSidebarCollapsed}
         isChatExpanded={isChatExpanded}
         isModelOpen={isModelOpen}
-        assetType={assetType}
-        onInfraAssetClick={(asset) => { setSelectedPipelineAsset(asset); setIsPanelOpen(true); setActiveNav('overview'); }}
+        infraOverlayLayers={infraOverlayLayers}
+        onParcelClick={handleMapParcelClick}
       />
-      <InfrastructureLayerControl mapRef={mapRef} />
+      <InfrastructureLayerControl mapRef={mapRef}
+        infraLayerCounts={infraLayerCounts}
+        isChatExpanded={isChatExpanded}
+        isSidebarCollapsed={isSidebarCollapsed}
+        onInfraLayerToggle={(layerId, enabled) => {
+          setInfraOverlayLayers(prev => {
+            const next = new Set(prev);
+            if (enabled) next.add(layerId);
+            else next.delete(layerId);
+            return next;
+          });
+        }}
+      />
+      {activeProjectId && activeProjectName && (
+        <div className="project-save-indicator">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="13" height="13">
+            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+          </svg>
+          <span className="project-save-name">{activeProjectName}</span>
+          <div className="project-save-items">
+            <span className="project-save-item" title="Plans & documents auto-saved">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="11" height="11"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+              Plans
+            </span>
+            <span className="project-save-item" title="Chat conversations auto-saved">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="11" height="11"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+              Chat
+            </span>
+            <span className="project-save-item" title="File uploads auto-saved">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="11" height="11"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+              Files
+            </span>
+          </div>
+          <button className="project-save-close" onClick={() => { setActiveProjectId(null); setActiveProjectName(null); }} title="Stop saving to project">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="10" height="10">
+              <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        </div>
+      )}
       <SearchBar onLocationSelected={handleLocationSelected} />
+      {selectedParcels.length > 0 && (
+        <SelectionChips
+          parcels={selectedParcels}
+          primaryId={primaryParcel?.id}
+          onSetPrimary={handleSetPrimary}
+          onRemove={handleParcelDeselect}
+          onClearAll={handleClearSelection}
+          isSidebarCollapsed={isSidebarCollapsed}
+        />
+      )}
       <Sidebar
         isCollapsed={isSidebarCollapsed}
         onToggleCollapse={handleSidebarToggle}
@@ -276,13 +397,14 @@ export default function DashboardView({ initialAddress, parcelId }) {
         onHistoryBack={() => setShowHistory(false)}
         historyItems={searchHistory}
         onHistoryItemClick={handleHistoryItemClick}
-        assetType={assetType}
-        onAssetTypeChange={setAssetType}
         onDashboardClick={handleDashboardClick}
         onSettingsClick={() => setIsSettingsOpen(true)}
       />
       <PolicyPanel
-        parcel={selectedParcel}
+        parcel={primaryParcel}
+        parcels={selectedParcels}
+        selectedParcels={selectedParcels}
+        isComparisonMode={isComparisonMode}
         isOpen={isPanelOpen}
         onClose={handlePanelClose}
         activeNav={activeNav}
@@ -290,8 +412,9 @@ export default function DashboardView({ initialAddress, parcelId }) {
         onSaveParcel={handleSaveParcel}
         onUploadAnalyzed={handleUploadAnalyzed}
         activePlanId={activePlanId}
-        assetType={assetType}
-        selectedPipelineAsset={selectedPipelineAsset}
+        activeProjectId={activeProjectId}
+        onProjectOpen={(id, name) => { setActiveProjectId(id); setActiveProjectName(name); }}
+        onProjectClose={() => { setActiveProjectId(null); setActiveProjectName(null); }}
       />
       {!isPanelOpen && (
         <button
@@ -305,17 +428,20 @@ export default function DashboardView({ initialAddress, parcelId }) {
         </button>
       )}
       <ChatPanel
-        parcelContext={selectedParcel}
+        parcelContext={primaryParcel}
+        selectedParcels={selectedParcels}
+        isComparisonMode={isComparisonMode}
         onToggleExpand={setIsChatExpanded}
         modelParams={modelParams}
         onModelUpdate={(params) => { setModelParams(params); setIsModelOpen(true); }}
         analyzedUploads={analyzedUploads}
         activePlanId={activePlanId}
-        assetType={assetType}
+        activeProjectId={activeProjectId}
+        activeProjectName={activeProjectName}
         onPlanComplete={(massing, planId) => {
           if (planId) setActivePlanId(planId);
-          if (mapRef.current && selectedParcel?.geom) {
-            mapRef.current.setProposedMassing(selectedParcel.geom, massing.height_m || (massing.storeys * 3.5));
+          if (mapRef.current && primaryParcel?.geom) {
+            mapRef.current.setProposedMassing(primaryParcel.geom, massing.height_m || (massing.storeys * 3.5));
           }
           setModelParams({
             storeys: massing.storeys || 0,
@@ -328,30 +454,29 @@ export default function DashboardView({ initialAddress, parcelId }) {
         }}
       />
       <Suspense fallback={null}>
-        {assetType === 'building' ? (
-          <ModelViewer
-            isOpen={isModelOpen}
-            onClose={() => setIsModelOpen(false)}
-            parcelGeoJSON={selectedParcel?.geom}
-            modelParams={modelParams}
-            isPanelOpen={isPanelOpen}
-            isSidebarCollapsed={isSidebarCollapsed}
-            isChatExpanded={isChatExpanded}
-            floorPlans={floorPlans}
-            projectId={projectId}
-            parcelId={selectedParcel?.id}
-          />
-        ) : (
+        <ModelViewer
+          isOpen={isModelOpen && !pipelineData}
+          onClose={() => setIsModelOpen(false)}
+          parcelGeoJSON={primaryParcel?.geom}
+          modelParams={modelParams}
+          isPanelOpen={isPanelOpen}
+          isSidebarCollapsed={isSidebarCollapsed}
+          isChatExpanded={isChatExpanded}
+          floorPlans={floorPlans}
+          projectId={projectId}
+          parcelId={primaryParcel?.id}
+        />
+        {pipelineData && (
           <InfrastructureViewer
-            isOpen={isModelOpen}
+            isOpen={isModelOpen && !!pipelineData}
             onClose={() => setIsModelOpen(false)}
             modelParams={modelParams}
             isPanelOpen={isPanelOpen}
             isSidebarCollapsed={isSidebarCollapsed}
             isChatExpanded={isChatExpanded}
-            assetType={assetType}
             pipelineData={pipelineData}
             onPipelineDataChange={setPipelineData}
+            assetType="pipeline"
           />
         )}
       </Suspense>

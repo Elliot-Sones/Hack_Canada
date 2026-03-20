@@ -40,6 +40,19 @@ class SelectionReason:
     reason: str
 
 
+ALL_KNOWN_DOC_TYPES = frozenset({
+    "cover_letter", "planning_rationale", "compliance_matrix", "site_plan_data",
+    "massing_summary", "unit_mix_summary", "financial_feasibility", "precedent_report",
+    "public_benefit_statement", "shadow_study", "four_statutory_tests",
+    "approval_pathway_document", "due_diligence_report", "olt_appeal_brief",
+    "revised_rationale", "mediation_strategy", "neighbour_support_letter",
+    "pac_prep_package", "submission_readiness_report", "correction_response",
+    "compliance_review_report", "variance_justification", "as_of_right_check",
+    "required_studies_checklist", "timeline_cost_estimate",
+    "building_permit_readiness_checklist", "professional_referral_checklist",
+})
+
+
 def select_documents_for_project(
     compliance_result=None,
     massing: dict | None = None,
@@ -48,6 +61,7 @@ def select_documents_for_project(
     precedents: list | None = None,
     parsed: dict | None = None,
     financial_output: dict | None = None,
+    requested_documents: list[str] | None = None,
 ) -> tuple[list[str], list[SelectionReason]]:
     """Select which documents to generate based on project context.
 
@@ -59,6 +73,24 @@ def select_documents_for_project(
     massing = massing or {}
     precedents = precedents or []
     reasons: list[SelectionReason] = []
+
+    # --- Intent-first selection ---
+    # If caller provided specific document requests (not "full_package"),
+    # generate only those — skip the ALWAYS_GENERATE + conditional logic.
+    if requested_documents and "full_package" not in requested_documents:
+        valid = [d for d in requested_documents if d in ALL_KNOWN_DOC_TYPES]
+        invalid = [d for d in requested_documents if d not in ALL_KNOWN_DOC_TYPES]
+        if valid:
+            for d in valid:
+                reasons.append(SelectionReason(d, True, "Explicitly requested by user"))
+            for d in invalid:
+                reasons.append(SelectionReason(d, False, f"Unknown document type: {d}"))
+            logger.info(
+                "document_selector.intent_based",
+                requested=len(valid),
+                invalid=len(invalid),
+            )
+            return sorted(valid), reasons
 
     selected = set(ALWAYS_GENERATE)
 

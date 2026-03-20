@@ -738,6 +738,47 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-xs);
+    text-decoration: none;
+    color: inherit;
+    transition: border-color var(--transition), background var(--transition);
+}
+
+.contractor-card-clickable {
+    cursor: pointer;
+    position: relative;
+}
+
+.contractor-card-clickable::after {
+    content: 'View on Maps \2197';
+    position: absolute;
+    bottom: 8px;
+    right: 10px;
+    font-size: 10px;
+    font-weight: 500;
+    color: var(--text-muted);
+    opacity: 0;
+    transition: opacity var(--transition), color var(--transition);
+    letter-spacing: 0.3px;
+}
+
+.contractor-card-clickable:hover {
+    border-color: var(--accent);
+    background: rgba(200, 165, 92, 0.1);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.contractor-card-clickable:hover::after {
+    opacity: 1;
+    color: var(--accent);
+}
+
+.contractor-card-address {
+    font-size: var(--font-xs);
+    color: var(--text-secondary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .contractor-card-name {

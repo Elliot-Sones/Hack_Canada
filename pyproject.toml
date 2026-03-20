@@ -39,6 +39,7 @@ dependencies = [
     "langchain-openai>=0.1.0",
     "shapely>=2.0.0",
     "langchain-chroma>=0.1.0",
+    "stripe>=8.0.0",
 ]
 
 [project.optional-dependencies]

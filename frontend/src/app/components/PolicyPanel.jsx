@@ -1,9 +1,12 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { getParcelOverlays, getParcelZoningAnalysis, getPolicyStack, getNearbyApplications, getParcelFinancialSummary, uploadDocument, getUpload, getPlanDocuments, regeneratePlanDocument } from '../api.js';
+import { getParcel, getParcelOverlays, getParcelZoningAnalysis, getPolicyStack, getNearbyApplications, getParcelFinancialSummary, uploadDocument, getUpload, getPlanDocuments, regeneratePlanDocument } from '../api.js';
 import { isResolvedParcel, isUnresolvedParcel } from '../lib/parcelState.js';
 import useResizable from '../hooks/useResizable.js';
+import useNearbyInfrastructure from '../hooks/useNearbyInfrastructure.js';
+import ServicingSummaryCard from './ServicingSummaryCard.jsx';
+import ProjectsPanel from './ProjectsPanel.jsx';
 
 // ─── Pipeline engineering decision panel ──────────────────────────────────────
 
@@ -638,7 +641,7 @@ function LoadingZoningTab({ parcel }) {
     );
 }
 
-function OverviewTab({ parcel, zoning, onUploadComplete }) {
+function OverviewTab({ parcel, zoning, onUploadComplete, infraData, infraLoading }) {
     const zoneName = zoneDisplay(parcel, zoning);
 
     return (
@@ -688,6 +691,8 @@ function OverviewTab({ parcel, zoning, onUploadComplete }) {
                 </div>
             </div>
             <ReviewNotesCard zoning={zoning} />
+            <ServicingSummaryCard infraData={infraData} infraLoading={infraLoading}
+                                  parcelCentroid={infraData?.centroid} />
         </>
     );
 }
@@ -1223,8 +1228,122 @@ function DocumentsTab({ planId }) {
     );
 }
 
+// ─── Comparison Tab ──────────────────────────────────────────────────────────
+
+function ComparisonTab({ parcels }) {
+    const [details, setDetails] = React.useState({});
+    const [loading, setLoading] = React.useState(true);
+
+    React.useEffect(() => {
+        let cancelled = false;
+        setLoading(true);
+        Promise.all(
+            parcels.map(p =>
+                getParcel(p.id)
+                    .then(data => ({ id: p.id, data, error: false }))
+                    .catch(() => ({ id: p.id, data: null, error: true }))
+            )
+        ).then(results => {
+            if (cancelled) return;
+            const map = {};
+            for (const r of results) map[r.id] = r;
+            setDetails(map);
+            setLoading(false);
+        });
+        return () => { cancelled = true; };
+    }, [parcels]);
+
+    if (loading) {
+        return (
+            <div className="tab-section-header">
+                <h3>Comparing {parcels.length} Parcels</h3>
+                <p className="tab-section-desc">Loading parcel data...</p>
+            </div>
+        );
+    }
+
+    const METRICS = [
+        { key: 'zone_code', label: 'Zone Code', format: v => v || '—' },
+        { key: 'lot_area_m2', label: 'Lot Area (m\u00B2)', format: v => v != null ? Math.round(v).toLocaleString() : '—', best: 'max' },
+        { key: 'lot_frontage_m', label: 'Lot Frontage (m)', format: v => v != null ? v.toFixed(1) : '—' },
+        { key: 'max_height_m', label: 'Max Height (m)', format: v => v != null ? v.toFixed(1) : '—', best: 'max' },
+        { key: 'max_fsi', label: 'Max FSI', format: v => v != null ? v.toFixed(2) : '—', best: 'max' },
+        { key: 'max_storeys', label: 'Max Storeys', format: v => v != null ? v : '—' },
+        { key: 'max_lot_coverage_pct', label: 'Lot Coverage %', format: v => v != null ? `${v}%` : '—' },
+        { key: 'heritage_flag', label: 'Heritage', format: v => v ? 'Yes' : 'No', icon: true },
+        { key: 'esa_flag', label: 'ESA', format: v => v ? 'Yes' : 'No', icon: true },
+        { key: 'ravine_flag', label: 'Ravine', format: v => v ? 'Yes' : 'No', icon: true },
+    ];
+
+    const getData = (parcel) => details[parcel.id]?.data || {};
+
+    const getBestValue = (metric) => {
+        if (!metric.best) return null;
+        const vals = parcels.map(p => getData(p)[metric.key]).filter(v => v != null && typeof v === 'number');
+        if (vals.length === 0) return null;
+        return metric.best === 'max' ? Math.max(...vals) : Math.min(...vals);
+    };
+
+    const colCount = parcels.length;
+
+    return (
+        <>
+            <div className="tab-section-header">
+                <h3>Comparing {parcels.length} Parcels</h3>
+                <p className="tab-section-desc">Side-by-side zoning and constraint comparison.</p>
+            </div>
+
+            <div className="comparison-grid" style={{ '--compare-count': colCount }}>
+                {/* Header row */}
+                <div className="comparison-label comparison-header-label" />
+                {parcels.map(p => {
+                    const err = details[p.id]?.error;
+                    return (
+                        <div key={p.id} className="comparison-cell comparison-header-cell">
+                            <span className="selection-chip-zone" style={{ fontSize: 10, marginBottom: 2 }}>{p.zoning || p.zoneCode || '—'}</span>
+                            <span style={{ fontSize: 11, color: '#ccc', maxWidth: 90, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {(p.address || '').split(',')[0] || 'Parcel'}
+                            </span>
+                            {err && <span style={{ fontSize: 10, color: '#e74c3c' }}>Error</span>}
+                        </div>
+                    );
+                })}
+
+                {/* Metric rows */}
+                {METRICS.map(metric => {
+                    const bestVal = getBestValue(metric);
+                    return (
+                        <React.Fragment key={metric.key}>
+                            <div className="comparison-label">{metric.label}</div>
+                            {parcels.map(p => {
+                                const d = getData(p);
+                                const raw = d[metric.key];
+                                const isBest = bestVal != null && raw === bestVal;
+                                return (
+                                    <div
+                                        key={p.id}
+                                        className="comparison-cell"
+                                        style={isBest ? { color: 'var(--accent)', fontWeight: 600 } : undefined}
+                                    >
+                                        {metric.icon && raw ? (
+                                            <span style={{ color: '#e74c3c', fontWeight: 600 }}>{metric.format(raw)}</span>
+                                        ) : (
+                                            metric.format(raw)
+                                        )}
+                                    </div>
+                                );
+                            })}
+                        </React.Fragment>
+                    );
+                })}
+            </div>
+        </>
+    );
+}
+
 const TAB_TITLES = {
     overview: 'Project Overview',
+    projects: 'Projects',
     finances: 'Financial Analysis',
     policies: 'Policy Extracts',
     datasets: 'Data Sources',
@@ -1754,7 +1873,7 @@ function InfraHistoryTab({ asset }) {
 }
 
 
-export default function PolicyPanel({ parcel, isOpen, onClose, activeNav, savedParcels, onSaveParcel, onUploadAnalyzed, activePlanId, assetType, selectedPipelineAsset }) {
+export default function PolicyPanel({ parcel, parcels = [], isComparisonMode = false, isOpen, onClose, activeNav, savedParcels, onSaveParcel, onUploadAnalyzed, activePlanId, selectedParcels, activeProjectId, onProjectOpen, onProjectClose }) {
     const { isResizing, handleProps: resizeHandleProps } = useResizable({
         defaultSize: 380,
         minSize: 280,
@@ -1769,6 +1888,7 @@ export default function PolicyPanel({ parcel, isOpen, onClose, activeNav, savedP
     const [loadingPolicies, setLoadingPolicies] = useState(false);
     const [loadingOverlays, setLoadingOverlays] = useState(false);
     const [loadingZoning, setLoadingZoning] = useState(false);
+    const { infraData, infraLoading } = useNearbyInfrastructure(parcel);
 
     useEffect(() => {
         if (!isResolvedParcel(parcel)) {
@@ -1834,19 +1954,21 @@ export default function PolicyPanel({ parcel, isOpen, onClose, activeNav, savedP
     const visibleZoningLoading = isResolvedParcel(parcel) ? loadingZoning : false;
 
     const renderTab = () => {
-        // Pipeline mode: show asset detail when a segment is clicked
-        if (assetType === 'pipeline' && selectedPipelineAsset && activeNav === 'overview') {
-            return <PipelineAssetPanel asset={selectedPipelineAsset} />;
+        // Projects panel — standalone, no parcel needed
+        if (activeNav === 'projects') {
+            return <ProjectsPanel selectedParcels={selectedParcels || parcels} onProjectOpen={onProjectOpen} onProjectClose={onProjectClose} activeProjectId={activeProjectId} />;
+        }
+
+        // Multi-parcel comparison mode
+        if (isComparisonMode && activeNav === 'overview') {
+            return <ComparisonTab parcels={parcels} />;
         }
 
         if (!parcel) {
             return (
                 <div className="tab-empty">
-                    {activeNav === 'overview' && assetType !== 'pipeline' && <FileUploadZone onUploadComplete={onUploadAnalyzed} />}
-                    <p>{assetType === 'pipeline'
-                        ? 'Click a pipeline segment on the map to view asset details.'
-                        : 'Search for a property to view due diligence information.'
-                    }</p>
+                    {activeNav === 'overview' && <FileUploadZone onUploadComplete={onUploadAnalyzed} />}
+                    <p>Search for a property to view due diligence information.</p>
                 </div>
             );
         }
@@ -1862,29 +1984,19 @@ export default function PolicyPanel({ parcel, isOpen, onClose, activeNav, savedP
 
         switch (activeNav) {
             case 'overview':
-                return <OverviewTab parcel={parcel} zoning={zoning} onUploadComplete={onUploadAnalyzed} />;
+                return <OverviewTab parcel={parcel} zoning={zoning} onUploadComplete={onUploadAnalyzed} infraData={infraData} infraLoading={infraLoading} />;
             case 'policies':
                 return <PoliciesTab policies={visiblePolicies} loading={visiblePoliciesLoading} />;
             case 'datasets':
-                return assetType === 'pipeline'
-                    ? <InfraDatasetsTab />
-                    : <DatasetsTab overlays={visibleOverlays} loading={visibleOverlaysLoading} />;
+                return <DatasetsTab overlays={visibleOverlays} loading={visibleOverlaysLoading} />;
             case 'precedents':
                 return <PrecedentsTab parcel={parcel} />;
             case 'finances':
                 return <FinancesTab parcel={parcel} />;
             case 'documents':
                 return <DocumentsTab planId={activePlanId} />;
-            case 'standards':
-                return <InfraStandardsTab asset={selectedPipelineAsset} />;
-            case 'network':
-                return <InfraNetworkTab asset={selectedPipelineAsset} />;
-            case 'inspections':
-                return <InfraInspectionsTab asset={selectedPipelineAsset} />;
-            case 'history':
-                return <InfraHistoryTab asset={selectedPipelineAsset} />;
             default:
-                return <OverviewTab parcel={parcel} zoning={zoning} onUploadComplete={onUploadAnalyzed} />;
+                return <OverviewTab parcel={parcel} zoning={zoning} onUploadComplete={onUploadAnalyzed} infraData={infraData} infraLoading={infraLoading} />;
         }
     };
 
@@ -1893,8 +2005,8 @@ export default function PolicyPanel({ parcel, isOpen, onClose, activeNav, savedP
             <div {...resizeHandleProps} style={{ ...resizeHandleProps.style, left: -2 }} />
             <div id="policy-panel-header">
                 <h2 id="policy-panel-title">
-                    {assetType === 'pipeline' && selectedPipelineAsset
-                        ? (selectedPipelineAsset.location || 'Water Main')
+                    {isComparisonMode && activeNav === 'overview'
+                        ? `Comparing ${parcels.length} Parcels`
                         : (TAB_TITLES[activeNav] || 'Project Information')}
                 </h2>
                 <div className="panel-header-actions">

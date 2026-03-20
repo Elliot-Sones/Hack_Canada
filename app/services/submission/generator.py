@@ -386,8 +386,12 @@ class SubmissionPackageGenerator:
 
     @staticmethod
     def _safe_format(context: dict) -> dict:
-        """Return a defaultdict-like mapping that returns placeholder for missing keys."""
+        """Return a defaultdict-like mapping that returns empty string for missing keys.
+
+        This prevents placeholder text like '[key — data pending]' from leaking
+        into AI prompts. Missing data is simply omitted.
+        """
         class SafeDict(dict):
             def __missing__(self, key):
-                return f"[{key} — data pending]"
+                return ""
         return SafeDict(context)

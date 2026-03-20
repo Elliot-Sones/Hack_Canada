@@ -86,3 +86,4 @@ chroma_db/
 
 # Large infrastructure GIS data (ingest via CKAN or download separately)
 water-system-data/*.geojson
+.gstack/

@@ -160,3 +160,118 @@ body.sidebar-collapsed #search-container {
     color: var(--text-muted);
     font-size: var(--font-xs);
 }
+
+/* --- Selection Chips --- */
+.selection-chips-bar {
+    position: fixed;
+    top: calc(var(--space-lg) + var(--search-height) + 12px);
+    left: calc(var(--sidebar-width) + var(--space-lg));
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    transition: left var(--transition);
+}
+
+.selection-chips-bar.sidebar-collapsed {
+    left: calc(var(--sidebar-collapsed) + var(--space-lg));
+}
+
+.selection-chip {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 10px;
+    background: var(--bg-glass);
+    backdrop-filter: var(--blur);
+    -webkit-backdrop-filter: var(--blur);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: all var(--transition);
+    font-family: Inter, sans-serif;
+    font-size: var(--font-xs);
+    color: var(--text-secondary);
+    box-shadow: var(--shadow-sm);
+}
+
+.selection-chip:hover {
+    border-color: var(--border-accent);
+    background: var(--accent-bg);
+}
+
+.selection-chip--primary {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent-dim), var(--shadow-sm);
+}
+
+.selection-chip-zone {
+    display: inline-block;
+    padding: 1px 6px;
+    background: var(--accent-bg);
+    border: 1px solid var(--border-accent);
+    border-radius: 4px;
+    font-weight: 600;
+    font-size: 10px;
+    color: var(--accent);
+    letter-spacing: 0.3px;
+}
+
+.selection-chip-addr {
+    max-width: 120px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-primary);
+    font-weight: 500;
+}
+
+.selection-chip-remove {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    font-size: 12px;
+    line-height: 1;
+    color: var(--text-muted);
+    transition: all var(--transition);
+    flex-shrink: 0;
+}
+
+.selection-chip-remove:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--text-primary);
+}
+
+.selection-chips-clear {
+    font-size: var(--font-xs);
+    color: var(--text-muted);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    transition: color var(--transition);
+    padding: 4px 6px;
+}
+
+.selection-chips-clear:hover {
+    color: var(--accent);
+}
+
+/* --- Parcel hover popup overrides --- */
+.parcel-hover-popup {
+    pointer-events: none !important;
+}
+
+.parcel-hover-popup .maplibregl-popup-content {
+    background: transparent !important;
+    padding: 0 !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+    pointer-events: none !important;
+}
+
+.parcel-hover-popup .maplibregl-popup-tip {
+    display: none !important;
+}

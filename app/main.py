@@ -1,3 +1,5 @@
+from contextlib import asynccontextmanager
+
 import structlog
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -43,11 +45,20 @@ structlog.configure(
 )
 
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    from app.services.cache import get_async_redis
+
+    await get_async_redis()  # warm the pool; failure is non-fatal
+    yield
+
+
 def create_app() -> FastAPI:
     application = FastAPI(
         title="CoCivil",
         description="Land-development due diligence platform",
         version=__version__,
+        lifespan=lifespan,
     )
 
     application.add_middleware(RequestIDMiddleware)

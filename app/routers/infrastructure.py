@@ -28,13 +28,6 @@ PIPE_COLORS = {
     "gas_line": "#ddaa22",
 }
 
-# Electrical colors
-ELECTRICAL_COLORS = {
-    "power_line": "#e74c3c",
-    "electrical_substation": "#8e44ad",
-}
-
-
 def _voltage_tier_color(tier: str | None) -> tuple[str, float]:
     """Return (color, line_width_factor) for a voltage tier key."""
     if tier and tier in VOLTAGE_TIERS:
@@ -244,15 +237,11 @@ async def get_electrical_bbox(
         tier = row["voltage_tier"] or "unknown"
         color, lwf = _voltage_tier_color(tier)
 
-        # Map asset_type to layer_type for frontend compatibility
-        layer_type = "power_line" if row["asset_type"] == "power_line" else "electrical_substation"
-
         features.append({
             "type": "Feature",
             "geometry": row["geometry"],
             "properties": {
                 "asset_id": row["asset_id"],
-                "layer_type": layer_type,
                 "asset_type": row["asset_type"],
                 "voltage_kv": row["voltage_kv"],
                 "voltage_tier": tier,
@@ -261,7 +250,6 @@ async def get_electrical_bbox(
                 "operator": row["operator"],
                 "name": row["name"],
                 "cables": row["cables"],
-                "color": color,
             },
         })
     return {"type": "FeatureCollection", "features": features}
@@ -322,7 +310,6 @@ async def get_nearby_electrical(
     for row in rows:
         tier = row["voltage_tier"] or "unknown"
         color, lwf = _voltage_tier_color(tier)
-        layer_type = "power_line" if row["asset_type"] == "power_line" else "electrical_substation"
 
         features.append({
             "type": "Feature",
@@ -330,7 +317,6 @@ async def get_nearby_electrical(
             "properties": {
                 "id": str(row["id"]),
                 "asset_id": row["asset_id"],
-                "layer_type": layer_type,
                 "asset_type": row["asset_type"],
                 "voltage_kv": row["voltage_kv"],
                 "voltage_tier": tier,
@@ -339,7 +325,6 @@ async def get_nearby_electrical(
                 "operator": row["operator"],
                 "name": row["name"],
                 "distance_m": round(row["distance_m"], 1) if row["distance_m"] else None,
-                "color": color,
             },
         })
     return {"type": "FeatureCollection", "features": features}

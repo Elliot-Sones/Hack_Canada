@@ -52,6 +52,12 @@ DEVELOPMENT_PARAMS_SCHEMA = {
             "nullable": True,
         },
         "special_considerations": {"type": "array", "items": {"type": "string"}, "nullable": True},
+        "requested_documents": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Document types the user wants. 'full_package' if they want everything. Common types: planning_rationale, compliance_matrix, financial_feasibility, precedent_report, shadow_study, massing_summary, unit_mix_summary, cover_letter, approval_pathway_document, due_diligence_report, four_statutory_tests, variance_justification, correction_response, olt_appeal_brief. Infer from context if not explicitly stated. null if no document generation mentioned.",
+            "nullable": True,
+        },
         "confidence": {
             "type": "number",
             "description": "How confident you are in the extraction (0.0-1.0)",
@@ -77,6 +83,7 @@ Key context:
 - If the user mentions "storeys" but not height, estimate 3.0m per storey (3.5m for ground floor retail)
 - If info is missing, set nullable fields to null and add questions to clarification_needed
 - Always extract what you can and flag what's ambiguous
+- Detect which documents the user wants generated. "financial feasibility" → ["financial_feasibility"]. "full package" / "all documents" / "submission package" → ["full_package"]. If they just describe a building without mentioning documents, set requested_documents to null.
 
 Be precise. Do not invent information the user didn't provide."""
 

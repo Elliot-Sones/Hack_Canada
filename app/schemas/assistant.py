@@ -23,6 +23,7 @@ class AssistantChatRequest(BaseModel):
     lng: float | None = None
     model_params: dict | None = None
     zone_code: str | None = None
+    zone_codes: list[str] | None = None
     upload_context: list[UploadContextItem] | None = None
 
 
@@ -52,6 +53,7 @@ class ContractorRecommendation(BaseModel):
     website: str | None = None
     address: str | None = None
     trade: str | None = None
+    maps_url: str | None = None
 
 
 class AssistantChatResponse(BaseModel):

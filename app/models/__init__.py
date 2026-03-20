@@ -52,6 +52,8 @@ from app.models.tenant import (
     AnalysisSnapshotManifest,
     Organization,
     Project,
+    ProjectConversation,
+    ProjectNote,
     ProjectShare,
     ScenarioRun,
     User,
@@ -60,7 +62,7 @@ from app.models.tenant import (
 
 __all__ = [
     "Base",
-    "Organization", "User", "WorkspaceMember", "Project", "ProjectShare", "ScenarioRun", "AnalysisSnapshotManifest",
+    "Organization", "User", "WorkspaceMember", "Project", "ProjectNote", "ProjectConversation", "ProjectShare", "ScenarioRun", "AnalysisSnapshotManifest",
     "Jurisdiction", "Parcel", "ParcelAddress", "ParcelMetric", "ParcelZoningAssignment", "ProjectParcel",
     "PolicyDocument", "PolicyVersion", "PolicyClause", "PolicyReference", "PolicyApplicabilityRule", "PolicyReviewItem",
     "DatasetLayer", "DatasetFeature", "FeatureToParcelLink",
