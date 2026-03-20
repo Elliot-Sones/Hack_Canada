@@ -6,6 +6,7 @@ import uuid
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.factory import get_ai_provider
@@ -103,6 +104,17 @@ Example ACTION markers:
 
 Only propose documents that are relevant to what the user is asking about. Never propose the full package unless the user explicitly asks for it.
 
+## Document suggestion rules (use with LIVE SITE DATA)
+When you have parcel data, proactively suggest the most relevant documents:
+- Heritage/ESA/Ravine flags present → suggest: compliance_review_report, required_studies_checklist
+- Zone standards exceeded by current model → suggest: four_statutory_tests, variance_justification
+- Everything within zone limits → suggest: as_of_right_check, building_permit_readiness_checklist
+- Comparison mode (multiple parcels) → suggest: due_diligence_report for each parcel
+- User discussing approval process → suggest: approval_pathway_document, timeline_cost_estimate
+- User uploaded documents → suggest: correction_response or compliance_review_report
+
+Always match suggestions to context. Do not suggest documents for data you don't have.
+
 ## Contractor recommendation tool
 IMPORTANT: When the user asks about contractors, professionals, or what team they need, OR when you mention needing specific professionals in your answer, you MUST append the CONTRACTORS marker at the very end of your response. This is how the system fetches real local companies to show the user.
 
@@ -192,6 +204,8 @@ async def _fetch_contractors(trades: list[str], lat: float, lng: float) -> list[
                 )
                 data = resp.json()
                 for place in (data.get("results") or [])[:3]:
+                    place_id = place.get("place_id")
+                    maps_url = f"https://www.google.com/maps/place/?q=place_id:{place_id}" if place_id else None
                     contractors.append(ContractorRecommendation(
                         name=place.get("name", ""),
                         rating=place.get("rating"),
@@ -199,6 +213,7 @@ async def _fetch_contractors(trades: list[str], lat: float, lng: float) -> list[
                         phone=place.get("formatted_phone_number"),
                         address=place.get("formatted_address"),
                         trade=trade,
+                        maps_url=maps_url,
                     ))
             except Exception:
                 logger.warning("Google Places API error for trade=%s", trade, exc_info=True)
@@ -280,6 +295,7 @@ async def _gather_site_data(
     lng: float | None,
     zone_code: str | None,
     db: AsyncSession,
+    zone_codes: list[str] | None = None,
 ) -> str:
     """Fetch zoning analysis, electrical capacity, water infrastructure, and
     policy RAG data in parallel. Returns a formatted context string."""
@@ -298,18 +314,12 @@ async def _gather_site_data(
     site_lat = lat or 43.6532
     site_lng = lng or -79.3832
 
-    # Launch parallel data fetches
-    async def _noop():
-        return None
-    zoning_task = _fetch_zoning(pid, db) if pid else _noop()
-    electrical_task = _fetch_electrical(site_lat, site_lng, db)
-    watermain_task = _fetch_watermains(site_lat, site_lng)
-    rag_task = _fetch_policy_rag(zone_code, parcel_id)
-
-    zoning_result, electrical_result, watermain_result, rag_result = await asyncio.gather(
-        zoning_task, electrical_task, watermain_task, rag_task,
-        return_exceptions=True,
-    )
+    # DB-dependent fetches must run sequentially (single async session)
+    zoning_result = await _fetch_zoning(pid, db) if pid else None
+    electrical_result = await _fetch_electrical(site_lat, site_lng, db)
+    watermain_result = await _fetch_watermains(site_lat, site_lng, db)
+    # RAG is independent (ChromaDB) — no need for gather with a single task
+    rag_result = await _fetch_policy_rag(zone_code, parcel_id, zone_codes=zone_codes)
 
     # Format zoning data
     if isinstance(zoning_result, dict) and zoning_result:
@@ -410,12 +420,13 @@ async def _gather_site_data(
     # Format RAG results
     if isinstance(rag_result, list) and rag_result:
         lines = ["## RELEVANT POLICY EXTRACTS (from RAG)"]
-        for r in rag_result[:5]:
+        for r in rag_result[:10]:
             source = r.get("metadata", {}).get("source", "Unknown")
             content = r.get("content", "")[:300]
             score = r.get("score")
             score_str = f" (relevance: {score:.2f})" if score is not None else ""
-            lines.append(f"[{source}{score_str}]: {content}")
+            zone_tag = f" [zone: {r['zone_code']}]" if r.get("zone_code") else ""
+            lines.append(f"[{source}{score_str}{zone_tag}]: {content}")
         sections.append("\n".join(lines))
 
     return "\n\n".join(sections) if sections else ""
@@ -485,6 +496,7 @@ async def _fetch_zoning(parcel_id: uuid.UUID, db: AsyncSession) -> dict | None:
                 "heritage": cf.heritage_flag,
                 "ravine": cf.ravine_flag,
                 "esa": cf.esa_flag,
+                "floodplain": cf.floodplain_flag,
                 "overlay_count": cf.overlay_count,
             }
 
@@ -497,66 +509,79 @@ async def _fetch_zoning(parcel_id: uuid.UUID, db: AsyncSession) -> dict | None:
 async def _fetch_electrical(lat: float, lng: float, db: AsyncSession) -> dict | None:
     """Fetch electrical capacity analysis for a location."""
     try:
-        from app.services.electrical_capacity import check_capacity, score_infrastructure
-        from app.routers.infrastructure import _query_electrical_bbox
+        from app.services.electrical_capacity import check_capacity
 
-        # Get features from in-memory cache (fast, no DB needed)
-        # Use a 2km bbox around the point
-        delta = 0.018  # ~2km
-        features = _query_electrical_bbox(
-            lng - delta, lat - delta, lng + delta, lat + delta,
-            limit=200, include_poles=False,
+        delta = 0.018  # ~2km bbox
+        result = await db.execute(
+            text("""
+                SELECT asset_id, asset_type, voltage_kv, voltage_tier, operator, name,
+                       ST_AsGeoJSON(geom)::json AS geometry
+                FROM electrical_assets
+                WHERE ST_Intersects(geom, ST_MakeEnvelope(:min_lng, :min_lat, :max_lng, :max_lat, 4326))
+                LIMIT 200
+            """),
+            {"min_lng": lng - delta, "min_lat": lat - delta, "max_lng": lng + delta, "max_lat": lat + delta},
         )
-
-        if not features:
+        rows = result.mappings().all()
+        if not rows:
             return None
 
-        result = check_capacity(
+        features = [
+            {"type": "Feature", "geometry": r["geometry"], "properties": {
+                "asset_id": r["asset_id"], "asset_type": r["asset_type"],
+                "voltage_kv": r["voltage_kv"], "voltage_tier": r["voltage_tier"],
+            }}
+            for r in rows
+        ]
+
+        return check_capacity(
             lat=lat, lng=lng, features=features,
             building_type="residential", num_units=1,
         )
-        return result
     except Exception:
         logger.warning("Failed to fetch electrical data", exc_info=True)
         return None
 
 
-async def _fetch_watermains(lat: float, lng: float) -> list | None:
-    """Fetch nearby watermain segments from the in-memory cache."""
+async def _fetch_watermains(lat: float, lng: float, db: AsyncSession) -> list | None:
+    """Fetch nearby watermain segments from the DB."""
     try:
-        from app.routers.infrastructure import _load_watermains, _geom_intersects_bbox
+        delta = 0.005  # ~500m bbox
+        result = await db.execute(
+            text("""
+                SELECT material, diameter_mm, install_year
+                FROM pipeline_assets
+                WHERE pipe_type = 'water_main'
+                  AND ST_Intersects(geom, ST_MakeEnvelope(:min_lng, :min_lat, :max_lng, :max_lat, 4326))
+                LIMIT 50
+            """),
+            {"min_lng": lng - delta, "min_lat": lat - delta, "max_lng": lng + delta, "max_lat": lat + delta},
+        )
+        rows = result.mappings().all()
+        if not rows:
+            return None
 
-        features = _load_watermains()
-        delta = 0.005  # ~500m
-        min_lng, min_lat = lng - delta, lat - delta
-        max_lng, max_lat = lng + delta, lat + delta
-
-        nearby = []
-        for feat in features:
-            if len(nearby) >= 50:
-                break
-            geom = feat.get("geometry")
-            if not geom:
-                continue
-            if _geom_intersects_bbox(geom, min_lng, min_lat, max_lng, max_lat):
-                p = feat.get("properties", {})
-                nearby.append({
-                    "type": "Feature",
-                    "geometry": None,  # Don't include geometry in context
-                    "properties": {
-                        "diameter_mm": int(p.get("Watermain Diameter")) if p.get("Watermain Diameter") else None,
-                        "material": p.get("Watermain Material") or "Unknown",
-                        "install_year": int(p.get("Watermain Construction Year")) if p.get("Watermain Construction Year") and str(p.get("Watermain Construction Year")).isdigit() else None,
-                    },
-                })
-        return nearby if nearby else None
+        return [
+            {"type": "Feature", "geometry": None, "properties": {
+                "diameter_mm": r["diameter_mm"],
+                "material": r["material"] or "Unknown",
+                "install_year": r["install_year"],
+            }}
+            for r in rows
+        ]
     except Exception:
         logger.warning("Failed to fetch watermain data", exc_info=True)
         return None
 
 
-async def _fetch_policy_rag(zone_code: str | None, parcel_id: str | None) -> list | None:
-    """Fetch relevant policy chunks from ChromaDB RAG."""
+async def _fetch_policy_rag(zone_code: str | None, parcel_id: str | None, zone_codes: list[str] | None = None) -> list | None:
+    """Fetch relevant policy chunks from ChromaDB RAG.
+
+    When *zone_codes* contains multiple entries, query for each unique code
+    (5 chunks each), deduplicate by the first 100 chars of content, and cap
+    at 10 results.  Falls back to the single *zone_code* path when
+    *zone_codes* is None or empty.
+    """
     try:
         import sys
         from pathlib import Path
@@ -565,14 +590,39 @@ async def _fetch_policy_rag(zone_code: str | None, parcel_id: str | None) -> lis
             sys.path.insert(0, rag_dir)
         from retriever import search
 
+        codes = list(dict.fromkeys(zone_codes)) if zone_codes else []
+
+        if len(codes) > 1:
+            # Multi-zone path: query per unique code, deduplicate
+            all_results: list[dict] = []
+            seen_prefixes: set[str] = set()
+            for code in codes:
+                query = f"zoning {code} Ontario planning policy development standards"
+                hits = await asyncio.to_thread(search, query, 5)
+                for r in (hits or []):
+                    prefix = (r.get("content") or "")[:100]
+                    if prefix not in seen_prefixes:
+                        seen_prefixes.add(prefix)
+                        r["zone_code"] = code
+                        all_results.append(r)
+                    if len(all_results) >= 10:
+                        break
+                if len(all_results) >= 10:
+                    break
+            return all_results if all_results else None
+
+        # Single-zone / no-zone fallback
         query_parts = []
-        if zone_code:
-            query_parts.append(f"zoning {zone_code}")
+        effective_code = codes[0] if codes else zone_code
+        if effective_code:
+            query_parts.append(f"zoning {effective_code}")
         query_parts.append("Ontario planning policy development standards")
         query = " ".join(query_parts)
 
-        # Run sync search in thread pool to not block event loop
         results = await asyncio.to_thread(search, query, 5)
+        if results and effective_code:
+            for r in results:
+                r["zone_code"] = effective_code
         return results if results else None
     except Exception:
         logger.warning("Failed to fetch RAG results", exc_info=True)
@@ -693,6 +743,7 @@ async def chat_with_assistant(
         lng=body.lng,
         zone_code=body.zone_code,
         db=db,
+        zone_codes=body.zone_codes,
     )
 
     # ── Build prompt with real data ──

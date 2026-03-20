@@ -11,9 +11,11 @@ class ParcelSearchParams(BaseModel):
     min_lot_area: float | None = None
     max_lot_area: float | None = None
     min_frontage: float | None = None
+    lat: float | None = Field(None, description="Latitude for spatial fallback search")
+    lng: float | None = Field(None, description="Longitude for spatial fallback search")
     bbox: str | None = Field(None, description="Bounding box as 'minx,miny,maxx,maxy'")
     page: int = Field(default=1, ge=1)
-    page_size: int = Field(default=20, ge=1, le=100)
+    page_size: int = Field(default=20, ge=1, le=500)
 
     @property
     def bbox_bounds(self) -> tuple[float, float, float, float] | None:
@@ -73,6 +75,8 @@ class ParcelDetailResponse(ParcelResponse):
     heritage_flag: bool | None = None
     ravine_flag: bool | None = None
     esa_flag: bool | None = None
+    floodplain_flag: bool | None = None
+    floodplain_coverage_pct: float | None = None
     overlay_count: int | None = None
 
 

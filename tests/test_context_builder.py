@@ -113,8 +113,8 @@ class TestBuildDocumentContext:
                     f"missing from context"
                 )
 
-    def test_missing_data_marked_not_available(self):
-        """Missing data should be explicitly marked, never silently omitted."""
+    def test_missing_data_returns_empty_strings(self):
+        """Missing data should produce empty strings so templates skip blank fields."""
         context = build_document_context(
             parcel_data=None,
             zoning=None,
@@ -127,10 +127,8 @@ class TestBuildDocumentContext:
             overlays=None,
         )
 
-        not_available_marker = "[NOT AVAILABLE"
-        # Key fields should have the marker
-        assert not_available_marker in context["address"]
-        assert not_available_marker in context["zoning_code"]
+        assert context["address"] == ""
+        assert context["zoning_code"] == ""
 
     def test_compliance_summary_is_deterministic(self):
         """Compliance summary should contain the deterministic matrix."""

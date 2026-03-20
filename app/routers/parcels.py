@@ -2,6 +2,7 @@ import json
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
+from geoalchemy2 import Geography
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,6 +23,7 @@ from app.schemas.geospatial import (
     ZoningConstraintResponse,
     ZoningStandardsResponse,
 )
+from app.services.cache import get_or_fetch
 from app.services.geospatial import build_parcel_search_statement, get_active_parcel_by_id, list_active_snapshot_ids
 from app.services.overlay_service import get_parcel_overlays_response
 from app.services.policy_stack import get_policy_stack_response
@@ -118,6 +120,64 @@ async def search_parcels(
             "geom": json.loads(geom_json) if geom_json else None
         }
         response.append(p_dict)
+
+    # Spatial fallback: if text search returned nothing and we have coordinates,
+    # find the nearest parcel containing or closest to that point.
+    if not response and params.lat is not None and params.lng is not None:
+        point = func.ST_SetSRID(func.ST_MakePoint(params.lng, params.lat), 4326)
+
+        # First try: parcel that contains the point
+        contains_query = (
+            select(Parcel, func.ST_AsGeoJSON(Parcel.geom).label("geom_json"))
+            .where(func.ST_Contains(Parcel.geom, point))
+        )
+        if active_snapshot_ids:
+            contains_query = contains_query.where(Parcel.source_snapshot_id.in_(list(active_snapshot_ids)))
+        contains_query = contains_query.limit(5)
+        contains_result = await db.execute(contains_query)
+
+        for parcel, geom_json in contains_result:
+            response.append({
+                "id": parcel.id,
+                "jurisdiction_id": parcel.jurisdiction_id,
+                "pin": parcel.pin,
+                "address": parcel.address if parcel.address and parcel.address != "None None" else params.address,
+                "lot_area_m2": parcel.lot_area_m2,
+                "lot_frontage_m": parcel.lot_frontage_m,
+                "zone_code": parcel.zone_code,
+                "current_use": parcel.current_use,
+                "geom": json.loads(geom_json) if geom_json else None,
+            })
+
+        # Second try: nearest parcel within 50m
+        if not response:
+            nearest_query = (
+                select(Parcel, func.ST_AsGeoJSON(Parcel.geom).label("geom_json"))
+                .where(func.ST_DWithin(
+                    Parcel.geom.cast(Geography),
+                    point.cast(Geography),
+                    50,
+                ))
+                .order_by(func.ST_Distance(Parcel.geom, point))
+            )
+            if active_snapshot_ids:
+                nearest_query = nearest_query.where(Parcel.source_snapshot_id.in_(list(active_snapshot_ids)))
+            nearest_query = nearest_query.limit(1)
+            nearest_result = await db.execute(nearest_query)
+
+            for parcel, geom_json in nearest_result:
+                response.append({
+                    "id": parcel.id,
+                    "jurisdiction_id": parcel.jurisdiction_id,
+                    "pin": parcel.pin,
+                    "address": parcel.address if parcel.address and parcel.address != "None None" else params.address,
+                    "lot_area_m2": parcel.lot_area_m2,
+                    "lot_frontage_m": parcel.lot_frontage_m,
+                    "zone_code": parcel.zone_code,
+                    "current_use": parcel.current_use,
+                    "geom": json.loads(geom_json) if geom_json else None,
+                })
+
     return response
 
 
@@ -126,79 +186,79 @@ async def get_parcel(
     parcel_id: uuid.UUID,
     db: AsyncSession = Depends(get_db_session),
 ):
-    active_snapshot_ids = await list_active_snapshot_ids(db, "parcel_base")
+    async def _fetch():
+        active_snapshot_ids = await list_active_snapshot_ids(db, "parcel_base")
 
-    query = select(Parcel, func.ST_AsGeoJSON(Parcel.geom).label("geom_json")).where(Parcel.id == parcel_id)
-    if active_snapshot_ids:
-        query = query.where(Parcel.source_snapshot_id.in_(list(active_snapshot_ids)))
+        query = select(Parcel, func.ST_AsGeoJSON(Parcel.geom).label("geom_json")).where(Parcel.id == parcel_id)
+        if active_snapshot_ids:
+            query = query.where(Parcel.source_snapshot_id.in_(list(active_snapshot_ids)))
 
-    result = await db.execute(query)
-    row = result.first()
-    if not row:
-        raise HTTPException(status_code=404, detail="Parcel not found")
+        result = await db.execute(query)
+        row = result.first()
+        if not row:
+            raise HTTPException(status_code=404, detail="Parcel not found")
 
-    parcel, geom_json = row
+        parcel, geom_json = row
 
-    # Fetch fact tables in parallel
-    bld_result = await db.execute(
-        select(ParcelBuildingFact).where(ParcelBuildingFact.parcel_id == parcel_id)
-    )
-    bld = bld_result.scalar_one_or_none()
+        bld_result = await db.execute(
+            select(ParcelBuildingFact).where(ParcelBuildingFact.parcel_id == parcel_id)
+        )
+        bld = bld_result.scalar_one_or_none()
 
-    zf_result = await db.execute(
-        select(ParcelZoningFact).where(ParcelZoningFact.parcel_id == parcel_id)
-    )
-    zf = zf_result.scalar_one_or_none()
+        zf_result = await db.execute(
+            select(ParcelZoningFact).where(ParcelZoningFact.parcel_id == parcel_id)
+        )
+        zf = zf_result.scalar_one_or_none()
 
-    cf_result = await db.execute(
-        select(ParcelConstraintFact).where(ParcelConstraintFact.parcel_id == parcel_id)
-    )
-    cf = cf_result.scalar_one_or_none()
+        cf_result = await db.execute(
+            select(ParcelConstraintFact).where(ParcelConstraintFact.parcel_id == parcel_id)
+        )
+        cf = cf_result.scalar_one_or_none()
 
-    # Parse permitted uses from JSON
-    permitted_uses = None
-    if zf and zf.permitted_use_groups_json:
-        uses = zf.permitted_use_groups_json
-        if isinstance(uses, list):
-            permitted_uses = uses
-        elif isinstance(uses, str):
-            try:
-                permitted_uses = json.loads(uses)
-            except (json.JSONDecodeError, TypeError):
-                pass
+        permitted_uses = None
+        if zf and zf.permitted_use_groups_json:
+            uses = zf.permitted_use_groups_json
+            if isinstance(uses, list):
+                permitted_uses = uses
+            elif isinstance(uses, str):
+                try:
+                    permitted_uses = json.loads(uses)
+                except (json.JSONDecodeError, TypeError):
+                    pass
 
-    return {
-        "id": parcel.id,
-        "jurisdiction_id": parcel.jurisdiction_id,
-        "pin": parcel.pin,
-        "address": parcel.address,
-        "lot_area_m2": parcel.lot_area_m2,
-        "lot_frontage_m": parcel.lot_frontage_m,
-        "zone_code": parcel.zone_code,
-        "current_use": parcel.current_use,
-        "lot_depth_m": parcel.lot_depth_m,
-        "assessed_value": parcel.assessed_value,
-        "created_at": parcel.created_at,
-        "geom": json.loads(geom_json) if geom_json else None,
-        # Building facts
-        "building_count": bld.building_count if bld else None,
-        "total_building_footprint_m2": bld.total_building_footprint_m2 if bld else None,
-        "building_coverage_pct": bld.building_coverage_pct if bld else None,
-        "vacant_lot_flag": bld.vacant_lot_flag if bld else None,
-        "underutilized_flag": bld.underutilized_flag if bld else None,
-        # Zoning facts
-        "zone_family": zf.zone_family if zf else None,
-        "max_height_m": zf.max_height_m if zf else None,
-        "max_storeys": zf.max_storeys if zf else None,
-        "max_fsi": zf.max_fsi if zf else None,
-        "max_lot_coverage_pct": zf.max_lot_coverage_pct if zf else None,
-        "permitted_uses": permitted_uses,
-        # Constraint facts
-        "heritage_flag": cf.heritage_flag if cf else None,
-        "ravine_flag": cf.ravine_flag if cf else None,
-        "esa_flag": cf.esa_flag if cf else None,
-        "overlay_count": cf.overlay_count if cf else None,
-    }
+        return {
+            "id": parcel.id,
+            "jurisdiction_id": parcel.jurisdiction_id,
+            "pin": parcel.pin,
+            "address": parcel.address,
+            "lot_area_m2": parcel.lot_area_m2,
+            "lot_frontage_m": parcel.lot_frontage_m,
+            "zone_code": parcel.zone_code,
+            "current_use": parcel.current_use,
+            "lot_depth_m": parcel.lot_depth_m,
+            "assessed_value": parcel.assessed_value,
+            "created_at": parcel.created_at,
+            "geom": json.loads(geom_json) if geom_json else None,
+            "building_count": bld.building_count if bld else None,
+            "total_building_footprint_m2": bld.total_building_footprint_m2 if bld else None,
+            "building_coverage_pct": bld.building_coverage_pct if bld else None,
+            "vacant_lot_flag": bld.vacant_lot_flag if bld else None,
+            "underutilized_flag": bld.underutilized_flag if bld else None,
+            "zone_family": zf.zone_family if zf else None,
+            "max_height_m": zf.max_height_m if zf else None,
+            "max_storeys": zf.max_storeys if zf else None,
+            "max_fsi": zf.max_fsi if zf else None,
+            "max_lot_coverage_pct": zf.max_lot_coverage_pct if zf else None,
+            "permitted_uses": permitted_uses,
+            "heritage_flag": cf.heritage_flag if cf else None,
+            "ravine_flag": cf.ravine_flag if cf else None,
+            "esa_flag": cf.esa_flag if cf else None,
+            "floodplain_flag": cf.floodplain_flag if cf else None,
+            "floodplain_coverage_pct": cf.floodplain_coverage_pct if cf else None,
+            "overlay_count": cf.overlay_count if cf else None,
+        }
+
+    return await get_or_fetch(f"cocivil:parcel:{parcel_id}", _fetch, ttl=86400)
 
 
 @router.get("/parcels/{parcel_id}/zoning-analysis", response_model=ZoningAnalysisResponse)
@@ -206,17 +266,20 @@ async def get_parcel_zoning_analysis(
     parcel_id: uuid.UUID,
     db: AsyncSession = Depends(get_db_session),
 ):
-    active_snapshot_ids = await list_active_snapshot_ids(db, "parcel_base")
-    parcel = await get_active_parcel_by_id(db, parcel_id, active_snapshot_ids=active_snapshot_ids)
-    if not parcel:
-        raise HTTPException(status_code=404, detail="Parcel not found")
+    async def _fetch():
+        active_snapshot_ids = await list_active_snapshot_ids(db, "parcel_base")
+        parcel = await get_active_parcel_by_id(db, parcel_id, active_snapshot_ids=active_snapshot_ids)
+        if not parcel:
+            raise HTTPException(status_code=404, detail="Parcel not found")
 
-    overlay_response = await get_parcel_overlays_response(db, parcel)
-    analysis = build_zoning_analysis(
-        parcel,
-        overlay_data=[overlay.model_dump() for overlay in overlay_response.overlays],
-    )
-    return _serialize_zoning_analysis(analysis)
+        overlay_response = await get_parcel_overlays_response(db, parcel)
+        analysis = build_zoning_analysis(
+            parcel,
+            overlay_data=[overlay.model_dump() for overlay in overlay_response.overlays],
+        )
+        return _serialize_zoning_analysis(analysis).model_dump()
+
+    return await get_or_fetch(f"cocivil:zoning:{parcel_id}", _fetch, ttl=86400)
 
 
 @router.get("/parcels/{parcel_id}/policy-stack", response_model=PolicyStackResponse)
@@ -224,11 +287,15 @@ async def get_parcel_policy_stack(
     parcel_id: uuid.UUID,
     db: AsyncSession = Depends(get_db_session),
 ):
-    active_snapshot_ids = await list_active_snapshot_ids(db, "parcel_base")
-    parcel = await get_active_parcel_by_id(db, parcel_id, active_snapshot_ids=active_snapshot_ids)
-    if not parcel:
-        raise HTTPException(status_code=404, detail="Parcel not found")
-    return await get_policy_stack_response(db, parcel)
+    async def _fetch():
+        active_snapshot_ids = await list_active_snapshot_ids(db, "parcel_base")
+        parcel = await get_active_parcel_by_id(db, parcel_id, active_snapshot_ids=active_snapshot_ids)
+        if not parcel:
+            raise HTTPException(status_code=404, detail="Parcel not found")
+        resp = await get_policy_stack_response(db, parcel)
+        return resp.model_dump()
+
+    return await get_or_fetch(f"cocivil:policy:{parcel_id}", _fetch, ttl=3600)
 
 
 @router.get("/parcels/{parcel_id}/overlays", response_model=ParcelOverlaysResponse)
@@ -236,11 +303,15 @@ async def get_parcel_overlays(
     parcel_id: uuid.UUID,
     db: AsyncSession = Depends(get_db_session),
 ):
-    active_snapshot_ids = await list_active_snapshot_ids(db, "parcel_base")
-    parcel = await get_active_parcel_by_id(db, parcel_id, active_snapshot_ids=active_snapshot_ids)
-    if not parcel:
-        raise HTTPException(status_code=404, detail="Parcel not found")
-    return await get_parcel_overlays_response(db, parcel)
+    async def _fetch():
+        active_snapshot_ids = await list_active_snapshot_ids(db, "parcel_base")
+        parcel = await get_active_parcel_by_id(db, parcel_id, active_snapshot_ids=active_snapshot_ids)
+        if not parcel:
+            raise HTTPException(status_code=404, detail="Parcel not found")
+        resp = await get_parcel_overlays_response(db, parcel)
+        return resp.model_dump()
+
+    return await get_or_fetch(f"cocivil:overlays:{parcel_id}", _fetch, ttl=86400)
 
 
 @router.get("/parcels/{parcel_id}/nearby-applications", response_model=NearbyApplicationsResponse)

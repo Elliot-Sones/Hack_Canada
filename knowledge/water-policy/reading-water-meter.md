@@ -1,0 +1,11 @@
+https://www.toronto.ca/services-payments/property-taxes-utilities/utility-bill/utility-account-lookup/
+
+Utility Account Lookup
+If you received a mailed notice asking you to submit an actual reading of your water meter, you can do so in the Utility Account Lookup. If the account number on your mailed notice appears with fewer than nine digits, please add leading zeros to bring the total to nine digits. This is required to successfully access your account.
+
+Terms of Use Agreement
+By using this application, you acknowledge that the City provides the application on an "as is", "as available", basis. The City does not make any express or implied warranties, representations or endorsements with respect to the application. In particular, without limiting the generality of the foregoing, you acknowledge that the information provided through the application:
+may not reflect the true or current balance of the account;
+is unsuitable for purposes of transacting property sales or any other legally binding matters;
+To obtain information certified to be accurate, tax and utility certificates are available from the City. The City is not responsible for, and will not be liable to you or anyone else, for any damages whatsoever, including any indirect, special, incidental or consequential damages, arising out of or in connection with your use of, or inability to use, the application. By using this application, you agree that you will not (i) interfere with or disrupt the application or computer networks connected thereto; or (ii) delete or revise any materials or information accessible through the application.
+Note: Some water meter transmission units (MTUs) are not sending customers’ water consumption information to the City as intended. Until this is resolved, the City is sending estimated bills to affected customers. Estimated water meter readings are based on a customer’s historical usage data. Customers will be notified on their utility bill if their water meter reading is an estimate. If you have questions, please call 311.

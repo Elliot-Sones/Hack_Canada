@@ -49,6 +49,7 @@ async def test_assistant_chat_uses_backend_provider(client, monkeypatch):
         "message": "Server-side answer",
         "model_update": None,
         "proposed_action": None,
+        "contractors": None,
     }
     assert len(fake_provider.calls) == 1
     assert "Current site context:\nCurrent parcel: 123 King St W, Zoning: CR 3.0" in fake_provider.calls[0]["prompt"]

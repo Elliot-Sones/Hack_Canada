@@ -467,26 +467,6 @@ def _insert_feature_batch(cursor: Any, rows: list[tuple[Any, ...]]) -> None:
     )
 
 
-def link_buildings_to_parcels(db: Session, jurisdiction_id: uuid.UUID) -> int:
-    """Bulk spatial join: link building features to parcels via ST_Intersects."""
-    logger.info("arcgis.buildings.linking")
-    result = db.execute(text("""
-        INSERT INTO feature_to_parcel_links (id, feature_id, parcel_id, relationship_type)
-        SELECT gen_random_uuid(), df.id, p.id, 'intersects'
-        FROM dataset_features df
-        JOIN dataset_layers dl ON dl.id = df.dataset_layer_id
-            AND dl.layer_type = 'building_footprint'
-            AND dl.jurisdiction_id = CAST(:jid AS uuid)
-        JOIN parcels p ON p.jurisdiction_id = CAST(:jid AS uuid)
-            AND ST_Intersects(df.geom, p.geom)
-        ON CONFLICT ON CONSTRAINT uq_feature_parcel_link DO NOTHING
-        RETURNING 1
-    """), {"jid": str(jurisdiction_id)})
-    count = len(result.fetchall())
-    db.commit()
-    logger.info("arcgis.buildings.linked", links_created=count)
-    return count
-
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Phase 3: Zoning
@@ -581,28 +561,34 @@ def ingest_arcgis_zoning(db: Session, jurisdiction_id: uuid.UUID) -> IngestionSu
             if batch:
                 _insert_feature_batch(cursor, batch)
                 raw_conn.commit()
+
+        # Lightweight zone_code assignment via centroid-in-polygon
+        # (avoids disk-heavy intersection + assignments table on constrained Railway instances)
+        layer_id_str = str(layer.id)
+        jid_str = str(jurisdiction_id)
+
+        logger.info("arcgis.zoning.assigning_zone_codes")
+        db.execute(text("""
+            UPDATE parcels p
+            SET zone_code = df.attributes_json->>'zone_code'
+            FROM dataset_features df
+            WHERE df.dataset_layer_id = CAST(:layer_id AS uuid)
+                AND ST_Contains(df.geom, ST_Centroid(p.geom))
+                AND p.jurisdiction_id = CAST(:jid AS uuid)
+        """), {"layer_id": layer_id_str, "jid": jid_str})
+        db.commit()
+        logger.info("arcgis.zoning.zone_codes_assigned")
+
+        publish_snapshot(db, snapshot, validation_summary=summary.as_json())
+        _finalize_job(job, summary)
+    except Exception as exc:
+        raw_conn.rollback()
+        _finalize_job(job, summary, error=str(exc))
+        db.commit()
+        raise
     finally:
         raw_conn.close()
 
-    # Lightweight zone_code assignment via centroid-in-polygon
-    # (avoids disk-heavy intersection + assignments table on constrained Railway instances)
-    layer_id_str = str(layer.id)
-    jid_str = str(jurisdiction_id)
-
-    logger.info("arcgis.zoning.assigning_zone_codes")
-    db.execute(text("""
-        UPDATE parcels p
-        SET zone_code = df.attributes_json->>'zone_code'
-        FROM dataset_features df
-        WHERE df.dataset_layer_id = CAST(:layer_id AS uuid)
-            AND ST_Contains(df.geom, ST_Centroid(p.geom))
-            AND p.jurisdiction_id = CAST(:jid AS uuid)
-    """), {"layer_id": layer_id_str, "jid": jid_str})
-    db.commit()
-    logger.info("arcgis.zoning.zone_codes_assigned")
-
-    publish_snapshot(db, snapshot, validation_summary=summary.as_json())
-    _finalize_job(job, summary)
     db.commit()
     logger.info("arcgis.zoning.completed", processed=summary.processed, failed=summary.failed)
     return summary

@@ -3,7 +3,7 @@ import uuid
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -34,6 +34,14 @@ from app.tasks.plan import run_plan_generation
 router = APIRouter()
 
 
+def _plan_org_filter(user: dict):
+    """Plan visibility: user's org plans OR orphaned plans they created."""
+    return or_(
+        DevelopmentPlan.organization_id == user["organization_id"],
+        and_(DevelopmentPlan.organization_id.is_(None), DevelopmentPlan.created_by == user["id"]),
+    )
+
+
 @router.post("/plans/generate", response_model=JobAccepted, status_code=status.HTTP_202_ACCEPTED)
 async def generate_plan(
     body: PlanGenerateRequest,
@@ -57,6 +65,7 @@ async def generate_plan(
     plan = DevelopmentPlan(
         organization_id=org_id,
         created_by=created_by,
+        project_id=body.project_id,
         original_query=body.query,
         status="pending",
     )
@@ -81,7 +90,7 @@ async def list_plans(
 ):
     result = await db.execute(
         select(DevelopmentPlan)
-        .where(DevelopmentPlan.organization_id == user["organization_id"])
+        .where(_plan_org_filter(user))
         .order_by(DevelopmentPlan.created_at.desc())
     )
     return result.scalars().all()
@@ -95,7 +104,7 @@ async def get_plan(
 ):
     query = select(DevelopmentPlan).options(selectinload(DevelopmentPlan.documents)).where(DevelopmentPlan.id == plan_id)
     if user:
-        query = query.where(DevelopmentPlan.organization_id == user["organization_id"])
+        query = query.where(_plan_org_filter(user))
     result = await db.execute(query)
     plan = result.scalar_one_or_none()
     if not plan:
@@ -114,7 +123,7 @@ async def get_plan_readiness(
         .options(selectinload(DevelopmentPlan.documents))
         .where(
             DevelopmentPlan.id == plan_id,
-            DevelopmentPlan.organization_id == user["organization_id"],
+            _plan_org_filter(user),
         )
     )
     plan = result.scalar_one_or_none()
@@ -136,7 +145,7 @@ async def clarify_plan(
         .options(selectinload(DevelopmentPlan.documents))
         .where(
             DevelopmentPlan.id == plan_id,
-            DevelopmentPlan.organization_id == user["organization_id"],
+            _plan_org_filter(user),
         )
     )
     plan = result.scalar_one_or_none()
@@ -172,7 +181,7 @@ async def list_plan_documents(
         .where(SubmissionDocument.plan_id == plan_id)
     )
     if user:
-        query = query.where(DevelopmentPlan.organization_id == user["organization_id"])
+        query = query.where(_plan_org_filter(user))
     result = await db.execute(query.order_by(SubmissionDocument.sort_order))
     return result.scalars().all()
 
@@ -190,7 +199,7 @@ async def get_plan_document(
         .where(
             SubmissionDocument.id == doc_id,
             SubmissionDocument.plan_id == plan_id,
-            DevelopmentPlan.organization_id == user["organization_id"],
+            _plan_org_filter(user),
         )
     )
     doc = result.scalar_one_or_none()
@@ -214,7 +223,7 @@ async def submit_document_for_review(
     plan_result = await db.execute(
         select(DevelopmentPlan).where(
             DevelopmentPlan.id == plan_id,
-            DevelopmentPlan.organization_id == user["organization_id"],
+            _plan_org_filter(user),
         )
     )
     if not plan_result.scalar_one_or_none():
@@ -242,7 +251,7 @@ async def approve_plan_document(
     plan_result = await db.execute(
         select(DevelopmentPlan).where(
             DevelopmentPlan.id == plan_id,
-            DevelopmentPlan.organization_id == user["organization_id"],
+            _plan_org_filter(user),
         )
     )
     if not plan_result.scalar_one_or_none():
@@ -270,7 +279,7 @@ async def reject_plan_document(
     plan_result = await db.execute(
         select(DevelopmentPlan).where(
             DevelopmentPlan.id == plan_id,
-            DevelopmentPlan.organization_id == user["organization_id"],
+            _plan_org_filter(user),
         )
     )
     if not plan_result.scalar_one_or_none():
@@ -333,7 +342,7 @@ async def regenerate_document(
         .options(selectinload(DevelopmentPlan.documents))
         .where(
             DevelopmentPlan.id == plan_id,
-            DevelopmentPlan.organization_id == user["organization_id"],
+            _plan_org_filter(user),
         )
     )
     plan = result.scalar_one_or_none()
@@ -437,7 +446,7 @@ async def download_document(
         .where(
             SubmissionDocument.id == doc_id,
             SubmissionDocument.plan_id == plan_id,
-            DevelopmentPlan.organization_id == user["organization_id"],
+            _plan_org_filter(user),
         )
     )
     doc = result.scalar_one_or_none()
@@ -517,7 +526,7 @@ async def export_plan(
         .options(selectinload(DevelopmentPlan.documents))
         .where(
             DevelopmentPlan.id == plan_id,
-            DevelopmentPlan.organization_id == user["organization_id"],
+            _plan_org_filter(user),
         )
     )
     plan = result.scalar_one_or_none()
@@ -601,7 +610,7 @@ async def get_contractor_recommendations(
         .where(DevelopmentPlan.id == plan_id)
     )
     if user:
-        query = query.where(DevelopmentPlan.organization_id == user["organization_id"])
+        query = query.where(_plan_org_filter(user))
     result = await db.execute(query)
     plan = result.scalar_one_or_none()
     if not plan:
@@ -626,6 +635,8 @@ async def get_contractor_recommendations(
                 )
                 data = resp.json()
                 for place in (data.get("results") or [])[:3]:
+                    place_id = place.get("place_id")
+                    maps_url = f"https://www.google.com/maps/place/?q=place_id:{place_id}" if place_id else None
                     contractors.append(ContractorResult(
                         name=place.get("name", ""),
                         rating=place.get("rating"),
@@ -634,6 +645,7 @@ async def get_contractor_recommendations(
                         website=None,
                         address=place.get("formatted_address"),
                         trade=trade,
+                        maps_url=maps_url,
                     ))
             except Exception:
                 logger.warning("Google Places API error for trade=%s", trade, exc_info=True)

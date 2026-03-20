@@ -1,7 +1,7 @@
 # CoCivil — AI-Powered Civil Development Platform
 
 > **Auto-maintained**: Updated after every file edit/creation. See `.claude/CLAUDE.md` for rules.
-> **Last updated**: 2026-03-16 (wired fact tables to API endpoints, removed dropped table refs) | **PRD**: [`.claude/docs/PRD.md`](.claude/docs/PRD.md)
+> **Last updated**: 2026-03-19 (pre-landing review fixes: cross-join counts, plan auth guard, floodplain enum, cache cleanup, zoning error handling) | **PRD**: [`.claude/docs/PRD.md`](.claude/docs/PRD.md)
 
 ---
 
@@ -58,16 +58,14 @@
 ## Table of Contents
 
 1. [Backend — `app/`](#backend--app)
-2. [Frontend — `frontend-react/`](#frontend--frontend-react)
+2. [Frontend — `frontend/`](#frontend--frontend-nextjs-16-app-router)
 3. [Fine-Tuned RAG — `fine-tuned-RAG/`](#fine-tuned-rag--fine-tuned-rag)
-4. [Skills Pipeline — `.claude/skills/`](#skills-pipeline--claudeskills)
-5. [Agent Skills — `.agents/skills/`](#agent-skills--agentsskills)
-6. [Scripts — `scripts/`](#scripts--scripts)
-7. [Tests — `tests/`](#tests--tests)
-8. [Documentation — `docs/`](#documentation--docs)
-9. [Data & Infrastructure Files](#data--infrastructure-files)
-10. [Config & DevOps](#config--devops)
-11. [API Endpoint Reference](#api-endpoint-reference)
+4. [Knowledge — `knowledge/`](#knowledge--knowledge)
+5. [Scripts — `scripts/`](#scripts--scripts)
+6. [Tests — `tests/`](#tests--tests)
+7. [Data & Infrastructure Files](#data--infrastructure-files)
+8. [Config & DevOps](#config--devops)
+9. [API Endpoint Reference](#api-endpoint-reference)
 
 ---
 
@@ -77,7 +75,7 @@
 
 | File | Purpose |
 |------|---------|
-| `app/main.py` | FastAPI app factory, route registration, middleware (API-only, no SPA serving) |
+| `app/main.py` | FastAPI app factory, lifespan (Redis pool warmup), route registration, middleware |
 | `app/config.py` | Settings (DB, AI provider, S3, Auth0) via Pydantic BaseSettings |
 | `app/database.py` | SQLAlchemy dual async/sync engines & session factories |
 | `app/dependencies.py` | FastAPI dependency injection (JWT auth, multi-tenant org scoping) |
@@ -109,13 +107,13 @@
 | `finance.py` | Development cost models |
 | `policy.py` | Policy references & citations |
 | `ingestion.py` | Data ingestion tracking |
-| `upload.py` | File upload records |
+| `upload.py` | File upload records (with optional project_id FK) |
 | `export.py` | Document export records |
 | `dataset.py` | Dataset catalog |
 | `facts.py` | Materialized parcel fact tables (ParcelCurrentFact, ParcelBuildingFact, ParcelConstraintFact w/ esa_flag, ParcelZoningFact) + parser traceability (ParserVersion, ParseRun) |
 | `design_version.py` | Design version tracking |
 | `simulation.py` | Scenario simulation |
-| `tenant.py` | Multi-tenant isolation |
+| `tenant.py` | Multi-tenant isolation (Project, ProjectNote, ProjectConversation, map_state) |
 | `better_auth.py` | Read-only Better Auth session/user models (separate base, excluded from Alembic) |
 | `users_db.py` | Billing/auth database models (User, Organisation, Subscription, SubscriptionPlan, TokenAccount, TokenLedger, Invoice, BillingRateCard); two-bucket token design |
 | `better_auth.py` | Read-only SQLAlchemy models for Better Auth tables (user, session) on separate DeclarativeBase to stay out of Alembic |
@@ -124,7 +122,7 @@
 
 | File | Endpoint | Purpose |
 |------|----------|---------|
-| `plans.py` | `/api/v1/plans` | Plan CRUD + generation |
+| `plans.py` | `/api/v1/plans` | Plan CRUD + generation; org_id filter includes NULL (anonymous plans visible to authed users) |
 | `parcels.py` | `/api/v1/parcels` | Parcel data & search |
 | `entitlement.py` | `/api/v1/entitlements` | Zoning approvals |
 | `compliance.py` | `/api/v1/compliance` | OBC interior compliance checks |
@@ -136,7 +134,7 @@
 | `uploads.py` | `/api/v1/uploads` | File upload handling |
 | `auth.py` | `/api/v1/auth` | Authentication (login, register, session-exchange for Better Auth bridge) |
 | `jobs.py` | `/api/v1/jobs` | Async task tracking |
-| `projects.py` | `/api/v1/projects` | Project CRUD |
+| `projects.py` | `/api/v1/projects` | Project CRUD + notes, conversations, plans, uploads, map state (workspace) |
 | `scenarios.py` | `/api/v1/scenarios` | Scenario modeling |
 | `simulation.py` | `/api/v1/simulation` | Run simulations |
 | `design_versions.py` | `/api/v1/design-versions` | Version control |
@@ -183,14 +181,15 @@
 | `water_main_ingestion.py` | Ingests Toronto distribution water mains from GeoJSON into pipeline_assets |
 | `electrical_capacity.py` | Deterministic electrical demand analysis (CEC Rule 8-200 tables + grid scoring) |
 | `electrical_ingestion.py` | Ingests power lines & substations from Overpass API into electrical_assets |
+| `cache.py` | Redis cache-aside helper (`get_or_fetch`) for high-traffic parcel endpoints (silent fallthrough on failure) |
 | `token_service.py` | Token grant/consume/renew/top-up; two-bucket rules (subscription first, spill to purchased) |
-| `submission/templates.py` | Document templates & AI prompts |
-| `submission/context_builder.py` | Submission context assembly |
+| `submission/templates.py` | Document templates & AI prompts; includes Municipal Servicing section in planning_rationale and due_diligence_report |
+| `submission/context_builder.py` | Submission context assembly; accepts infrastructure param, builds servicing_summary/water_servicing/sewer_servicing/electrical_servicing keys |
 | `submission/generator.py` | AI-driven document generation |
 | `submission/review.py` | Submission review & QA |
 | `submission/readiness.py` | Readiness checks |
 | `submission/citation_verifier.py` | Citation validation |
-| `submission/document_selector.py` | Document selection logic |
+| `submission/document_selector.py` | Document selection logic; intent-first mode generates only user-requested doc types |
 
 ### Data & Policy (`app/data/`)
 
@@ -216,7 +215,7 @@
 | `finance.py` | FinancialRunRequest/Response, FinancialAssumptionSetReferenceResponse |
 | `infrastructure.py` | PipelineComplianceRequest, BridgeComplianceRequest, NearbyPipelineRequest |
 | `simulation.py` | MassingRequest/Response, LayoutRunRequest/Response, UnitTypeReferenceResponse |
-| `tenant.py` | ProjectCreate/Response, ScenarioCreate/Response, AddParcelRequest |
+| `tenant.py` | ProjectCreate/Update/Response (with counts), NoteCreate/Update/Response, ConversationCreate/Update/Response/Summary, MapStateUpdate, ScenarioCreate/Response, AddParcelRequest |
 | `job.py` | JobStatusResponse (unified across all async job types) |
 | `auth.py` | RegisterRequest, LoginRequest, TokenResponse, SessionExchangeRequest |
 | `upload.py` | UploadResponse, UploadDetail, GenerateResponseRequest |
@@ -229,7 +228,7 @@
 
 | File | Purpose |
 |------|---------|
-| `plan.py` | Main plan generation pipeline |
+| `plan.py` | Main plan generation pipeline; fetches nearby infrastructure and passes to document context |
 | `ingestion.py` | CKAN/GeoJSON import |
 | `arcgis_ingestion.py` | ArcGIS ingestion tasks (4 phases + full pipeline) |
 | `entitlement.py` | Entitlement analysis |
@@ -247,7 +246,7 @@
 | `base.py` | Abstract AI provider interface |
 | `claude_provider.py` | Anthropic Claude integration |
 | `openai_provider.py` | OpenAI fallback |
-| `query_parser.py` | Intent detection & query parsing |
+| `query_parser.py` | Intent detection & query parsing (extracts requested_documents for selective doc generation) |
 | `factory.py` | Provider factory |
 
 ---
@@ -266,9 +265,11 @@
 | `src/app/dashboard/page.tsx` | Dashboard route (reads ?address= query param) |
 | `src/app/dashboard/[parcelId]/page.tsx` | Dashboard with parcel from URL |
 | `src/app/api/auth/exchange/route.ts` | Server-side session exchange (reads BA cookie, calls FastAPI, returns JWT) |
-| `src/app/api.js` | API client (all backend calls, session exchange, 401 auto-retry) |
+| `src/app/api.js` | API client (all backend calls, session exchange, 401 auto-retry, bbox parcel search, infrastructure, project workspace CRUD — notes, conversations, uploads, map state) |
 | `src/app/lib/auth-client.js` | Better Auth client (session management) |
-| `src/app/styles/` | Global CSS, landing, ModelViewer, InfrastructureViewer, UserBubble styles |
+| `src/app/styles/` | Global CSS, landing, ModelViewer, InfrastructureViewer, UserBubble, map-search (selection chips, parcel hover popup), panel (comparison grid, project workspace) styles |
+| `src/app/lib/parcelState.js` | Parcel selection state helpers (create, add, remove, toggle, multi-select max 4) |
+| `src/app/lib/parcelState.test.js` | Unit tests for parcel selection helpers |
 | `next.config.ts` | Next.js config (standalone output, API proxy rewrites) |
 | `Dockerfile` | Standalone Next.js Docker build |
 
@@ -276,13 +277,16 @@
 
 | File | Purpose |
 |------|---------|
-| `DashboardView.jsx` | Main dashboard shell (map, sidebar, panels, models) |
-| `LandingPage.jsx` | Home page with hero, product demo mockup, How It Works, feature cards, story/vision, CTA |
-| `MapView.jsx` | Interactive parcel/zoning map (MapLibre GL) |
+| `DashboardView.jsx` | Main dashboard shell (map, sidebar, panels, models); infraOverlayLayers Set for map overlay control; activeProjectId state + floating save indicator showing what artifacts are persisted to the project |
+| `LandingPage.jsx` | Home page with Carto dark map bg, SVG brand icon, nav center links, hero typewriter, product demo mockup, How It Works, feature cards, story/vision, final CTA, enhanced footer |
+| `MapView.jsx` | Interactive parcel/zoning map (MapLibre GL) with bbox parcel layer, hover/click selection, feature-state highlights, overlay-controlled infrastructure layers (watermains/sewers/electrical) |
+| `SelectionChips.jsx` | Floating chip bar for multi-parcel selection (max 4), primary indicator, clear all |
 | `SearchBar.jsx` | Address/parcel search |
-| `Sidebar.jsx` | Navigation & context panel |
-| `ChatPanel.jsx` | AI assistant chat with plan generation, file uploads, contractor matching, and polling |
-| `PolicyPanel.jsx` | Policy extracts, overlays, datasets, uploads, zoning analysis |
+| `Sidebar.jsx` | Navigation & context panel (building nav + Projects tab) |
+| `ChatContextHeader.jsx` | Compact single-line context strip in chat panel showing selected parcels (zone badge + address), uploads, and plan status |
+| `ChatPanel.jsx` | AI assistant chat with plan generation, file uploads, contractor matching, polling, multi-parcel context, comparison report generation, chat history persistence (localStorage + project backend), New Chat / History buttons; auto-saves conversations and plans to active project |
+| `ProjectsPanel.jsx` | Projects workspace panel (list, create, detail views with tabs: overview, parcels, plans, files, notes, chat); notifies parent on project open/close for save indicator |
+| `PolicyPanel.jsx` | Policy extracts, overlays, datasets, uploads, zoning analysis, multi-parcel ComparisonTab, ProjectsPanel routing; OverviewTab integrates useNearbyInfrastructure hook and ServicingSummaryCard |
 | `DocumentViewer.jsx` | Markdown document viewer (ReactMarkdown + remark-gfm) |
 | `DocumentGallery.jsx` | Document library UI |
 | `ModelViewer.jsx` | 3D building massing viewer (Three.js) |
@@ -291,7 +295,8 @@
 | `ElectricalViewer.jsx` | Electrical grid visualization (power lines, substations, voltage tiers) |
 | `ContractorCards.jsx` | Contractor/trade recommendation cards |
 | `BlueprintOverlay.jsx` | Blueprint display overlay |
-| `InfrastructureLayerControl.jsx` | Floating layer toggle panel (Roads, Water, EV) |
+| `InfrastructureLayerControl.jsx` | Floating layer toggle panel for DB-backed infrastructure overlays (Water Mains, Sewers, Electrical Grid) |
+| `ServicingSummaryCard.jsx` | Municipal servicing summary card with status indicators and capacity check form |
 | `UserBubble.jsx` | User profile menu |
 
 ### Floor Plan Editor (`src/components/floorplan/`)
@@ -324,25 +329,28 @@
 | `PipeProperties.jsx` | Pipe parameter editor |
 | `ProfileView.jsx` | Elevation profile view |
 
-### Hooks (`src/hooks/`)
+### Hooks (`src/hooks/` and `src/app/hooks/`)
 
 | File | Purpose |
 |------|---------|
 | `useResizable.js` | Resizable panel hook |
+| `src/app/hooks/useNearbyInfrastructure.js` | React hook to fetch nearby water, sewer, storm, electrical infrastructure for a parcel |
 
-### Utilities (`src/lib/`)
+### Utilities (`src/lib/` and `src/app/lib/`)
 
 | File | Purpose |
 |------|---------|
+| `src/app/lib/geoUtils.js` | Centroid extraction utility for GeoJSON geometries |
 | `buildingGeometry.js` | 3D building geometry helpers |
 | `wallGeometry.js` | Wall geometry calculations |
 | `floorPlanHelpers.js` | Floor plan utilities |
 | `infrastructureGeometry.js` | Pipeline geometry math |
-| `parcelState.js` | Parcel data state management |
+| `parcelState.js` | Parcel data state management, multi-selection helpers (add/remove/toggle, max 4) |
+| `chatHistory.js` | localStorage conversation persistence (CRUD, auto-prune at 50, title from first user message) |
 | `chatCommands.js` | Chat command parsing |
 | `watermainStandards.js` | Water main diameter/depth rules |
 | `chatCommands.test.js` | Tests for chat command parsing |
-| `parcelState.test.js` | Tests for parcel state functions |
+| `parcelState.test.js` | Tests for parcel state functions and multi-selection helpers |
 
 ### Dev Harness (`src/dev/`)
 
@@ -374,15 +382,13 @@
 
 ---
 
-## Skills Pipeline — `.claude/skills/`
+## Knowledge — `knowledge/`
 
-Sequential AI research pipeline for Ontario site-feasibility:
+Domain knowledge for CoCivil's AI systems. Single source directory for RAG ingestion into ChromaDB.
 
-```
-Address → source-discovery → parcel-zoning-research → buildability-analysis → approval-pathway
-                                                    → precedent-research   → constraints-red-flags
-                                                                           → report-generator
-```
+### Research Pipeline (`knowledge/research-pipeline/`)
+
+9 sequential AI research skills for Ontario site-feasibility:
 
 | Skill | Output | Purpose |
 |-------|--------|---------|
@@ -396,64 +402,26 @@ Address → source-discovery → parcel-zoning-research → buildability-analysi
 | `infrastructure-assessment` | `condition_assessment.json` | Asset condition rating & rehab priority |
 | `infrastructure-standards` | — | OPSD/CSA/MTO standard lookups |
 
----
+### Document Templates (`knowledge/document-templates/`)
 
-## Agent Skills — `.agents/skills/`
+29 ontario-* planning document generation skills (planning rationale, compliance matrix, cover letter, precedent report, etc.).
 
-29 self-contained agent skill definitions for Ontario planning document generation. Each directory contains a `SKILL.md` with inputs, outputs, workflow, and governing law references.
+### Water Policy (`knowledge/water-policy/`)
 
-### Data & Research Skills
+13 markdown docs + PDF references on Ontario water/sewer regulations, MECP procedures, MTU zone maps.
 
-| Skill | Section | Purpose |
-|-------|---------|---------|
-| `ontario-planning-framework` | 1 | Foundational legal hierarchy and data sources |
-| `ontario-planning-appendices` | 15 | Reference compendium (11 appendices: legislation, fees, glossary, QA) |
+### Research (`knowledge/research/`)
 
-### Compliance & Analysis Skills
-
-| Skill | Section | Purpose |
-|-------|---------|---------|
-| `ontario-compliance-matrix` | 2 | Zoning standards comparison table (required vs proposed) |
-| `ontario-as-of-right-checker` | 14 | Determine if development needs no planning application |
-| `ontario-required-studies` | 15 | Trigger-based checklist of 22 required technical studies |
-| `ontario-upload-analysis` | 12 | Extract dimensions from uploaded PDF/DXF drawings |
-
-### Document Generation Skills
-
-| Skill | Section | Purpose |
-|-------|---------|---------|
-| `ontario-planning-rationale` | 3 | Full 15–40 page planning rationale report |
-| `ontario-cover-letter` | 4 | Formal application cover letter |
-| `ontario-precedent-report` | 5 | CoA/OLT comparable decisions report |
-| `ontario-financial-feasibility` | 6 | Development cost/revenue pro forma |
-| `ontario-massing-built-form` | 7 | Built form description + guideline compliance |
-| `ontario-unit-mix-layout` | 8 | Unit distribution + Growing Up Guidelines check |
-| `ontario-shadow-study` | 9 | Shadow analysis (Toronto standard test dates) |
-| `ontario-public-benefit` | 10 | Public benefit statement (housing, sustainability) |
-| `ontario-site-plan-data` | 11 | Site plan data summary tables |
-| `ontario-correction-response` | 13 | Response letter to municipal staff comments |
-| `ontario-due-diligence` | 16 | Consolidated pre-acquisition due diligence report |
-
-### Approval & Legal Skills
-
-| Skill | Section | Purpose |
-|-------|---------|---------|
-| `ontario-approval-pathway` | 17 | Approval process classification (as-of-right/MV/ZBA/OPA) |
-| `ontario-timeline-fee-estimator` | 18 | Timeline + government/consultant fee estimates |
-| `ontario-four-statutory-tests` | 20 | s.45(1) four-test analysis for minor variance |
-| `ontario-variance-justification-table` | 21 | Per-variance justification table for CoA package |
-| `ontario-building-permit-checklist` | 22 | Post-approval building permit readiness checklist |
-| `ontario-olt-appeal-strategy` | 24 | OLT appeal strategy brief (PROCEED/REVISE/SETTLE) |
-
-### Application Packaging Skills
-
-| Skill | Section | Purpose |
-|-------|---------|---------|
-| `ontario-auto-filled-committee-form` | 19 | Pre-populated CoA application form |
-| `ontario-neighbour-support-letter` | 23 | Neighbour info letter + support letter template |
-| `ontario-site-photo-checklist` | 25 | Required photographs checklist by proposal type |
-| `ontario-pre-application-consultation` | 26 | Pre-consultation meeting package |
-| `ontario-professional-referral-matcher` | 27 | Match project to required professionals (RPP, OAA, P.Eng, etc.) |
+| File | Purpose |
+|------|---------|
+| `arterial_backend_clone_analysis.md` | Reverse-engineering analysis of Arterial.design |
+| `DATA_PLAN.md` | MVP data plan: 4 dataset tiers, 9-stage ingestion pipeline |
+| `DATA_RESEARCH_TEAM_PLAN.md` | 6 parallel research tracks for Toronto MVP |
+| `IMPLEMENTATION_PLAN.md` | Full technical spec: schema DDL, algorithms, phase breakdown |
+| `SUBMISSION_RESEARCH.md` | Toronto application requirements, document types, policy framework |
+| `RAG_LEGAL_DOCUMENT_GENERATION_RESEARCH.md` | RAG architecture research |
+| `TRACK_3_4_RESEARCH.md` | Research for Policy Text + Hard Constraint Overlays tracks |
+| `TRACK_5_6_RESEARCH.md` | Research for Simulation Defaults + Precedent/Permit tracks |
 
 ---
 
@@ -509,23 +477,8 @@ Address → source-discovery → parcel-zoning-research → buildability-analysi
 | `test_job_service.py` | Job status serialization across async tables |
 | `test_dev_architecture.py` | Docker compose structure, .env.example validation |
 | `test_audit_toronto_seed.py` | Benchmark suite execution without DB |
+| `test_cache.py` | Redis cache-aside: hit, miss, Redis down, fetch error, TTL (all mocked) |
 | `fixtures/benchmarks/` | 3 fixture files: toronto_core.json, toronto_phase2.json, toronto_showcase.json |
-
----
-
-## Documentation — `docs/`
-
-| File | Purpose |
-|------|---------|
-| `index.md` | Documentation overview (29 endpoints, 34 tables, implementation status) |
-| `arterial_backend_clone_analysis.md` | Reverse-engineering analysis of Arterial.design (founding blueprint) |
-| `DATA_PLAN.md` | MVP data plan: 4 dataset tiers, 9-stage ingestion pipeline |
-| `DATA_RESEARCH_TEAM_PLAN.md` | 6 parallel research tracks for Toronto MVP |
-| `IMPLEMENTATION_PLAN.md` | Full technical spec: schema DDL, algorithms, phase breakdown |
-| `SUBMISSION_RESEARCH.md` | Toronto application requirements, document types, policy framework |
-| `RAG_LEGAL_DOCUMENT_GENERATION_RESEARCH.md` | RAG architecture research: embeddings, chunking, hallucination prevention |
-| `TRACK_3_4_RESEARCH.md` | Research for Policy Text + Hard Constraint Overlays tracks |
-| `TRACK_5_6_RESEARCH.md` | Research for Simulation Defaults + Precedent/Permit tracks |
 
 ---
 
@@ -540,7 +493,6 @@ Address → source-discovery → parcel-zoning-research → buildability-analysi
 | `data/development-applications.json` | CoA/ZBA/OPA precedent records (UTM coords) |
 | `data/test_floor_plan.dxf` | Sample DXF for parser testing |
 | `water-system-data/` | Distribution mains GeoJSON + waterbodies shapefile (other layers removed — ingested into pipeline_assets) |
-| `water-policy/` | 13 markdown docs + 20 PDF references (Ontario regs, MECP procedures, MTU zone maps) |
 | `Road/` | Road Reconstruction Program GeoJSON (LineString) |
 | `City-electric-charge/` | City-operated EV charging stations GeoJSON (Point) |
 
@@ -558,7 +510,7 @@ Address → source-discovery → parcel-zoning-research → buildability-analysi
 | `frontend/src/app/api/auth/exchange/route.ts` | Next.js route: exchanges Better Auth session cookie for FastAPI JWT |
 | `railway.toml` | Railway API service config (pre-deploy: alembic migrate, health: /api/v1/health) |
 | `alembic.ini` | Alembic migration config |
-| `alembic/` | 11 migrations: initial 34-table schema → infrastructure assets → infra data refactor → fact tables → esa_flag |
+| `alembic/` | 13 migrations: initial 34-table schema → infrastructure assets → infra data refactor → fact tables → esa_flag → project workspace → fix electrical asset_type |
 | `pyproject.toml` | Python project config (uv), Python ≥3.11, pytest asyncio_mode=auto |
 | `Makefile` | 12 targets: infra-up/down, doctor, migrate, run-api/frontend, seed, test |
 | `.env.example` | Environment variable template (localhost targets) |
@@ -620,16 +572,30 @@ Address → source-discovery → parcel-zoning-research → buildability-analysi
 | `POST` | `/api/v1/assistant/parse-model` | Parse NL building description into 3D params |
 | `POST` | `/api/v1/assistant/parse-infra-model` | Parse NL infrastructure description into params |
 
-### Projects & Scenarios (9 endpoints)
+### Projects & Scenarios (21 endpoints)
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `POST` | `/api/v1/projects` | Create project |
-| `GET` | `/api/v1/projects` | List projects for org |
-| `GET` | `/api/v1/projects/{id}` | Get project |
+| `GET` | `/api/v1/projects` | List projects for org (with counts) |
+| `GET` | `/api/v1/projects/{id}` | Get project (with counts) |
 | `PATCH` | `/api/v1/projects/{id}` | Update project |
+| `DELETE` | `/api/v1/projects/{id}` | Delete project |
 | `POST` | `/api/v1/projects/{id}/parcels` | Link parcel to project |
 | `DELETE` | `/api/v1/projects/{id}/parcels/{parcel_id}` | Unlink parcel |
+| `POST` | `/api/v1/projects/{id}/notes` | Create note |
+| `GET` | `/api/v1/projects/{id}/notes` | List notes (pinned first) |
+| `PATCH` | `/api/v1/projects/{id}/notes/{note_id}` | Update/pin note |
+| `DELETE` | `/api/v1/projects/{id}/notes/{note_id}` | Delete note |
+| `POST` | `/api/v1/projects/{id}/conversations` | Save conversation |
+| `GET` | `/api/v1/projects/{id}/conversations` | List conversations (summaries) |
+| `GET` | `/api/v1/projects/{id}/conversations/{conv_id}` | Get full conversation |
+| `PUT` | `/api/v1/projects/{id}/conversations/{conv_id}` | Update conversation messages |
+| `DELETE` | `/api/v1/projects/{id}/conversations/{conv_id}` | Delete conversation |
+| `GET` | `/api/v1/projects/{id}/plans` | List plans for project |
+| `GET` | `/api/v1/projects/{id}/uploads` | List project files |
+| `POST` | `/api/v1/projects/{id}/uploads` | Upload file to project |
+| `PATCH` | `/api/v1/projects/{id}/map-state` | Save map state |
 | `POST` | `/api/v1/projects/{id}/scenarios` | Create scenario run |
 | `GET` | `/api/v1/scenarios/{id}` | Get scenario |
 | `GET` | `/api/v1/scenarios/{id}/compare/{other_id}` | Compare two scenarios |
