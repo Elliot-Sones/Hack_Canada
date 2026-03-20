@@ -27,7 +27,7 @@ from langchain_core.documents import Document
 
 from config import (
     DOCS_DIR, ALL_DOCS_DIRS, CHROMA_DIR, CHUNK_SIZE, CHUNK_OVERLAP,
-    COLLECTION_NAME, EMBEDDING_MODEL, VOYAGE_API_KEY
+    COLLECTION_NAME, EMBEDDING_MODEL, VOYAGE_API_KEY, OPENAI_API_KEY
 )
 
 # ---------------------------------------------------------------------------
