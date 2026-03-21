@@ -148,18 +148,42 @@ async def _find_or_create_cocivil_user(db: AsyncSession, ba_user: BetterAuthUser
     user_id = _uuid.uuid4()
 
     async with factory() as fresh_db:
-        await fresh_db.execute(
-            text("INSERT INTO organizations (id, name, slug) VALUES (:id, :name, :slug)"),
-            {"id": str(org_id), "name": org_name, "slug": slug},
+        # Create org (skip if slug already exists from a prior partial bootstrap)
+        existing_org = await fresh_db.execute(
+            text("SELECT id FROM organizations WHERE slug = :slug"), {"slug": slug}
         )
-        await fresh_db.execute(
-            text("INSERT INTO users (id, email, name) VALUES (:id, :email, :name)"),
-            {"id": str(user_id), "email": ba_user.email, "name": ba_user.name},
+        org_row = existing_org.first()
+        if org_row:
+            org_id = org_row[0]
+        else:
+            await fresh_db.execute(
+                text("INSERT INTO organizations (id, name, slug) VALUES (:id, :name, :slug)"),
+                {"id": str(org_id), "name": org_name, "slug": slug},
+            )
+
+        # Create user (skip if email already exists)
+        existing_user = await fresh_db.execute(
+            text("SELECT id FROM users WHERE email = :email"), {"email": ba_user.email}
         )
-        await fresh_db.execute(
-            text("INSERT INTO workspace_members (organization_id, user_id, role) VALUES (:org_id, :user_id, :role)"),
-            {"org_id": str(org_id), "user_id": str(user_id), "role": "owner"},
+        user_row = existing_user.first()
+        if user_row:
+            user_id = user_row[0]
+        else:
+            await fresh_db.execute(
+                text("INSERT INTO users (id, email, name) VALUES (:id, :email, :name)"),
+                {"id": str(user_id), "email": ba_user.email, "name": ba_user.name},
+            )
+
+        # Create membership (skip if already exists)
+        existing_member = await fresh_db.execute(
+            text("SELECT 1 FROM workspace_members WHERE user_id = :uid"), {"uid": str(user_id)}
         )
+        if not existing_member.first():
+            await fresh_db.execute(
+                text("INSERT INTO workspace_members (organization_id, user_id, role) VALUES (:org_id, :user_id, :role)"),
+                {"org_id": str(org_id), "user_id": str(user_id), "role": "owner"},
+            )
+
         await fresh_db.commit()
 
     await engine.dispose()
