@@ -199,39 +199,46 @@ CLARIFICATION_CONFIDENCE_THRESHOLD = 0.2
 
 
 def _update_plan_status(db, plan, status, step=None, progress_update=None, error=None):
-    """Helper to update plan status in the database."""
-    try:
-        # Recover from any previous failed transaction
-        if not db.is_active:
-            db.rollback()
-            plan = db.merge(plan)
+    """Helper to update plan status using a separate connection to avoid session corruption."""
+    import json as _json
+    from sqlalchemy import text, create_engine
+    from app.config import settings
 
-        plan.status = status
-        if step:
-            plan.current_step = step
-        if progress_update:
-            progress = dict(plan.pipeline_progress or {})
-            progress.update(progress_update)
-            plan.pipeline_progress = progress
-        if error:
-            plan.error_message = error
-        db.commit()
-        db.refresh(plan)
-    except Exception:
-        db.rollback()
-        # Retry once with a fresh merge
-        plan = db.merge(plan)
-        plan.status = status
-        if step:
-            plan.current_step = step
-        if progress_update:
-            progress = dict(plan.pipeline_progress or {})
-            progress.update(progress_update)
-            plan.pipeline_progress = progress
-        if error:
-            plan.error_message = error
-        db.commit()
-        db.refresh(plan)
+    # Update in-memory plan object
+    plan.status = status
+    if step:
+        plan.current_step = step
+    if progress_update:
+        progress = dict(plan.pipeline_progress or {})
+        progress.update(progress_update)
+        plan.pipeline_progress = progress
+    if error:
+        plan.error_message = error
+
+    # Write to DB using a separate short-lived connection to avoid PendingRollbackError
+    try:
+        engine = create_engine(settings.DATABASE_URL_SYNC, echo=False)
+        with engine.connect() as conn:
+            conn.execute(
+                text("""UPDATE development_plans
+                        SET status = :status,
+                            current_step = :step,
+                            pipeline_progress = :progress::jsonb,
+                            error_message = :error,
+                            updated_at = now()
+                        WHERE id = :plan_id"""),
+                {
+                    "status": status,
+                    "step": step,
+                    "progress": _json.dumps(plan.pipeline_progress or {}),
+                    "error": error,
+                    "plan_id": str(plan.id),
+                },
+            )
+            conn.commit()
+        engine.dispose()
+    except Exception as e:
+        logger.warning("plan.status_update.failed", plan_id=str(plan.id), error=str(e))
 
 
 def _fail_plan(db, plan, step, error):
@@ -497,16 +504,8 @@ def _build_context_and_generate_docs(
                 "total_docs": total_docs,
             }
             plan.pipeline_progress = progress
-            try:
-                db.commit()
-            except Exception:
-                db.rollback()
-                try:
-                    plan = db.merge(plan)
-                    plan.pipeline_progress = progress
-                    db.commit()
-                except Exception:
-                    db.rollback()
+            # Use separate connection for progress update to avoid session corruption
+            _update_plan_status(db, plan, plan.status, step=plan.current_step)
 
             # For compliance_matrix, use deterministic content (no AI)
             if doc_type == "compliance_matrix" and compliance_result:
