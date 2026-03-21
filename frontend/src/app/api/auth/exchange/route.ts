@@ -3,7 +3,8 @@ import { NextResponse } from 'next/server';
 
 export async function POST() {
   const cookieStore = await cookies();
-  const rawToken = cookieStore.get('better-auth.session_token')?.value;
+  const rawToken = cookieStore.get('better-auth.session_token')?.value
+      || cookieStore.get('__Secure-better-auth.session_token')?.value;
   if (!rawToken) {
     return NextResponse.json({ error: 'No session' }, { status: 401 });
   }
