@@ -6,7 +6,7 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
 from jose import jwt
 from passlib.context import CryptContext
-from sqlalchemy import insert, select
+from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -134,28 +134,31 @@ async def _find_or_create_cocivil_user(db: AsyncSession, ba_user: BetterAuthUser
     if user:
         return user
 
-    # First-time bootstrap: create org + user + membership using raw inserts
-    # to avoid ORM relationship lazy-loading in async context
+    # First-time bootstrap: create org + user + membership using raw SQL
+    # to completely avoid ORM mapper/relationship triggers in async context
     org_name = f"{ba_user.name}'s Organization"
     slug = _slugify(org_name)
     org_id = _uuid.uuid4()
 
     try:
         await db.execute(
-            insert(Organization).values(id=org_id, name=org_name, slug=slug)
+            text("INSERT INTO organizations (id, name, slug) VALUES (:id, :name, :slug)"),
+            {"id": str(org_id), "name": org_name, "slug": slug},
         )
     except IntegrityError:
         await db.rollback()
         slug = f"{slug}-{os.urandom(2).hex()}"
         org_id = _uuid.uuid4()
         await db.execute(
-            insert(Organization).values(id=org_id, name=org_name, slug=slug)
+            text("INSERT INTO organizations (id, name, slug) VALUES (:id, :name, :slug)"),
+            {"id": str(org_id), "name": org_name, "slug": slug},
         )
 
     user_id = _uuid.uuid4()
     try:
         await db.execute(
-            insert(User).values(id=user_id, email=ba_user.email, name=ba_user.name, password_hash=None)
+            text("INSERT INTO users (id, email, name) VALUES (:id, :email, :name)"),
+            {"id": str(user_id), "email": ba_user.email, "name": ba_user.name},
         )
     except IntegrityError:
         await db.rollback()
@@ -166,7 +169,8 @@ async def _find_or_create_cocivil_user(db: AsyncSession, ba_user: BetterAuthUser
         return user
 
     await db.execute(
-        insert(WorkspaceMember).values(organization_id=org_id, user_id=user_id, role="owner")
+        text("INSERT INTO workspace_members (organization_id, user_id, role) VALUES (:org_id, :user_id, :role)"),
+        {"org_id": str(org_id), "user_id": str(user_id), "role": "owner"},
     )
 
     log.info("bootstrapped_cocivil_user", email=ba_user.email, org_slug=slug)
