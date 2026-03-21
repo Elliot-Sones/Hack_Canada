@@ -200,17 +200,38 @@ CLARIFICATION_CONFIDENCE_THRESHOLD = 0.2
 
 def _update_plan_status(db, plan, status, step=None, progress_update=None, error=None):
     """Helper to update plan status in the database."""
-    plan.status = status
-    if step:
-        plan.current_step = step
-    if progress_update:
-        progress = dict(plan.pipeline_progress or {})
-        progress.update(progress_update)
-        plan.pipeline_progress = progress
-    if error:
-        plan.error_message = error
-    db.commit()
-    db.refresh(plan)
+    try:
+        # Recover from any previous failed transaction
+        if not db.is_active:
+            db.rollback()
+            plan = db.merge(plan)
+
+        plan.status = status
+        if step:
+            plan.current_step = step
+        if progress_update:
+            progress = dict(plan.pipeline_progress or {})
+            progress.update(progress_update)
+            plan.pipeline_progress = progress
+        if error:
+            plan.error_message = error
+        db.commit()
+        db.refresh(plan)
+    except Exception:
+        db.rollback()
+        # Retry once with a fresh merge
+        plan = db.merge(plan)
+        plan.status = status
+        if step:
+            plan.current_step = step
+        if progress_update:
+            progress = dict(plan.pipeline_progress or {})
+            progress.update(progress_update)
+            plan.pipeline_progress = progress
+        if error:
+            plan.error_message = error
+        db.commit()
+        db.refresh(plan)
 
 
 def _fail_plan(db, plan, step, error):
