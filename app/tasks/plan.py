@@ -498,9 +498,15 @@ def _build_context_and_generate_docs(
             }
             plan.pipeline_progress = progress
             try:
-                db.flush()
+                db.commit()
             except Exception:
-                pass
+                db.rollback()
+                try:
+                    plan = db.merge(plan)
+                    plan.pipeline_progress = progress
+                    db.commit()
+                except Exception:
+                    db.rollback()
 
             # For compliance_matrix, use deterministic content (no AI)
             if doc_type == "compliance_matrix" and compliance_result:
