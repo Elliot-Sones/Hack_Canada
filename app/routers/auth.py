@@ -128,53 +128,44 @@ async def session_exchange(body: SessionExchangeRequest, db: AsyncSession = Depe
 async def _find_or_create_cocivil_user(db: AsyncSession, ba_user: BetterAuthUser) -> User:
     """Find existing cocivil user by email, or bootstrap a new one."""
     import uuid as _uuid
+    from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession as _AS
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+    from app.config import settings
 
     result = await db.execute(select(User).where(User.email == ba_user.email))
     user = result.scalar_one_or_none()
     if user:
         return user
 
-    # First-time bootstrap: create org + user + membership using raw SQL
-    # to completely avoid ORM mapper/relationship triggers in async context
+    # First-time bootstrap: use a SEPARATE connection to avoid corrupting
+    # the request's async session if IntegrityError + rollback occurs.
+    engine = create_async_engine(settings.DATABASE_URL, echo=False)
+    factory = async_sessionmaker(engine, class_=_AS, expire_on_commit=False)
+
     org_name = f"{ba_user.name}'s Organization"
     slug = _slugify(org_name)
     org_id = _uuid.uuid4()
-
-    try:
-        await db.execute(
-            text("INSERT INTO organizations (id, name, slug) VALUES (:id, :name, :slug)"),
-            {"id": str(org_id), "name": org_name, "slug": slug},
-        )
-    except IntegrityError:
-        await db.rollback()
-        slug = f"{slug}-{os.urandom(2).hex()}"
-        org_id = _uuid.uuid4()
-        await db.execute(
-            text("INSERT INTO organizations (id, name, slug) VALUES (:id, :name, :slug)"),
-            {"id": str(org_id), "name": org_name, "slug": slug},
-        )
-
     user_id = _uuid.uuid4()
-    try:
-        await db.execute(
+
+    async with factory() as fresh_db:
+        await fresh_db.execute(
+            text("INSERT INTO organizations (id, name, slug) VALUES (:id, :name, :slug)"),
+            {"id": str(org_id), "name": org_name, "slug": slug},
+        )
+        await fresh_db.execute(
             text("INSERT INTO users (id, email, name) VALUES (:id, :email, :name)"),
             {"id": str(user_id), "email": ba_user.email, "name": ba_user.name},
         )
-    except IntegrityError:
-        await db.rollback()
-        result = await db.execute(select(User).where(User.email == ba_user.email))
-        user = result.scalar_one_or_none()
-        if not user:
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create user")
-        return user
+        await fresh_db.execute(
+            text("INSERT INTO workspace_members (organization_id, user_id, role) VALUES (:org_id, :user_id, :role)"),
+            {"org_id": str(org_id), "user_id": str(user_id), "role": "owner"},
+        )
+        await fresh_db.commit()
 
-    await db.execute(
-        text("INSERT INTO workspace_members (organization_id, user_id, role) VALUES (:org_id, :user_id, :role)"),
-        {"org_id": str(org_id), "user_id": str(user_id), "role": "owner"},
-    )
+    await engine.dispose()
 
     log.info("bootstrapped_cocivil_user", email=ba_user.email, org_slug=slug)
 
-    # Fetch the created user as ORM object for the caller
+    # Fetch the created user via the request's session
     result = await db.execute(select(User).where(User.id == user_id))
     return result.scalar_one()
