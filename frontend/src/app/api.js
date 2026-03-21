@@ -2,6 +2,29 @@
 
 const API_BASE = '/api/v1';
 
+// ─── Simple in-memory GET cache (5-min TTL, 200-entry cap) ───
+
+const _cache = new Map();
+const CACHE_TTL_MS = 5 * 60 * 1000;
+
+function getCached(url) {
+    const entry = _cache.get(url);
+    if (!entry) return undefined;
+    if (Date.now() - entry.ts > CACHE_TTL_MS) {
+        _cache.delete(url);
+        return undefined;
+    }
+    return entry.data;
+}
+
+function setCache(url, data) {
+    _cache.set(url, { data, ts: Date.now() });
+    if (_cache.size > 200) {
+        const oldest = _cache.keys().next().value;
+        _cache.delete(oldest);
+    }
+}
+
 function authHeaders() {
     const token = localStorage.getItem('token');
     const headers = { 'Content-Type': 'application/json' };
@@ -78,10 +101,14 @@ export function clearFastApiToken() { localStorage.removeItem('token'); }
 // ─── Parcels ───
 
 export async function searchParcels(address, { lat, lng } = {}) {
+    let url = `${API_BASE}/parcels/search?address=${encodeURIComponent(address)}`;
+    if (lat != null && lng != null) url += `&lat=${lat}&lng=${lng}`;
+    const cached = getCached(url);
+    if (cached) return cached;
     try {
-        let url = `${API_BASE}/parcels/search?address=${encodeURIComponent(address)}`;
-        if (lat != null && lng != null) url += `&lat=${lat}&lng=${lng}`;
-        return await apiFetch(url);
+        const data = await apiFetch(url);
+        setCache(url, data);
+        return data;
     } catch {
         return [];
     }
@@ -115,8 +142,13 @@ export async function searchParcelsBbox(bounds, zoom, options = {}) {
 }
 
 export async function getParcel(parcelId, options = {}) {
+    const url = `${API_BASE}/parcels/${parcelId}`;
+    const cached = getCached(url);
+    if (cached) return cached;
     try {
-        return await apiFetch(`${API_BASE}/parcels/${parcelId}`, options);
+        const data = await apiFetch(url, options);
+        setCache(url, data);
+        return data;
     } catch (error) {
         if (isAbortError(error)) throw error;
         return null;
@@ -124,8 +156,13 @@ export async function getParcel(parcelId, options = {}) {
 }
 
 export async function getPolicyStack(parcelId, options = {}) {
+    const url = `${API_BASE}/parcels/${parcelId}/policy-stack`;
+    const cached = getCached(url);
+    if (cached) return cached;
     try {
-        return await apiFetch(`${API_BASE}/parcels/${parcelId}/policy-stack`, options);
+        const data = await apiFetch(url, options);
+        setCache(url, data);
+        return data;
     } catch (error) {
         if (isAbortError(error)) throw error;
         return { parcel_id: parcelId, applicable_policies: [], citations: [] };
@@ -133,8 +170,13 @@ export async function getPolicyStack(parcelId, options = {}) {
 }
 
 export async function getParcelOverlays(parcelId, options = {}) {
+    const url = `${API_BASE}/parcels/${parcelId}/overlays`;
+    const cached = getCached(url);
+    if (cached) return cached;
     try {
-        return await apiFetch(`${API_BASE}/parcels/${parcelId}/overlays`, options);
+        const data = await apiFetch(url, options);
+        setCache(url, data);
+        return data;
     } catch (error) {
         if (isAbortError(error)) throw error;
         return { parcel_id: parcelId, overlays: [] };
@@ -142,8 +184,13 @@ export async function getParcelOverlays(parcelId, options = {}) {
 }
 
 export async function getParcelZoningAnalysis(parcelId, options = {}) {
+    const url = `${API_BASE}/parcels/${parcelId}/zoning-analysis`;
+    const cached = getCached(url);
+    if (cached) return cached;
     try {
-        return await apiFetch(`${API_BASE}/parcels/${parcelId}/zoning-analysis`, options);
+        const data = await apiFetch(url, options);
+        setCache(url, data);
+        return data;
     } catch (error) {
         if (isAbortError(error)) throw error;
         return null;
@@ -313,10 +360,14 @@ export async function generateResponseFromUpload(uploadId, responseType = 'corre
 // ─── Infrastructure ───
 
 export async function getNearbyPipelines(lat, lng, radius = 500, pipeType = null, options = {}) {
+    let url = `${API_BASE}/infrastructure/pipelines/nearby?lat=${lat}&lng=${lng}&radius_m=${radius}`;
+    if (pipeType) url += `&pipe_type=${pipeType}`;
+    const cached = getCached(url);
+    if (cached) return cached;
     try {
-        let url = `${API_BASE}/infrastructure/pipelines/nearby?lat=${lat}&lng=${lng}&radius_m=${radius}`;
-        if (pipeType) url += `&pipe_type=${pipeType}`;
-        return await apiFetch(url, options);
+        const data = await apiFetch(url, options);
+        setCache(url, data);
+        return data;
     } catch (error) {
         if (isAbortError(error)) throw error;
         return { type: 'FeatureCollection', features: [] };
@@ -362,9 +413,13 @@ export async function triggerStormSewerIngestion() {
 }
 
 export async function getElectricalNearby(lat, lng, radius = 500, options = {}) {
+    const url = `${API_BASE}/infrastructure/electrical/nearby?lat=${lat}&lng=${lng}&radius_m=${radius}`;
+    const cached = getCached(url);
+    if (cached) return cached;
     try {
-        const url = `${API_BASE}/infrastructure/electrical/nearby?lat=${lat}&lng=${lng}&radius_m=${radius}`;
-        return await apiFetch(url, options);
+        const data = await apiFetch(url, options);
+        setCache(url, data);
+        return data;
     } catch (error) {
         if (isAbortError(error)) throw error;
         return { type: 'FeatureCollection', features: [] };

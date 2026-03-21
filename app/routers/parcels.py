@@ -32,6 +32,12 @@ from app.services.zoning_service import ZoningAnalysis, build_zoning_analysis
 router = APIRouter()
 
 
+class _SkipCache(Exception):
+    """Raised to return a result without caching it."""
+    def __init__(self, result):
+        self.result = result
+
+
 def _serialize_zoning_analysis(analysis: ZoningAnalysis) -> ZoningAnalysisResponse:
     components = None
     if analysis.components is not None:
@@ -100,72 +106,49 @@ async def search_parcels(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    active_snapshot_ids = await list_active_snapshot_ids(db, "parcel_base")
-    query = build_parcel_search_statement(params, active_snapshot_ids=active_snapshot_ids)
+    # Cache address/coord lookups (not bbox viewport queries — those change on every pan)
+    cache_key = None
+    if not params.bbox and params.address:
+        cache_key = f"cocivil:search:{params.address}:{params.lat}:{params.lng}:{params.pin}"
 
-    query = query.add_columns(func.ST_AsGeoJSON(Parcel.geom).label("geom_json"))
-    result = await db.execute(query)
+    async def _fetch():
+        active_snapshot_ids = await list_active_snapshot_ids(db, "parcel_base")
+        query = build_parcel_search_statement(params, active_snapshot_ids=active_snapshot_ids)
 
-    response = []
-    for parcel, geom_json in result:
-        p_dict = {
-            "id": parcel.id,
-            "jurisdiction_id": parcel.jurisdiction_id,
-            "pin": parcel.pin,
-            "address": parcel.address,
-            "lot_area_m2": parcel.lot_area_m2,
-            "lot_frontage_m": parcel.lot_frontage_m,
-            "zone_code": parcel.zone_code,
-            "current_use": parcel.current_use,
-            "geom": json.loads(geom_json) if geom_json else None
-        }
-        response.append(p_dict)
+        query = query.add_columns(func.ST_AsGeoJSON(Parcel.geom).label("geom_json"))
+        result = await db.execute(query)
 
-    # Spatial fallback: if text search returned nothing and we have coordinates,
-    # find the nearest parcel containing or closest to that point.
-    if not response and params.lat is not None and params.lng is not None:
-        point = func.ST_SetSRID(func.ST_MakePoint(params.lng, params.lat), 4326)
-
-        # First try: parcel that contains the point
-        contains_query = (
-            select(Parcel, func.ST_AsGeoJSON(Parcel.geom).label("geom_json"))
-            .where(func.ST_Contains(Parcel.geom, point))
-        )
-        if active_snapshot_ids:
-            contains_query = contains_query.where(Parcel.source_snapshot_id.in_(list(active_snapshot_ids)))
-        contains_query = contains_query.limit(5)
-        contains_result = await db.execute(contains_query)
-
-        for parcel, geom_json in contains_result:
-            response.append({
+        response = []
+        for parcel, geom_json in result:
+            p_dict = {
                 "id": parcel.id,
                 "jurisdiction_id": parcel.jurisdiction_id,
                 "pin": parcel.pin,
-                "address": parcel.address if parcel.address and parcel.address != "None None" else params.address,
+                "address": parcel.address,
                 "lot_area_m2": parcel.lot_area_m2,
                 "lot_frontage_m": parcel.lot_frontage_m,
                 "zone_code": parcel.zone_code,
                 "current_use": parcel.current_use,
-                "geom": json.loads(geom_json) if geom_json else None,
-            })
+                "geom": json.loads(geom_json) if geom_json else None
+            }
+            response.append(p_dict)
 
-        # Second try: nearest parcel within 50m
-        if not response:
-            nearest_query = (
+        # Spatial fallback: if text search returned nothing and we have coordinates,
+        # find the nearest parcel containing or closest to that point.
+        if not response and params.lat is not None and params.lng is not None:
+            point = func.ST_SetSRID(func.ST_MakePoint(params.lng, params.lat), 4326)
+
+            # First try: parcel that contains the point
+            contains_query = (
                 select(Parcel, func.ST_AsGeoJSON(Parcel.geom).label("geom_json"))
-                .where(func.ST_DWithin(
-                    Parcel.geom.cast(Geography),
-                    point.cast(Geography),
-                    50,
-                ))
-                .order_by(func.ST_Distance(Parcel.geom, point))
+                .where(func.ST_Contains(Parcel.geom, point))
             )
             if active_snapshot_ids:
-                nearest_query = nearest_query.where(Parcel.source_snapshot_id.in_(list(active_snapshot_ids)))
-            nearest_query = nearest_query.limit(1)
-            nearest_result = await db.execute(nearest_query)
+                contains_query = contains_query.where(Parcel.source_snapshot_id.in_(list(active_snapshot_ids)))
+            contains_query = contains_query.limit(5)
+            contains_result = await db.execute(contains_query)
 
-            for parcel, geom_json in nearest_result:
+            for parcel, geom_json in contains_result:
                 response.append({
                     "id": parcel.id,
                     "jurisdiction_id": parcel.jurisdiction_id,
@@ -178,7 +161,40 @@ async def search_parcels(
                     "geom": json.loads(geom_json) if geom_json else None,
                 })
 
-    return response
+            # Second try: nearest parcel within 50m
+            if not response:
+                nearest_query = (
+                    select(Parcel, func.ST_AsGeoJSON(Parcel.geom).label("geom_json"))
+                    .where(func.ST_DWithin(
+                        Parcel.geom.cast(Geography),
+                        point.cast(Geography),
+                        50,
+                    ))
+                    .order_by(func.ST_Distance(Parcel.geom, point))
+                )
+                if active_snapshot_ids:
+                    nearest_query = nearest_query.where(Parcel.source_snapshot_id.in_(list(active_snapshot_ids)))
+                nearest_query = nearest_query.limit(1)
+                nearest_result = await db.execute(nearest_query)
+
+                for parcel, geom_json in nearest_result:
+                    response.append({
+                        "id": parcel.id,
+                        "jurisdiction_id": parcel.jurisdiction_id,
+                        "pin": parcel.pin,
+                        "address": parcel.address if parcel.address and parcel.address != "None None" else params.address,
+                        "lot_area_m2": parcel.lot_area_m2,
+                        "lot_frontage_m": parcel.lot_frontage_m,
+                        "zone_code": parcel.zone_code,
+                        "current_use": parcel.current_use,
+                        "geom": json.loads(geom_json) if geom_json else None,
+                    })
+
+        return response
+
+    if cache_key:
+        return await get_or_fetch(cache_key, _fetch, ttl=300)
+    return await _fetch()
 
 
 @router.get("/parcels/{parcel_id}", response_model=ParcelDetailResponse)
@@ -189,7 +205,19 @@ async def get_parcel(
     async def _fetch():
         active_snapshot_ids = await list_active_snapshot_ids(db, "parcel_base")
 
-        query = select(Parcel, func.ST_AsGeoJSON(Parcel.geom).label("geom_json")).where(Parcel.id == parcel_id)
+        query = (
+            select(
+                Parcel,
+                func.ST_AsGeoJSON(Parcel.geom).label("geom_json"),
+                ParcelBuildingFact,
+                ParcelZoningFact,
+                ParcelConstraintFact,
+            )
+            .outerjoin(ParcelBuildingFact, ParcelBuildingFact.parcel_id == Parcel.id)
+            .outerjoin(ParcelZoningFact, ParcelZoningFact.parcel_id == Parcel.id)
+            .outerjoin(ParcelConstraintFact, ParcelConstraintFact.parcel_id == Parcel.id)
+            .where(Parcel.id == parcel_id)
+        )
         if active_snapshot_ids:
             query = query.where(Parcel.source_snapshot_id.in_(list(active_snapshot_ids)))
 
@@ -198,22 +226,7 @@ async def get_parcel(
         if not row:
             raise HTTPException(status_code=404, detail="Parcel not found")
 
-        parcel, geom_json = row
-
-        bld_result = await db.execute(
-            select(ParcelBuildingFact).where(ParcelBuildingFact.parcel_id == parcel_id)
-        )
-        bld = bld_result.scalar_one_or_none()
-
-        zf_result = await db.execute(
-            select(ParcelZoningFact).where(ParcelZoningFact.parcel_id == parcel_id)
-        )
-        zf = zf_result.scalar_one_or_none()
-
-        cf_result = await db.execute(
-            select(ParcelConstraintFact).where(ParcelConstraintFact.parcel_id == parcel_id)
-        )
-        cf = cf_result.scalar_one_or_none()
+        parcel, geom_json, bld, zf, cf = row
 
         permitted_uses = None
         if zf and zf.permitted_use_groups_json:
@@ -287,6 +300,8 @@ async def get_parcel_policy_stack(
     parcel_id: uuid.UUID,
     db: AsyncSession = Depends(get_db_session),
 ):
+    cache_key = f"cocivil:policy:v3:{parcel_id}"
+
     async def _fetch():
         active_snapshot_ids = await list_active_snapshot_ids(db, "parcel_base")
         parcel = await get_active_parcel_by_id(db, parcel_id, active_snapshot_ids=active_snapshot_ids)
@@ -295,7 +310,17 @@ async def get_parcel_policy_stack(
         resp = await get_policy_stack_response(db, parcel)
         return resp.model_dump()
 
-    return await get_or_fetch(f"cocivil:policy:{parcel_id}", _fetch, ttl=3600)
+    # Don't cache empty results — transient Voyage AI failures would stick for 1h
+    async def _fetch_and_validate():
+        result = await _fetch()
+        if not result.get("applicable_policies"):
+            raise _SkipCache(result)
+        return result
+
+    try:
+        return await get_or_fetch(cache_key, _fetch_and_validate, ttl=3600)
+    except _SkipCache as e:
+        return e.result
 
 
 @router.get("/parcels/{parcel_id}/overlays", response_model=ParcelOverlaysResponse)

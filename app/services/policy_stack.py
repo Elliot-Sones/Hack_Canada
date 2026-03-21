@@ -4,6 +4,7 @@ policy_stack.py – RAG-backed policy retrieval.
 Replaces the former DB-backed query with ChromaDB vector search
 from the fine-tuned-RAG system.
 """
+import asyncio
 import os
 import sys
 import uuid
@@ -126,10 +127,22 @@ def _build_query(parcel: Parcel) -> str:
 
 async def get_policy_stack_response(db, parcel: Parcel) -> PolicyStackResponse:
     """Called by the parcels router (async endpoint)."""
-    search = _get_search()
-    query = _build_query(parcel)
-    results = search(query, k=8)
-    return _rag_results_to_response(parcel.id, results)
+    import structlog
+    _log = structlog.get_logger()
+    try:
+        search = _get_search()
+        query = _build_query(parcel)
+        import os
+        chroma_path = os.path.join(_RAG_DIR, "chroma_db")
+        chroma_files = os.listdir(chroma_path) if os.path.exists(chroma_path) else []
+        chroma_size = sum(os.path.getsize(os.path.join(chroma_path, f)) for f in chroma_files if os.path.isfile(os.path.join(chroma_path, f)))
+        _log.info("policy_stack.search_starting", query=query[:100], rag_dir=_RAG_DIR, chroma_files=chroma_files, chroma_size_mb=round(chroma_size/1024/1024, 1))
+        results = await asyncio.to_thread(search, query, 8)
+        _log.info("policy_stack.search_done", result_count=len(results))
+        return _rag_results_to_response(parcel.id, results)
+    except Exception as e:
+        _log.error("policy_stack.search_failed", error=str(e), error_type=type(e).__name__)
+        return PolicyStackResponse(parcel_id=parcel.id, applicable_policies=[], citations=[], snapshots=[])
 
 
 def get_policy_stack_response_sync(db, parcel: Parcel) -> PolicyStackResponse:

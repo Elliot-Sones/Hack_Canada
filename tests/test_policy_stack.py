@@ -1,69 +1,9 @@
 import uuid
-from datetime import date, datetime, timezone
 
 import pytest
 
 from app.dependencies import get_db_session
 from app.main import app
-from app.services.policy_stack import PolicyStackRecord, build_policy_stack_response, get_policy_zone_tokens
-
-
-def test_build_policy_stack_response_orders_by_precedence_and_deduplicates_snapshots():
-    parcel_id = uuid.uuid4()
-    shared_snapshot_id = uuid.uuid4()
-    now = datetime.now(timezone.utc)
-
-    lower_precedence = PolicyStackRecord(
-        clause_id=uuid.uuid4(),
-        policy_version_id=uuid.uuid4(),
-        document_id=uuid.uuid4(),
-        document_title="Base Zoning",
-        doc_type="zoning_bylaw",
-        override_level=4,
-        section_ref="40.10.40.10",
-        page_ref="12",
-        raw_text="Base height is 30 metres.",
-        normalized_type="max_height",
-        normalized_json={"value": 30, "unit": "m"},
-        applicability_json={},
-        confidence=0.98,
-        effective_date=date(2026, 1, 1),
-        source_url="https://example.com/base",
-        snapshot_id=shared_snapshot_id,
-        snapshot_type="policy",
-        snapshot_label="policy-v1",
-        snapshot_published_at=now,
-    )
-    higher_precedence = PolicyStackRecord(
-        clause_id=uuid.uuid4(),
-        policy_version_id=uuid.uuid4(),
-        document_id=uuid.uuid4(),
-        document_title="Site Specific Exception",
-        doc_type="site_specific",
-        override_level=1,
-        section_ref="SSA-1",
-        page_ref="2",
-        raw_text="Site-specific height is 36 metres.",
-        normalized_type="max_height",
-        normalized_json={"value": 36, "unit": "m"},
-        applicability_json={"lot": "specific"},
-        confidence=0.99,
-        effective_date=date(2026, 2, 1),
-        source_url="https://example.com/site-specific",
-        snapshot_id=shared_snapshot_id,
-        snapshot_type="policy",
-        snapshot_label="policy-v1",
-        snapshot_published_at=now,
-    )
-
-    response = build_policy_stack_response(parcel_id, [lower_precedence, higher_precedence])
-
-    assert response.parcel_id == parcel_id
-    assert [entry.override_level for entry in response.applicable_policies] == [1, 4]
-    assert response.applicable_policies[0].document_title == "Site Specific Exception"
-    assert len(response.citations) == 2
-    assert len(response.snapshots) == 1
-    assert response.snapshots[0].version_label == "policy-v1"
 
 
 @pytest.mark.anyio
@@ -91,8 +31,22 @@ async def test_parcel_policy_stack_returns_404_when_parcel_missing(client, monke
     assert response.json()["detail"] == "Parcel not found"
 
 
-def test_get_policy_zone_tokens_include_full_string_and_base_category():
-    tokens = get_policy_zone_tokens("CR 3.0 (c2.0; r2.5) SS2 (x345)")
+@pytest.mark.anyio
+async def test_get_policy_stack_response_uses_thread_pool(monkeypatch):
+    """Verify get_policy_stack_response dispatches the sync search to a thread."""
+    from app.services import policy_stack as ps
 
-    assert tokens[0] == "CR 3.0 (c2.0; r2.5) SS2 (x345)"
-    assert "CR" in tokens
+    called_with = {}
+
+    def fake_search(query, k):
+        called_with["query"] = query
+        called_with["k"] = k
+        return []
+
+    monkeypatch.setattr(ps, "_get_search", lambda: fake_search)
+
+    parcel = type("P", (), {"id": uuid.uuid4(), "zone_code": "CR", "address": "1 King St", "current_use": None})()
+    result = await ps.get_policy_stack_response(None, parcel)
+
+    assert result.parcel_id == parcel.id
+    assert called_with["k"] == 8

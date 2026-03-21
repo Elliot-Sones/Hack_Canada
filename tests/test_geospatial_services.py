@@ -212,3 +212,11 @@ def test_resolve_active_parcel_by_address_sync_uses_street_base_fallback():
     ]
     assert str(compiled_lookup_sql[-1]).count("parcels.source_snapshot_id IN") == 1
     assert "100 King%" in compiled_lookup_sql[-1].params.values()
+
+
+def test_snapshot_id_uuid_serialization_roundtrip():
+    """UUID -> str -> UUID roundtrip used by cached list_active_snapshot_ids."""
+    original = [uuid.uuid4() for _ in range(5)]
+    as_strings = [str(sid) for sid in original]
+    restored = [uuid.UUID(s) for s in as_strings]
+    assert original == restored

@@ -1,7 +1,7 @@
 # CoCivil — AI-Powered Civil Development Platform
 
 > **Auto-maintained**: Updated after every file edit/creation. See `.claude/CLAUDE.md` for rules.
-> **Last updated**: 2026-03-20 (fix adaptive Model/Layers button positioning, chat markdown rendering, Voyage AI embeddings) | **PRD**: [`.claude/docs/PRD.md`](.claude/docs/PRD.md)
+> **Last updated**: 2026-03-21 (login page: scroll fix, session exchange fix, Google sign-in; Celery worker; parcel performance; sidebar grouping) | **PRD**: [`.claude/docs/PRD.md`](.claude/docs/PRD.md)
 
 ---
 

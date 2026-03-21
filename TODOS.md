@@ -23,6 +23,6 @@
 **Why:** Cached responses serve stale data for up to 24h after ingestion. Bulk invalidation ensures users see fresh data immediately.
 **Pros:** Guarantees data freshness after ingestion runs
 **Cons:** Adds coupling between ingestion tasks and cache keys. Ingestion is infrequent (weekly/monthly) so impact is low.
-**Context:** `app/tasks/ingestion.py` should call `redis.delete(f"cocivil:parcel:{id}")` etc. after each parcel upsert, or do a bulk `SCAN cocivil:* | DEL` after ingestion completes. The 24h TTL self-corrects regardless, but explicit invalidation is cleaner.
+**Context:** `app/tasks/ingestion.py` should call `redis.delete(f"cocivil:parcel:{id}")` etc. after each parcel upsert, or do a bulk `SCAN cocivil:* | DEL` after ingestion completes. The 24h TTL self-corrects regardless, but explicit invalidation is cleaner. Cache key patterns to invalidate: `cocivil:parcel:*` (24h TTL), `cocivil:zoning:*` (24h), `cocivil:overlays:*` (24h), `cocivil:policy:*` (1h), `cocivil:search:*` (5min), `cocivil:snapshots:*` (60s).
 **Depends on:** Redis caching layer (app/services/cache.py)
 **Added:** 2026-03-18

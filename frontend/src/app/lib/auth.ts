@@ -3,8 +3,9 @@ import "dotenv/config";
 import { Pool } from "pg";
 import nodemailer from "nodemailer";
 
+const dbUrl = (process.env.DATABASE_URL || '').replace(/\+\w+/, '');
 const pool = new Pool({
-    connectionString: process.env.DATABASE_URL
+    connectionString: dbUrl
 });
 
 // Configure standard Nodemailer settings using Env variables
@@ -20,11 +21,17 @@ const transporter = nodemailer.createTransport({
 
 export const auth = betterAuth({
     database: new Pool({
-        connectionString: process.env.DATABASE_URL
+        connectionString: dbUrl
     }),
     rateLimit: {
         window: 60, // 60 seconds
         max: 100, // 100 requests max per 60 seconds
+    },
+    socialProviders: {
+        google: {
+            clientId: process.env.GOOGLE_CLIENT_ID || '',
+            clientSecret: process.env.GOOGLE_CLIENT_SECRET || '',
+        },
     },
     emailAndPassword: {
         enabled: true,

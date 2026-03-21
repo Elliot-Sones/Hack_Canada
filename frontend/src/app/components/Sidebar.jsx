@@ -5,12 +5,13 @@ import useResizable from '../hooks/useResizable.js';
 
 const BUILDING_NAV_ITEMS = [
     { id: 'overview', label: 'Overview', icon: (<><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><polyline points="9 22 9 12 15 12 15 22" /></>) },
-    { id: 'projects', label: 'Projects', icon: (<><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" /></>) },
     { id: 'finances', label: 'Finances', icon: (<><line x1="12" y1="1" x2="12" y2="23" /><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" /></>) },
     { id: 'policies', label: 'Policies', icon: (<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />) },
     { id: 'datasets', label: 'Datasets', icon: (<><ellipse cx="12" cy="5" rx="9" ry="3" /><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" /><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" /></>) },
     { id: 'precedents', label: 'Precedents', icon: (<><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></>) },
 ];
+
+const PROJECTS_ITEM = { id: 'projects', label: 'Projects', icon: (<><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" /></>) };
 
 const COLLAPSED_WIDTH = 52;
 const DEFAULT_WIDTH = 160;
@@ -127,6 +128,13 @@ export default function Sidebar({ isCollapsed, onToggleCollapse, activeNav, onNa
                         {!isCollapsed && (
                             <>
                                 <div className="sidebar-divider" />
+                                <button
+                                    className={`nav-item${activeNav === PROJECTS_ITEM.id ? ' active' : ''}`}
+                                    onClick={() => onNavClick(PROJECTS_ITEM.id)}
+                                >
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">{PROJECTS_ITEM.icon}</svg>
+                                    <span>{PROJECTS_ITEM.label}</span>
+                                </button>
                                 <button className="nav-item" onClick={onHistoryClick}>
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
                                         <circle cx="12" cy="12" r="10" />

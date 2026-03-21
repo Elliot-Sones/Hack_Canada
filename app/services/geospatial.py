@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from app.models.geospatial import Parcel
 from app.models.ingestion import SourceSnapshot
 from app.schemas.geospatial import ParcelSearchParams
+from app.services.cache import get_or_fetch
 
 ADDRESS_MATCH_PRIORITY = {
     "source_key": 3,
@@ -256,8 +257,14 @@ async def list_active_snapshot_ids(
     if not hasattr(db, "execute"):
         return []
 
-    result = await db.execute(build_active_snapshot_id_statement(snapshot_type, jurisdiction_id))
-    return list(result.scalars().all())
+    cache_key = f"cocivil:snapshots:{snapshot_type}:{jurisdiction_id or 'all'}"
+
+    async def _fetch():
+        result = await db.execute(build_active_snapshot_id_statement(snapshot_type, jurisdiction_id))
+        return [str(sid) for sid in result.scalars().all()]
+
+    id_strings = await get_or_fetch(cache_key, _fetch, ttl=60)
+    return [uuid.UUID(s) for s in id_strings]
 
 
 async def get_active_parcel_by_id(
