@@ -6,7 +6,7 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
 from jose import jwt
 from passlib.context import CryptContext
-from sqlalchemy import select
+from sqlalchemy import insert, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -127,33 +127,37 @@ async def session_exchange(body: SessionExchangeRequest, db: AsyncSession = Depe
 
 async def _find_or_create_cocivil_user(db: AsyncSession, ba_user: BetterAuthUser) -> User:
     """Find existing cocivil user by email, or bootstrap a new one."""
+    import uuid as _uuid
+
     result = await db.execute(select(User).where(User.email == ba_user.email))
     user = result.scalar_one_or_none()
     if user:
         return user
 
-    # First-time bootstrap: create org + user + membership
+    # First-time bootstrap: create org + user + membership using raw inserts
+    # to avoid ORM relationship lazy-loading in async context
     org_name = f"{ba_user.name}'s Organization"
     slug = _slugify(org_name)
+    org_id = _uuid.uuid4()
 
     try:
-        org = Organization(name=org_name, slug=slug)
-        db.add(org)
-        await db.flush()
+        await db.execute(
+            insert(Organization).values(id=org_id, name=org_name, slug=slug)
+        )
     except IntegrityError:
-        # Slug collision — retry with random suffix
         await db.rollback()
         slug = f"{slug}-{os.urandom(2).hex()}"
-        org = Organization(name=org_name, slug=slug)
-        db.add(org)
-        await db.flush()
+        org_id = _uuid.uuid4()
+        await db.execute(
+            insert(Organization).values(id=org_id, name=org_name, slug=slug)
+        )
 
+    user_id = _uuid.uuid4()
     try:
-        user = User(email=ba_user.email, name=ba_user.name, password_hash=None)
-        db.add(user)
-        await db.flush()
+        await db.execute(
+            insert(User).values(id=user_id, email=ba_user.email, name=ba_user.name, password_hash=None)
+        )
     except IntegrityError:
-        # Race condition: another request created the user concurrently
         await db.rollback()
         result = await db.execute(select(User).where(User.email == ba_user.email))
         user = result.scalar_one_or_none()
@@ -161,9 +165,12 @@ async def _find_or_create_cocivil_user(db: AsyncSession, ba_user: BetterAuthUser
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create user")
         return user
 
-    member = WorkspaceMember(organization_id=org.id, user_id=user.id, role="owner")
-    db.add(member)
-    await db.flush()
+    await db.execute(
+        insert(WorkspaceMember).values(organization_id=org_id, user_id=user_id, role="owner")
+    )
 
     log.info("bootstrapped_cocivil_user", email=ba_user.email, org_slug=slug)
-    return user
+
+    # Fetch the created user as ORM object for the caller
+    result = await db.execute(select(User).where(User.id == user_id))
+    return result.scalar_one()
