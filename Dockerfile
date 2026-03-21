@@ -19,4 +19,4 @@ COPY . .
 EXPOSE 8000
 
 ENV SERVICE_MODE=api
-CMD sh -c 'if [ "$SERVICE_MODE" = "worker" ]; then python -c "from http.server import HTTPServer,BaseHTTPRequestHandler;import threading;h=type(\"H\",(BaseHTTPRequestHandler,),{\"do_GET\":lambda s:(s.send_response(200),s.end_headers(),s.wfile.write(b\"ok\")),\"log_message\":lambda *a:None});threading.Thread(target=HTTPServer((\"\",8000),h).serve_forever,daemon=True).start();import subprocess,sys;sys.exit(subprocess.call([\"celery\",\"-A\",\"app.celery_app\",\"worker\",\"--loglevel=info\",\"--concurrency=2\"]))" ; else uvicorn app.main:app --host 0.0.0.0 --port 8000; fi'
+CMD sh -c 'if [ "$SERVICE_MODE" = "worker" ]; then celery -A app.celery_app worker --loglevel=info --concurrency=2; else uvicorn app.main:app --host 0.0.0.0 --port 8000; fi'

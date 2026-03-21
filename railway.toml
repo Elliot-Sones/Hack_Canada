@@ -10,9 +10,6 @@
 dockerfilePath = "Dockerfile"
 
 [deploy]
-preDeployCommand = "alembic upgrade head"
-healthcheckPath = "/api/v1/health"
-healthcheckTimeout = 120
 restartPolicyType = "on_failure"
 
 # Required environment variables (set in Railway dashboard):
