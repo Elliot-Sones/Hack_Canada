@@ -486,6 +486,7 @@ export default function DashboardView({ initialAddress, parcelId }) {
           isPanelOpen={isPanelOpen}
           isSidebarCollapsed={isSidebarCollapsed}
           isChatExpanded={isChatExpanded}
+          chatPanelHeight={chatPanelHeight}
           floorPlans={floorPlans}
           projectId={projectId}
           parcelId={primaryParcel?.id}

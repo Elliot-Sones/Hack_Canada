@@ -164,18 +164,19 @@ body.sidebar-collapsed #search-container {
 /* --- Selection Chips --- */
 .selection-chips-bar {
     position: fixed;
-    top: calc(var(--space-lg) + var(--search-height) + 12px);
-    left: calc(var(--sidebar-width) + var(--space-lg));
+    top: var(--space-lg);
+    left: calc(var(--sidebar-width) + var(--space-lg) + 430px);
+    height: var(--search-height);
     z-index: 10;
     display: flex;
     align-items: center;
     gap: 8px;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     transition: left var(--transition);
 }
 
 .selection-chips-bar.sidebar-collapsed {
-    left: calc(var(--sidebar-collapsed) + var(--space-lg));
+    left: calc(var(--sidebar-collapsed) + var(--space-lg) + 430px);
 }
 
 .selection-chip {

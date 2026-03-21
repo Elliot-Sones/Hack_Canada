@@ -851,7 +851,7 @@ function RoomInfoPanel({ room, onClose }) {
 
 export default function ModelViewer({
   isOpen, onClose, parcelGeoJSON, modelParams, isPanelOpen, isSidebarCollapsed, isChatExpanded,
-  floorPlans, blueprintPages: blueprintPagesProp, projectId, parcelId,
+  chatPanelHeight, floorPlans, blueprintPages: blueprintPagesProp, projectId, parcelId,
 }) {
   const controlsRef = useRef(null);
   const params = modelParams || DEFAULT_PARAMS;
@@ -1061,7 +1061,7 @@ export default function ModelViewer({
 
   const sidebarW = isSidebarCollapsed ? 52 : 'var(--sidebar-width, 160px)';
   const panelW = isPanelOpen ? 'var(--panel-width, 380px)' : 0;
-  const chatH = isChatExpanded ? 'calc(var(--chat-height, 280px) + 49px)' : 49;
+  const chatH = chatPanelHeight || 49;
 
   const closeBtn = createPortal(
     <button
@@ -1095,6 +1095,7 @@ export default function ModelViewer({
           transition: 'left 0.3s ease, right 0.3s ease, bottom 0.3s ease',
         }}
       >
+        <div style={{ width: '100%', height: '100%', position: 'relative', overflow: 'hidden' }}>
         {viewMode === 'floorplan' ? (
           <FloorPlanEditor
             floorPlans={uncommittedFloorPlans || floorPlans}
@@ -1146,22 +1147,19 @@ export default function ModelViewer({
             onClose={() => setShowHistory(false)}
           />
         )}
-      </div>
 
-      {/* Controls bar */}
-      <div
-        className="model-controls"
-        style={{
-          position: 'fixed',
-          left: sidebarW,
-          right: panelW,
-          bottom: chatH,
-          zIndex: 7,
-          transition: 'left 0.3s ease, right 0.3s ease, bottom 0.3s ease',
-          flexDirection: 'column',
-          gap: 0,
-        }}
-      >
+        {/* Controls bar */}
+        <div
+          className="model-controls"
+          style={{
+            position: 'absolute',
+            bottom: 0,
+            left: 0,
+            right: 0,
+            flexDirection: 'column',
+            gap: 0,
+          }}
+        >
         {/* Version control bar */}
         {projectId && (
           <div className="version-control-bar">
@@ -1303,6 +1301,8 @@ export default function ModelViewer({
             )}
           </span>
         </div>
+      </div>
+      </div>
       </div>
     </>
   );

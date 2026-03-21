@@ -4,7 +4,7 @@
   position: fixed;
   inset: 0;
   z-index: 5;          /* above map (0), below all panels (10+) */
-  background: #f5f0eb;
+  background: #1a1a1a;
 }
 
 .model-canvas-area {
@@ -40,9 +40,8 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 8px 16px;
-  background: #1a1a1a;
-  border-top: 1px solid #2a2a2a;
+  padding: 6px 16px;
+  background: transparent;
   flex-shrink: 0;
 }
 
