@@ -223,7 +223,7 @@ def _update_plan_status(db, plan, status, step=None, progress_update=None, error
                 text("""UPDATE development_plans
                         SET status = :status,
                             current_step = :step,
-                            pipeline_progress = :progress::jsonb,
+                            pipeline_progress = CAST(:progress AS jsonb),
                             error_message = :error,
                             updated_at = now()
                         WHERE id = :plan_id"""),
