@@ -1,18 +1,44 @@
 """
 retriever.py - Vector store retrieval logic for the Hack Canada RAG system.
 """
-from langchain_voyageai import VoyageAIEmbeddings
+import requests
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
+from langchain_core.embeddings import Embeddings
 
 from config import CHROMA_DIR, COLLECTION_NAME, EMBEDDING_MODEL, VOYAGE_API_KEY
 
 
+class DirectVoyageEmbeddings(Embeddings):
+    """Call Voyage AI API directly via HTTP — no HuggingFace tokenizer needed."""
+
+    def __init__(self, model: str, api_key: str):
+        self.model = model
+        self.api_key = api_key
+
+    def _call_api(self, texts: list[str], input_type: str = "document") -> list[list[float]]:
+        resp = requests.post(
+            "https://api.voyageai.com/v1/embeddings",
+            headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
+            json={"input": texts, "model": self.model, "input_type": input_type},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return [item["embedding"] for item in data["data"]]
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        return self._call_api(texts, input_type="document")
+
+    def embed_query(self, text: str) -> list[float]:
+        return self._call_api([text], input_type="query")[0]
+
+
 def get_vectorstore() -> Chroma:
     """Load the persisted ChromaDB vectorstore."""
-    embeddings = VoyageAIEmbeddings(
+    embeddings = DirectVoyageEmbeddings(
         model=EMBEDDING_MODEL,
-        voyage_api_key=VOYAGE_API_KEY
+        api_key=VOYAGE_API_KEY,
     )
     return Chroma(
         persist_directory=CHROMA_DIR,
