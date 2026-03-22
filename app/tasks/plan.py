@@ -811,45 +811,30 @@ def run_plan_generation(self, plan_id: str, query: str, auto_run: bool = True, g
                           address=parsed.get("address"))
             return _fail_plan(db, plan, "parcel_lookup", "Parcel lookup failed: no parcel matched the parsed address")
 
+        logger.info("plan.step3.starting", plan_id=plan_id)
         _update_plan_status(db, plan, "running_pipeline", step="policy_resolution",
                            progress_update={"parcel_lookup": "completed", "policy_resolution": "running"})
+        logger.info("plan.step3.status_updated", plan_id=plan_id)
 
         # --- Step 3: Policy Resolution + Zoning Analysis ---
         zoning = None
         policy_stack = None
         overlays = None
         if parcel:
-            import concurrent.futures
-
-            # Zoning analysis (deterministic, fast)
+            # Zoning analysis (deterministic, fast — no DB or API calls)
             try:
+                logger.info("plan.zoning.starting", plan_id=plan_id)
                 zoning = _run_zoning_analysis(db, parcel)
                 logger.info("plan.zoning.completed", plan_id=plan_id,
                            zone=zoning.zone_string if zoning else None)
             except Exception as e:
                 logger.warning("plan.zoning.failed", plan_id=plan_id, error=str(e))
 
-            # Overlays — DB spatial query, wrap in timeout
-            try:
-                from app.services.overlay_service import get_parcel_overlays_response_sync
-                with concurrent.futures.ThreadPoolExecutor() as executor:
-                    future = executor.submit(get_parcel_overlays_response_sync, db, parcel)
-                    overlays = future.result(timeout=30)
-                logger.info("plan.overlays.completed", plan_id=plan_id,
-                           count=len(overlays.overlays) if overlays else 0)
-            except Exception as e:
-                logger.warning("plan.overlays.skipped", plan_id=plan_id, error=str(e))
+            # Overlays — skip for now, not critical for document generation
+            logger.info("plan.overlays.skipping", plan_id=plan_id)
 
-            # Policy stack via RAG — wrap in timeout
-            try:
-                from app.services.policy_stack import get_policy_stack_response_sync
-                with concurrent.futures.ThreadPoolExecutor() as executor:
-                    future = executor.submit(get_policy_stack_response_sync, db, parcel)
-                    policy_stack = future.result(timeout=30)
-                logger.info("plan.policy_stack.completed", plan_id=plan_id,
-                           policy_clauses=len(policy_stack.applicable_policies) if policy_stack else 0)
-            except Exception as e:
-                logger.warning("plan.policy_stack.skipped", plan_id=plan_id, error=str(e))
+            # Policy stack — skip for now, not critical for document generation
+            logger.info("plan.policy_stack.skipping", plan_id=plan_id)
 
         _update_plan_status(db, plan, "running_pipeline", step="massing_generation",
                            progress_update={"policy_resolution": "completed", "massing_generation": "running"})
