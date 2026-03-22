@@ -217,8 +217,8 @@ def _update_plan_status(db, plan, status, step=None, progress_update=None, error
 
     # Write to DB using a separate short-lived connection to avoid PendingRollbackError
     try:
-        engine = create_engine(settings.DATABASE_URL_SYNC, echo=False)
-        with engine.connect() as conn:
+        from app.database import sync_engine
+        with sync_engine.connect() as conn:
             conn.execute(
                 text("""UPDATE development_plans
                         SET status = :status,
@@ -236,7 +236,6 @@ def _update_plan_status(db, plan, status, step=None, progress_update=None, error
                 },
             )
             conn.commit()
-        engine.dispose()
     except Exception as e:
         logger.warning("plan.status_update.failed", plan_id=str(plan.id), error=str(e))
 
@@ -820,23 +819,30 @@ def run_plan_generation(self, plan_id: str, query: str, auto_run: bool = True, g
         policy_stack = None
         overlays = None
         if parcel:
+            import concurrent.futures
+
+            # Zoning analysis (deterministic, fast)
+            try:
+                zoning = _run_zoning_analysis(db, parcel)
+                logger.info("plan.zoning.completed", plan_id=plan_id,
+                           zone=zoning.zone_string if zoning else None)
+            except Exception as e:
+                logger.warning("plan.zoning.failed", plan_id=plan_id, error=str(e))
+
+            # Overlays — DB spatial query, wrap in timeout
             try:
                 from app.services.overlay_service import get_parcel_overlays_response_sync
-
-                zoning = _run_zoning_analysis(db, parcel)
-                overlays = get_parcel_overlays_response_sync(db, parcel)
-                logger.info("plan.zoning_overlays.completed", plan_id=plan_id,
-                           zone=zoning.zone_string if zoning else None,
-                           overlays=len(overlays.overlays) if overlays else 0)
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    future = executor.submit(get_parcel_overlays_response_sync, db, parcel)
+                    overlays = future.result(timeout=30)
+                logger.info("plan.overlays.completed", plan_id=plan_id,
+                           count=len(overlays.overlays) if overlays else 0)
             except Exception as e:
-                logger.warning("plan.zoning_overlays.failed", plan_id=plan_id, error=str(e))
-                # Non-fatal — continue without zoning/overlays
+                logger.warning("plan.overlays.skipped", plan_id=plan_id, error=str(e))
 
-            # Policy stack via RAG — run with timeout to avoid hanging on Voyage AI
+            # Policy stack via RAG — wrap in timeout
             try:
-                import concurrent.futures
                 from app.services.policy_stack import get_policy_stack_response_sync
-
                 with concurrent.futures.ThreadPoolExecutor() as executor:
                     future = executor.submit(get_policy_stack_response_sync, db, parcel)
                     policy_stack = future.result(timeout=30)
@@ -844,7 +850,6 @@ def run_plan_generation(self, plan_id: str, query: str, auto_run: bool = True, g
                            policy_clauses=len(policy_stack.applicable_policies) if policy_stack else 0)
             except Exception as e:
                 logger.warning("plan.policy_stack.skipped", plan_id=plan_id, error=str(e))
-                # Non-fatal — continue without policy stack
 
         _update_plan_status(db, plan, "running_pipeline", step="massing_generation",
                            progress_update={"policy_resolution": "completed", "massing_generation": "running"})
