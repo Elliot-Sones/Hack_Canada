@@ -251,12 +251,13 @@ export async function chatWithAssistant({ messages, parcelContext = null, parcel
 
 // ─── Plans ───
 
-export async function generatePlan(query, generateSubset = null, projectId = null) {
+export async function generatePlan(query, generateSubset = null, projectId = null, parcelIds = null) {
     const body = { query, auto_run: true };
     if (generateSubset && generateSubset !== 'all') {
         body.generate_subset = generateSubset;
     }
     if (projectId) body.project_id = projectId;
+    if (parcelIds && parcelIds.length >= 2) body.parcel_ids = parcelIds;
     return apiFetch(`${API_BASE}/plans/generate`, {
         method: 'POST',
         body: JSON.stringify(body),

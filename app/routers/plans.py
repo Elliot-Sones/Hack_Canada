@@ -74,7 +74,8 @@ async def generate_plan(
     await db.refresh(plan)
     await db.commit()
 
-    run_plan_generation.delay(str(plan.id), body.query, body.auto_run, body.generate_subset)
+    parcel_id_strs = [str(pid) for pid in body.parcel_ids] if body.parcel_ids else None
+    run_plan_generation.delay(str(plan.id), body.query, body.auto_run, body.generate_subset, parcel_id_strs)
 
     return JobAccepted(
         job_id=plan.id,

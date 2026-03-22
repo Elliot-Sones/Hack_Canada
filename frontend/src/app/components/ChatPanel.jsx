@@ -358,30 +358,13 @@ export default function ChatPanel({ parcelContext, onPlanComplete, onToggleExpan
         const docTypes = action.doc_types;
         const isSmallSubset = Array.isArray(docTypes) && docTypes.length <= 3;
 
-        // If comparing multiple parcels, generate a single comparison document via AI chat
+        // If comparing multiple parcels, run pipeline with parcel_ids for downloadable comparison report
         if (isComparisonMode && selectedParcels?.length >= 2) {
+            const parcelIds = selectedParcels.map(p => p.id).filter(Boolean);
             try {
-                const zoneCodes = selectedParcels.map(p => p.zoneCode || p.zone_code).filter(Boolean);
-                const result = await chatWithAssistant({
-                    messages: [
-                        ...conversationHistoryRef.current,
-                        { role: 'user', text: action.query },
-                    ],
-                    parcelContext: parcelContextStr,
-                    parcelId: selectedParcels[0]?.id,
-                    zoneCode: zoneCodes[0],
-                    zoneCodes,
-                });
+                const result = await generatePlan(action.query, docTypes, activeProjectId, parcelIds);
                 setMessages((prev) => prev.map(m => m.isGenerating ? { ...m, isGenerating: false } : m));
-                setMessages((prev) => [...prev, {
-                    role: 'assistant',
-                    text: result.message,
-                    proposedAction: result.proposedAction,
-                }]);
-                conversationHistoryRef.current.push(
-                    { role: 'user', text: action.query },
-                    { role: 'assistant', text: result.message },
-                );
+                pollPlan(result.job_id);
             } catch (err) {
                 setMessages((prev) => prev.map(m => m.isGenerating ? { ...m, isGenerating: false } : m));
                 setMessages((prev) => [...prev, {

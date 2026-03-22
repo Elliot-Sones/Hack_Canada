@@ -705,7 +705,7 @@ def _fetch_nearby_infrastructure(db, parcel) -> dict | None:
 
 
 @celery.task(bind=True, max_retries=2, soft_time_limit=300, time_limit=600)
-def run_plan_generation(self, plan_id: str, query: str, auto_run: bool = True, generate_subset: list[str] | None = None):
+def run_plan_generation(self, plan_id: str, query: str, auto_run: bool = True, generate_subset: list[str] | None = None, parcel_ids: list[str] | None = None):
     """Orchestrate the full plan generation pipeline.
 
     Pipeline steps:
@@ -777,18 +777,40 @@ def run_plan_generation(self, plan_id: str, query: str, auto_run: bool = True, g
                            progress_update={"query_parsing": "completed", "parcel_lookup": "running"})
 
         # --- Step 2: Parcel Lookup ---
-        parcel = _run_parcel_lookup(db, parsed)
-        if parcel:
+        comparison_parcels = []  # For multi-parcel comparison reports
+
+        if parcel_ids and len(parcel_ids) >= 2:
+            # Multi-parcel comparison: look up each parcel by ID
+            from app.models.geospatial import Parcel as ParcelModel
+            for pid in parcel_ids:
+                p = db.query(ParcelModel).filter(ParcelModel.id == uuid.UUID(pid)).first()
+                if p:
+                    comparison_parcels.append(p)
+                    logger.info("plan.parcel_lookup.found", plan_id=plan_id, parcel_id=pid)
+            if not comparison_parcels:
+                return _fail_plan(db, plan, "parcel_lookup", "No parcels found for comparison")
+            parcel = comparison_parcels[0]  # Primary parcel for pipeline steps
             params = plan.parsed_parameters or {}
             params["parcel_id"] = str(parcel.id)
             params["resolved_address"] = parcel.address
             params["zone_code"] = parcel.zone_code
+            params["is_comparison"] = True
+            params["comparison_parcel_ids"] = parcel_ids
             plan.parsed_parameters = params
-            logger.info("plan.parcel_lookup.found", plan_id=plan_id, parcel_id=str(parcel.id))
         else:
-            logger.warning("plan.parcel_lookup.not_found", plan_id=plan_id,
-                          address=parsed.get("address"))
-            return _fail_plan(db, plan, "parcel_lookup", "Parcel lookup failed: no parcel matched the parsed address")
+            # Single parcel lookup from parsed address
+            parcel = _run_parcel_lookup(db, parsed)
+            if parcel:
+                params = plan.parsed_parameters or {}
+                params["parcel_id"] = str(parcel.id)
+                params["resolved_address"] = parcel.address
+                params["zone_code"] = parcel.zone_code
+                plan.parsed_parameters = params
+                logger.info("plan.parcel_lookup.found", plan_id=plan_id, parcel_id=str(parcel.id))
+            else:
+                logger.warning("plan.parcel_lookup.not_found", plan_id=plan_id,
+                              address=parsed.get("address"))
+                return _fail_plan(db, plan, "parcel_lookup", "Parcel lookup failed: no parcel matched the parsed address")
 
         logger.info("plan.step3.starting", plan_id=plan_id)
         _update_plan_status(db, plan, "running_pipeline", step="policy_resolution",
@@ -940,6 +962,29 @@ def run_plan_generation(self, plan_id: str, query: str, auto_run: bool = True, g
                 # Non-fatal — infrastructure is supplementary
 
         # --- Step 9: Generate Submission Documents ---
+        # For comparison reports, build comparison context with all parcels' data
+        if comparison_parcels and len(comparison_parcels) >= 2:
+            comparison_data = []
+            for cp in comparison_parcels:
+                cp_zoning = _run_zoning_analysis(db, cp) if cp else None
+                comparison_data.append({
+                    "address": cp.address,
+                    "zone_code": cp.zone_code,
+                    "lot_area_m2": cp.lot_area_m2,
+                    "lot_frontage_m": cp.lot_frontage_m,
+                    "lot_depth_m": cp.lot_depth_m,
+                    "current_use": cp.current_use,
+                    "zoning": {
+                        "zone_string": cp_zoning.zone_string if cp_zoning else None,
+                        "standards": cp_zoning.standards.__dict__ if cp_zoning and cp_zoning.standards else None,
+                    } if cp_zoning else None,
+                })
+            parsed["comparison_parcels"] = comparison_data
+            parsed["is_comparison"] = True
+            # Force generate a comparison report doc type
+            if not generate_subset:
+                generate_subset = ["planning_rationale"]
+
         generated_documents = _build_context_and_generate_docs(
             db, plan, parcel, zoning,
             massing_summary, layout_result, financial_output,

@@ -11,6 +11,7 @@ class PlanGenerateRequest(BaseModel):
     auto_run: bool = Field(default=True, description="Automatically run the full pipeline after parsing")
     generate_subset: list[str] | None = Field(default=None, description="Generate only these doc types (None = all)")
     project_id: uuid.UUID | None = Field(default=None, description="Link plan to a project workspace")
+    parcel_ids: list[uuid.UUID] | None = Field(default=None, description="Parcel IDs for multi-parcel comparison reports")
 
 
 class PlanGenerateDocumentRequest(BaseModel):
