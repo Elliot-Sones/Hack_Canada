@@ -199,12 +199,7 @@ CLARIFICATION_CONFIDENCE_THRESHOLD = 0.2
 
 
 def _update_plan_status(db, plan, status, step=None, progress_update=None, error=None):
-    """Helper to update plan status using a separate connection to avoid session corruption."""
-    import json as _json
-    from sqlalchemy import text, create_engine
-    from app.config import settings
-
-    # Update in-memory plan object
+    """Helper to update plan status in the database."""
     plan.status = status
     if step:
         plan.current_step = step
@@ -214,30 +209,14 @@ def _update_plan_status(db, plan, status, step=None, progress_update=None, error
         plan.pipeline_progress = progress
     if error:
         plan.error_message = error
-
-    # Write to DB using a separate short-lived connection to avoid PendingRollbackError
     try:
-        from app.database import sync_engine
-        with sync_engine.connect() as conn:
-            conn.execute(
-                text("""UPDATE development_plans
-                        SET status = :status,
-                            current_step = :step,
-                            pipeline_progress = CAST(:progress AS jsonb),
-                            error_message = :error,
-                            updated_at = now()
-                        WHERE id = :plan_id"""),
-                {
-                    "status": status,
-                    "step": step,
-                    "progress": _json.dumps(plan.pipeline_progress or {}),
-                    "error": error,
-                    "plan_id": str(plan.id),
-                },
-            )
-            conn.commit()
-    except Exception as e:
-        logger.warning("plan.status_update.failed", plan_id=str(plan.id), error=str(e))
+        db.commit()
+    except Exception:
+        db.rollback()
+        try:
+            db.commit()
+        except Exception as e:
+            logger.warning("plan.status_update.failed", plan_id=str(plan.id), error=str(e))
 
 
 def _fail_plan(db, plan, step, error):
@@ -830,11 +809,23 @@ def run_plan_generation(self, plan_id: str, query: str, auto_run: bool = True, g
             except Exception as e:
                 logger.warning("plan.zoning.failed", plan_id=plan_id, error=str(e))
 
-            # Overlays — skip for now, not critical for document generation
-            logger.info("plan.overlays.skipping", plan_id=plan_id)
+            # Overlays (DB spatial query)
+            try:
+                from app.services.overlay_service import get_parcel_overlays_response_sync
+                overlays = get_parcel_overlays_response_sync(db, parcel)
+                logger.info("plan.overlays.completed", plan_id=plan_id,
+                           count=len(overlays.overlays) if overlays else 0)
+            except Exception as e:
+                logger.warning("plan.overlays.failed", plan_id=plan_id, error=str(e))
 
-            # Policy stack — skip for now, not critical for document generation
-            logger.info("plan.policy_stack.skipping", plan_id=plan_id)
+            # Policy stack (RAG via Voyage AI — direct HTTP, no HuggingFace)
+            try:
+                from app.services.policy_stack import get_policy_stack_response_sync
+                policy_stack = get_policy_stack_response_sync(db, parcel)
+                logger.info("plan.policy_stack.completed", plan_id=plan_id,
+                           count=len(policy_stack.applicable_policies) if policy_stack else 0)
+            except Exception as e:
+                logger.warning("plan.policy_stack.failed", plan_id=plan_id, error=str(e))
 
         _update_plan_status(db, plan, "running_pipeline", step="massing_generation",
                            progress_update={"policy_resolution": "completed", "massing_generation": "running"})
