@@ -358,6 +358,40 @@ export default function ChatPanel({ parcelContext, onPlanComplete, onToggleExpan
         const docTypes = action.doc_types;
         const isSmallSubset = Array.isArray(docTypes) && docTypes.length <= 3;
 
+        // If comparing multiple parcels, generate per-parcel instead of combined query
+        if (isComparisonMode && selectedParcels?.length >= 2) {
+            const parcels = selectedParcels.filter(p => p.address || p.zoneCode);
+            let completed = 0;
+            const results = await Promise.all(parcels.map(async (p) => {
+                const addr = p.address || p.fullAddress || 'Unknown';
+                const zone = p.zoneCode || p.zone_code || p.zoning;
+                const lotArea = p.lotArea;
+                const reportQuery = [
+                    `I want to build a mixed-use development at ${addr}, Toronto, Ontario.`,
+                    zone ? `The site is zoned ${zone}.` : '',
+                    lotArea ? `Lot area is ${lotArea} m\u00B2.` : '',
+                    'Generate the full submission package.',
+                ].filter(Boolean).join(' ');
+                try {
+                    const result = await generatePlan(reportQuery, docTypes, activeProjectId);
+                    completed++;
+                    pollPlan(result.job_id, `comparison-${p.id}`);
+                    return { parcel: addr, jobId: result.job_id, error: null };
+                } catch (err) {
+                    return { parcel: addr, jobId: null, error: err.message };
+                }
+            }));
+            setMessages((prev) => prev.map(m => m.isGenerating ? { ...m, isGenerating: false } : m));
+            const failures = results.filter(r => r.error);
+            if (failures.length > 0) {
+                setMessages((prev) => [...prev, {
+                    role: 'assistant',
+                    text: `Some reports failed:\n${failures.map(f => `- ${f.parcel}: ${f.error}`).join('\n')}`,
+                }]);
+            }
+            return;
+        }
+
         try {
             // Smart routing: if an active plan exists and we're generating ≤3 docs,
             // regenerate from existing plan data (no pipeline re-run)
@@ -386,7 +420,7 @@ export default function ChatPanel({ parcelContext, onPlanComplete, onToggleExpan
                 text: planStartErrorMessage(err),
             }]);
         }
-    }, [pollPlan, activePlanId, activeProjectId]);
+    }, [pollPlan, activePlanId, activeProjectId, isComparisonMode, selectedParcels]);
 
     const handleGenerateReport = useCallback(async () => {
         if (isComparisonMode && selectedParcels?.length >= 2) {
