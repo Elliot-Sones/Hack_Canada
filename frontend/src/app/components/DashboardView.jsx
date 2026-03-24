@@ -473,7 +473,7 @@ export default function DashboardView({ initialAddress, parcelId }) {
           isComparisonMode={isComparisonMode}
           modelParams={modelParams}
           onModelUpdate={(params) => { setModelParams(params); setIsModelOpen(true); }}
-          onToggleExpand={() => setIsChatExpanded(c => !c)}
+          onToggleExpand={(expanded) => setIsChatExpanded(expanded)}
           analyzedUploads={analyzedUploads}
           activePlanId={activePlanId}
           activeProjectId={activeProjectId}
