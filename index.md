@@ -1,7 +1,7 @@
 # CoCivil — AI-Powered Civil Development Platform
 
 > **Auto-maintained**: Updated after every file edit/creation. See `.claude/CLAUDE.md` for rules.
-> **Last updated**: 2026-03-23 (sidebar redesign: workspace groups, parcel status rows, views, shortcuts) | **PRD**: [`.claude/docs/PRD.md`](.claude/docs/PRD.md)
+> **Last updated**: 2026-03-23 (add DetailPanel tabbed right panel with pipeline stepper) | **PRD**: [`.claude/docs/PRD.md`](.claude/docs/PRD.md)
 
 ---
 
@@ -286,6 +286,7 @@
 | `ChatContextHeader.jsx` | Compact single-line context strip in chat panel showing selected parcels (zone badge + address), uploads, and plan status |
 | `ChatPanel.jsx` | AI assistant chat with plan generation, file uploads, contractor matching, polling, multi-parcel context, comparison report generation, chat history persistence (localStorage + project backend), New Chat / History buttons; auto-saves conversations and plans to active project |
 | `ProjectsPanel.jsx` | Projects workspace panel (list, create, detail views with tabs: overview, parcels, plans, files, notes, chat); notifies parent on project open/close for save indicator |
+| `DetailPanel.jsx` | Tabbed right panel container (Overview, Policies, Infrastructure, Chat, Documents) with PipelineStepper, resizable width, collapsible reopen bar; delegates content to PolicyPanel/ChatPanel |
 | `PolicyPanel.jsx` | Policy extracts, overlays, datasets, uploads, zoning analysis, multi-parcel ComparisonTab, ProjectsPanel routing; OverviewTab integrates useNearbyInfrastructure hook and ServicingSummaryCard |
 | `DocumentViewer.jsx` | Markdown document viewer (ReactMarkdown + remark-gfm) |
 | `DocumentGallery.jsx` | Document library UI |
