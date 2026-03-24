@@ -267,7 +267,7 @@
 | `src/app/api/auth/exchange/route.ts` | Server-side session exchange (reads BA cookie, calls FastAPI, returns JWT) |
 | `src/app/api.js` | API client (all backend calls, session exchange, 401 auto-retry, bbox parcel search, infrastructure, project workspace CRUD — notes, conversations, uploads, map state) |
 | `src/app/lib/auth-client.js` | Better Auth client (session management) |
-| `src/app/styles/` | Global CSS, landing, ModelViewer, InfrastructureViewer, UserBubble, map-search (selection chips, parcel hover popup), panel (comparison grid, project workspace) styles |
+| `src/app/styles/` | Global CSS, landing, ModelViewer, InfrastructureViewer, UserBubble, map-search (selection chips, parcel hover popup), panel (comparison grid, project workspace) styles; variables.css holds tightened Linear-density typography tokens, easing tokens, status colors; spacing.css provides 4px-grid utility classes |
 | `src/app/lib/parcelState.js` | Parcel selection state helpers (create, add, remove, toggle, multi-select max 4) |
 | `src/app/lib/parcelState.test.js` | Unit tests for parcel selection helpers |
 | `next.config.ts` | Next.js config (standalone output, API proxy rewrites) |
