@@ -11,7 +11,6 @@ const TABS = [
   { id: 'overview', label: 'Overview' },
   { id: 'policies', label: 'Policies' },
   { id: 'infrastructure', label: 'Infrastructure' },
-  { id: 'chat', label: 'Chat' },
   { id: 'documents', label: 'Documents' },
 ];
 
@@ -99,15 +98,13 @@ export default function DetailPanel({
       />
 
       {/* Content area */}
-      <div className={`detail-panel-content${activeTab === 'chat' ? ' detail-panel-content--chat' : ''}`}>
+      <div className="detail-panel-content">
         {!parcel ? (
           <EmptyState
             icon={Building2}
             title="Select a parcel"
             description="Choose a parcel from the sidebar or search to view details"
           />
-        ) : activeTab === 'chat' ? (
-          renderChatContent ? renderChatContent() : null
         ) : (
           renderPolicyContent ? renderPolicyContent(TAB_TO_NAV[activeTab] || activeTab) : null
         )}

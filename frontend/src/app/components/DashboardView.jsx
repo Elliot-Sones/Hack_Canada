@@ -2,7 +2,7 @@
 
 import { useState, useRef, useCallback, useEffect, useMemo, lazy, Suspense } from 'react';
 import { useSession, signOut } from '../lib/auth-client.js';
-import { MapPin, LayoutList, Box, MessageSquare } from 'lucide-react';
+import { MessageSquare } from 'lucide-react';
 import MapView from './MapView.jsx';
 import Sidebar from './Sidebar.jsx';
 import TopBar from './TopBar.jsx';
@@ -44,8 +44,11 @@ export default function DashboardView({ initialAddress, parcelId }) {
   const isComparisonMode = selectedParcels.length >= 2;
 
   // --- Layout state ---
+  const [isPanelOpen, setIsPanelOpen] = useState(true);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
-  const [activeView, setActiveView] = useState('map');
+  const [activeNav, setActiveNav] = useState('overview');
+  const [showHistory, setShowHistory] = useState(false);
+  const [isChatExpanded, setIsChatExpanded] = useState(false);
   const [isCommandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [activeDetailTab, setActiveDetailTab] = useState('overview');
   const [isDetailOpen, setIsDetailOpen] = useState(true);
@@ -69,14 +72,13 @@ export default function DashboardView({ initialAddress, parcelId }) {
   // --- Keyboard shortcuts ---
   useKeyboardShortcuts([
     { key: 'k', meta: true, action: () => setCommandPaletteOpen(true) },
-    { key: '/', meta: true, action: () => { setActiveDetailTab('chat'); setIsDetailOpen(true); } },
+    { key: '/', meta: true, action: () => setIsChatExpanded(c => !c) },
     { key: 'b', meta: true, action: () => setIsSidebarCollapsed(c => !c) },
     { key: ']', meta: true, action: () => setIsDetailOpen(d => !d) },
-    { key: '1', meta: true, action: () => setActiveDetailTab('overview') },
-    { key: '2', meta: true, action: () => setActiveDetailTab('policies') },
-    { key: '3', meta: true, action: () => setActiveDetailTab('infrastructure') },
-    { key: '4', meta: true, action: () => setActiveDetailTab('chat') },
-    { key: '5', meta: true, action: () => setActiveDetailTab('documents') },
+    { key: '1', meta: true, action: () => { setActiveDetailTab('overview'); setActiveNav('overview'); } },
+    { key: '2', meta: true, action: () => { setActiveDetailTab('policies'); setActiveNav('policies'); } },
+    { key: '3', meta: true, action: () => { setActiveDetailTab('infrastructure'); setActiveNav('datasets'); } },
+    { key: '4', meta: true, action: () => { setActiveDetailTab('documents'); setActiveNav('precedents'); } },
   ]);
 
   const handleUploadAnalyzed = useCallback((upload) => {
@@ -319,10 +321,11 @@ export default function DashboardView({ initialAddress, parcelId }) {
 
     if (mapRef.current?.getMap()) {
       const styles = getComputedStyle(document.documentElement);
-      const left = isSidebarCollapsed ? 52 : (parseInt(styles.getPropertyValue('--sidebar-width')) || 220);
+      const left = isSidebarCollapsed ? 52 : (parseInt(styles.getPropertyValue('--sidebar-width')) || 160);
       const right = isDetailOpen ? (parseInt(styles.getPropertyValue('--panel-width')) || 380) : 0;
+      const bottom = isChatExpanded ? 280 : 49;
       mapRef.current.getMap().easeTo({
-        padding: { left, right, top: 48, bottom: 0 },
+        padding: { left, right, top: 48, bottom },
         duration: 300,
       });
     }
@@ -331,15 +334,13 @@ export default function DashboardView({ initialAddress, parcelId }) {
       document.body.classList.remove('sidebar-collapsed');
       document.body.classList.remove('panel-open');
     };
-  }, [isSidebarCollapsed, isDetailOpen]);
+  }, [isSidebarCollapsed, isDetailOpen, isChatExpanded]);
 
   // --- Command palette actions ---
   const commandActions = useMemo(() => [
-    { id: 'map', label: 'Switch to Map View', icon: <MapPin size={14} />, group: 'Views', onSelect: () => setActiveView('map') },
-    { id: 'table', label: 'Switch to Table View', icon: <LayoutList size={14} />, group: 'Views', onSelect: () => setActiveView('table') },
-    { id: '3d', label: 'Switch to 3D View', icon: <Box size={14} />, group: 'Views', onSelect: () => setActiveView('3d') },
-    { id: 'chat', label: 'Open Chat', kbd: '\u2318/', icon: <MessageSquare size={14} />, group: 'Actions', onSelect: () => { setActiveDetailTab('chat'); setIsDetailOpen(true); } },
+    { id: 'chat', label: 'Toggle Chat', kbd: '\u2318/', icon: <MessageSquare size={14} />, group: 'Actions', onSelect: () => setIsChatExpanded(c => !c) },
     { id: 'toggle-sidebar', label: 'Toggle Sidebar', kbd: '\u2318B', group: 'Actions', onSelect: () => setIsSidebarCollapsed(c => !c) },
+    { id: 'toggle-panel', label: 'Toggle Detail Panel', kbd: '\u2318]', group: 'Actions', onSelect: () => setIsDetailOpen(d => !d) },
     ...searchHistory.map(h => ({ id: h.address, label: h.address, group: 'Recent', onSelect: () => handleHistoryClick(h) })),
   ], [searchHistory, handleHistoryClick]);
 
@@ -356,12 +357,15 @@ export default function DashboardView({ initialAddress, parcelId }) {
           <Sidebar
             isCollapsed={isSidebarCollapsed}
             onToggleCollapse={() => setIsSidebarCollapsed(c => !c)}
-            selectedParcels={selectedParcels}
-            onParcelSelect={handleSetPrimary}
-            activeView={activeView}
-            onViewChange={setActiveView}
-            searchHistory={searchHistory}
-            onHistoryClick={handleHistoryClick}
+            activeNav={activeNav}
+            onNavClick={(id) => { setActiveNav(id); setActiveDetailTab(id); setIsDetailOpen(true); }}
+            showHistory={showHistory}
+            onHistoryClick={() => setShowHistory(true)}
+            onHistoryBack={() => setShowHistory(false)}
+            historyItems={searchHistory}
+            onHistoryItemClick={handleHistoryClick}
+            onDashboardClick={() => setIsDashboardModalOpen(true)}
+            onSettingsClick={() => setIsSettingsOpen(true)}
           />
           <main style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
             <MapView
@@ -431,7 +435,7 @@ export default function DashboardView({ initialAddress, parcelId }) {
           </main>
           <DetailPanel
             activeTab={activeDetailTab}
-            onTabChange={setActiveDetailTab}
+            onTabChange={(tab) => { setActiveDetailTab(tab); setActiveNav(tab); }}
             isOpen={isDetailOpen}
             onToggle={() => setIsDetailOpen(d => !d)}
             parcel={primaryParcel}
@@ -453,36 +457,34 @@ export default function DashboardView({ initialAddress, parcelId }) {
                 embedded={true}
               />
             )}
-            renderChatContent={() => (
-              <ChatPanel
-                parcelContext={primaryParcel}
-                selectedParcels={selectedParcels}
-                isComparisonMode={isComparisonMode}
-                modelParams={modelParams}
-                onModelUpdate={(params) => { setModelParams(params); setIsModelOpen(true); }}
-                analyzedUploads={analyzedUploads}
-                activePlanId={activePlanId}
-                activeProjectId={activeProjectId}
-                activeProjectName={activeProjectName}
-                embedded={true}
-                onPlanComplete={(massing, planId) => {
-                  if (planId) setActivePlanId(planId);
-                  if (mapRef.current && primaryParcel?.geom) {
-                    mapRef.current.setProposedMassing(primaryParcel.geom, massing.height_m || (massing.storeys * 3.5));
-                  }
-                  setModelParams({
-                    storeys: massing.storeys || 0,
-                    podium_storeys: massing.typology === 'tower_on_podium' ? 4 : 0,
-                    height_m: massing.height_m || (massing.storeys * 3.5),
-                    setback_m: massing.assumptions_used?.stepback_m ?? 3.0,
-                    typology: massing.typology || 'midrise',
-                    footprint_coverage: massing.lot_coverage_pct ? massing.lot_coverage_pct / 100 : 0.6,
-                  });
-                }}
-              />
-            )}
           />
         </div>
+        <ChatPanel
+          parcelContext={primaryParcel}
+          selectedParcels={selectedParcels}
+          isComparisonMode={isComparisonMode}
+          modelParams={modelParams}
+          onModelUpdate={(params) => { setModelParams(params); setIsModelOpen(true); }}
+          onToggleExpand={() => setIsChatExpanded(c => !c)}
+          analyzedUploads={analyzedUploads}
+          activePlanId={activePlanId}
+          activeProjectId={activeProjectId}
+          activeProjectName={activeProjectName}
+          onPlanComplete={(massing, planId) => {
+            if (planId) setActivePlanId(planId);
+            if (mapRef.current && primaryParcel?.geom) {
+              mapRef.current.setProposedMassing(primaryParcel.geom, massing.height_m || (massing.storeys * 3.5));
+            }
+            setModelParams({
+              storeys: massing.storeys || 0,
+              podium_storeys: massing.typology === 'tower_on_podium' ? 4 : 0,
+              height_m: massing.height_m || (massing.storeys * 3.5),
+              setback_m: massing.assumptions_used?.stepback_m ?? 3.0,
+              typology: massing.typology || 'midrise',
+              footprint_coverage: massing.lot_coverage_pct ? massing.lot_coverage_pct / 100 : 0.6,
+            });
+          }}
+        />
         <CommandPalette
           open={isCommandPaletteOpen}
           onClose={() => setCommandPaletteOpen(false)}
