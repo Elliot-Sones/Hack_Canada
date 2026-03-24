@@ -1,7 +1,7 @@
 import uuid
 from collections.abc import AsyncGenerator
 
-from fastapi import Depends, Header, HTTPException, status
+from fastapi import Depends, Header, HTTPException, Request, status
 from jose import JWTError, jwt
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,11 +21,42 @@ async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
             raise
 
 
+def _is_local_request(request: Request) -> bool:
+    """Check if request originates from localhost. Only trusts client IP, not Host header."""
+    client_host = (request.client.host if request.client else "").lower()
+    return client_host in {"localhost", "127.0.0.1", "::1"}
+
+
+async def _get_local_bypass_user(db: AsyncSession) -> dict:
+    result = await db.execute(
+        select(User.id, User.email, WorkspaceMember.organization_id, WorkspaceMember.role)
+        .join(WorkspaceMember, WorkspaceMember.user_id == User.id)
+        .where(User.is_active.is_(True))
+        .order_by(WorkspaceMember.created_at.asc())
+    )
+    row = result.first()
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Local auth bypass is enabled but no active workspace member exists",
+        )
+
+    return {
+        "id": row.id,
+        "email": row.email,
+        "organization_id": row.organization_id,
+        "role": row.role,
+    }
+
+
 async def get_current_user(
+    request: Request,
     authorization: str | None = Header(None),
     db: AsyncSession = Depends(get_db_session),
 ) -> dict:
     if not authorization:
+        if settings.LOCAL_AUTH_BYPASS and _is_local_request(request):
+            return await _get_local_bypass_user(db)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Missing authorization header",

@@ -87,3 +87,4 @@ output/playwright/
 # Large infrastructure GIS data (ingest via CKAN or download separately)
 water-system-data/*.geojson
 .gstack/
+chroma_db/
