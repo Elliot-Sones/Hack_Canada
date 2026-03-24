@@ -1873,7 +1873,7 @@ function InfraHistoryTab({ asset }) {
 }
 
 
-export default function PolicyPanel({ parcel, parcels = [], isComparisonMode = false, isOpen, onClose, activeNav, savedParcels, onSaveParcel, onUploadAnalyzed, activePlanId, selectedParcels, activeProjectId, onProjectOpen, onProjectClose, embedded = false }) {
+export default function PolicyPanel({ parcel, parcels = [], isComparisonMode = false, isOpen, onClose, activeNav, savedParcels, onSaveParcel, onUploadAnalyzed, activePlanId, selectedParcels, activeProjectId, onProjectOpen, onProjectClose }) {
     const { isResizing, handleProps: resizeHandleProps } = useResizable({
         defaultSize: 380,
         minSize: 280,
@@ -1999,28 +1999,6 @@ export default function PolicyPanel({ parcel, parcels = [], isComparisonMode = f
                 return <OverviewTab parcel={parcel} zoning={zoning} onUploadComplete={onUploadAnalyzed} infraData={infraData} infraLoading={infraLoading} />;
         }
     };
-
-    // Embedded mode: just render content, no wrapper/header/close button
-    if (embedded) {
-        return (
-            <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'auto' }}>
-                {savedParcels && savedParcels.length > 0 && (
-                    <div className="saved-parcels-strip">
-                        <div className="saved-parcels-label">Saved Parcels</div>
-                        <div className="saved-parcels-list">
-                            {savedParcels.map((savedParcel, idx) => (
-                                <div key={idx} className="saved-parcel-chip">
-                                    <span className="saved-parcel-zone">{savedParcel.zoning || '—'}</span>
-                                    <span className="saved-parcel-addr">{savedParcel.address?.split(',')[0]}</span>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-                )}
-                {renderTab()}
-            </div>
-        );
-    }
 
     return (
         <aside id="policy-panel" className={`${isOpen ? '' : 'panel-hidden'} backdrop-blur-xl`} style={{ userSelect: isResizing ? 'none' : undefined }}>

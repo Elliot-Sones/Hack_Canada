@@ -4,7 +4,7 @@
 
 /* --- Map (full viewport) --- */
 #map {
-    position: absolute;
+    position: fixed;
     inset: 0;
     z-index: 0;
 }
@@ -16,9 +16,8 @@
 }
 
 .maplibregl-ctrl-top-right {
-    top: 16px !important;
-    right: calc(var(--panel-width) + 16px) !important;
-    z-index: 2 !important;
+    top: 70px !important;
+    right: 12px !important;
 }
 
 .maplibregl-ctrl-group {
