@@ -123,10 +123,16 @@ body.sidebar-collapsed .sidebar-divider {
     font-size: var(--font-sm);
     color: var(--text-secondary);
     border-radius: 0;
-    transition: all var(--transition);
+    transition: all 150ms ease-out;
     white-space: nowrap;
     overflow: hidden;
     position: relative;
+}
+
+.nav-item span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .nav-item::before {
@@ -144,11 +150,15 @@ body.sidebar-collapsed .sidebar-divider {
 
 .nav-item:hover {
     color: var(--text-primary);
-    background: rgba(255, 255, 255, 0.03);
+    background: rgba(255, 255, 255, 0.04);
+    border-radius: var(--radius-sm);
 }
 
 .nav-item.active {
     color: var(--accent-light);
+    background: var(--accent-bg);
+    border-left: 2px solid var(--accent);
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
 }
 
 .nav-item.active::before {

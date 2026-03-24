@@ -7,6 +7,7 @@ import useResizable from '../hooks/useResizable.js';
 import useNearbyInfrastructure from '../hooks/useNearbyInfrastructure.js';
 import ServicingSummaryCard from './ServicingSummaryCard.jsx';
 import ProjectsPanel from './ProjectsPanel.jsx';
+import Skeleton, { SkeletonGroup } from './ui/Skeleton';
 
 // ─── Pipeline engineering decision panel ──────────────────────────────────────
 
@@ -636,7 +637,7 @@ function LoadingZoningTab({ parcel }) {
     return (
         <div className="tab-section-header">
             <h3>Loading Zoning Analysis</h3>
-            <p className="tab-section-desc">Fetching backend zoning analysis for {parcel.address}…</p>
+            <SkeletonGroup lines={5} gap={12} style={{ padding: '16px' }} />
         </div>
     );
 }
@@ -705,7 +706,7 @@ function PoliciesTab({ policies, loading }) {
         return (
             <div className="tab-section-header">
                 <h3>Policy Extracts</h3>
-                <p className="tab-section-desc">Loading applicable policies…</p>
+                <SkeletonGroup lines={5} gap={12} style={{ padding: '16px' }} />
             </div>
         );
     }
@@ -770,7 +771,7 @@ function DatasetsTab({ overlays, loading }) {
         return (
             <div className="tab-section-header">
                 <h3>Data Sources</h3>
-                <p className="tab-section-desc">Loading overlays…</p>
+                <SkeletonGroup lines={5} gap={12} style={{ padding: '16px' }} />
             </div>
         );
     }
@@ -842,7 +843,7 @@ function PrecedentsTab({ parcel }) {
         return (
             <div className="tab-section-header">
                 <h3>Nearby Applications</h3>
-                <p className="tab-section-desc">Loading nearby development applications...</p>
+                <SkeletonGroup lines={5} gap={12} style={{ padding: '16px' }} />
             </div>
         );
     }
@@ -952,7 +953,7 @@ function FinancesTab({ parcel }) {
         return () => controller.abort();
     }, [parcel?.id]);
 
-    if (loading) return <div className="tab-section-header"><h3>Financial Feasibility</h3><p className="tab-section-desc">Loading financial data...</p></div>;
+    if (loading) return <div className="tab-section-header"><h3>Financial Feasibility</h3><SkeletonGroup lines={5} gap={12} style={{ padding: '16px' }} /></div>;
     if (!data) return <div className="tab-section-header"><h3>Financial Feasibility</h3><p className="tab-section-desc">No financial data available for this parcel.</p></div>;
 
     const estimate = data.estimates?.[activeEstimate];
@@ -1173,7 +1174,7 @@ function DocumentsTab({ planId }) {
     }
 
     if (loading) {
-        return <div style={{ padding: 20, textAlign: 'center' }}>Loading documents...</div>;
+        return <SkeletonGroup lines={5} gap={12} style={{ padding: '16px' }} />;
     }
 
     const selected = selectedDoc || (documents.length > 0 ? documents[0] : null);
@@ -1257,7 +1258,7 @@ function ComparisonTab({ parcels }) {
         return (
             <div className="tab-section-header">
                 <h3>Comparing {parcels.length} Parcels</h3>
-                <p className="tab-section-desc">Loading parcel data...</p>
+                <SkeletonGroup lines={5} gap={12} style={{ padding: '16px' }} />
             </div>
         );
     }

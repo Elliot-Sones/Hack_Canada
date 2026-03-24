@@ -70,12 +70,12 @@ body.sidebar-collapsed #search-container {
     border-radius: var(--radius-lg);
     padding: 0 var(--space-lg);
     box-shadow: var(--shadow-lg);
-    transition: all var(--transition);
+    transition: all 150ms ease-out;
 }
 
 #search-bar:focus-within {
-    border-color: var(--border-accent);
-    box-shadow: var(--shadow-lg), 0 0 0 1px var(--accent-dim);
+    border-color: var(--accent);
+    box-shadow: var(--shadow-lg), 0 0 0 3px rgba(200, 165, 92, 0.1);
 }
 
 #search-icon {
