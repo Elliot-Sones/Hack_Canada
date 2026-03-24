@@ -299,6 +299,12 @@
 | `ServicingSummaryCard.jsx` | Municipal servicing summary card with status indicators and capacity check form |
 | `UserBubble.jsx` | User profile menu |
 
+### UI Primitives (`src/app/components/ui/`)
+
+| File | Purpose |
+|------|---------|
+| `CommandPalette.jsx` | Keyboard-driven command palette with fuse.js fuzzy search; accepts `actions` + `recentItems`, arrow-key navigation, group headers |
+
 ### Floor Plan Editor (`src/components/floorplan/`)
 
 | File | Purpose |
