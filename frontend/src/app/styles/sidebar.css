@@ -24,6 +24,33 @@ body.sidebar-collapsed #sidebar {
     width: var(--sidebar-collapsed);
 }
 
+/* Expand sidebar on hover when collapsed */
+body.sidebar-collapsed #sidebar:hover {
+    width: var(--sidebar-width);
+    box-shadow: var(--shadow-lg);
+}
+
+body.sidebar-collapsed #sidebar:hover .nav-item span {
+    opacity: 1;
+    width: auto;
+}
+
+body.sidebar-collapsed #sidebar:hover .sidebar-logo span {
+    opacity: 1;
+    width: auto;
+}
+
+body.sidebar-collapsed #sidebar:hover .sidebar-user-name,
+body.sidebar-collapsed #sidebar:hover .sidebar-user-email {
+    opacity: 1;
+    width: auto;
+}
+
+body.sidebar-collapsed #sidebar:hover .collapse-btn span {
+    opacity: 1;
+    width: auto;
+}
+
 .sidebar-top,
 .sidebar-bottom {
     display: flex;
