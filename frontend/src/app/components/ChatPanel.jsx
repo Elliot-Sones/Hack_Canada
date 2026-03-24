@@ -813,14 +813,14 @@ export default function ChatPanel({ parcelContext, onPlanComplete, onToggleExpan
     }, [sendMessage]);
 
     return (
-        <div id="chat-panel" className={`${isExpanded ? 'expanded' : ''} backdrop-blur-xl`} style={{ userSelect: isChatResizing ? 'none' : undefined }}>
+        <div id="chat-panel" role="region" aria-label="AI Assistant" className={`${isExpanded ? 'expanded' : ''} backdrop-blur-xl`} style={{ userSelect: isChatResizing ? 'none' : undefined }}>
             {isExpanded && <div {...chatResizeProps} style={{ ...chatResizeProps.style, top: -2 }} />}
             <div id="chat-toggle" role="button" tabIndex="0" aria-label="Toggle chat" onClick={handleToggle}>
                 <div id="chat-toggle-left">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
                         <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
                     </svg>
-                    <span>Ask the AI Agent</span>
+                    <span>{parcelContext ? 'Ask about this parcel' : 'Ask the AI Agent'}</span>
                 </div>
                 {isExpanded && (
                     <div className="chat-toolbar" onClick={(e) => e.stopPropagation()}>
@@ -1036,7 +1036,7 @@ export default function ChatPanel({ parcelContext, onPlanComplete, onToggleExpan
                     <input
                         type="text"
                         id="chat-input"
-                        placeholder="Ask about zoning, setbacks, variance requirements..."
+                        placeholder={parcelContext ? "Ask about zoning, setbacks, variance requirements..." : "Search for a parcel to start chatting..."}
                         autoComplete="off"
                         value={inputValue}
                         onChange={(e) => setInputValue(e.target.value)}

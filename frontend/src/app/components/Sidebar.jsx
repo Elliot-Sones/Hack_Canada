@@ -78,7 +78,7 @@ export default function Sidebar({ isCollapsed, onToggleCollapse, activeNav, onNa
     const NAV_ITEMS = BUILDING_NAV_ITEMS;
 
     return (
-        <nav id="sidebar" style={{ userSelect: isResizing ? 'none' : undefined }} className=' backdrop-blur-xl'>
+        <nav id="sidebar" role="navigation" aria-label="Main navigation" style={{ userSelect: isResizing ? 'none' : undefined }} className=' backdrop-blur-xl'>
             <div className="sidebar-top">
                 <div className="sidebar-logo">
                     {isCollapsed
@@ -242,7 +242,7 @@ export default function Sidebar({ isCollapsed, onToggleCollapse, activeNav, onNa
                     </div>
                 )}
 
-                <button className="nav-item" id="collapse-btn" onClick={onToggleCollapse}>
+                <button className="nav-item" id="collapse-btn" onClick={onToggleCollapse} aria-label={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}>
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
                         {isCollapsed ? <polyline points="9 18 15 12 9 6" /> : <polyline points="15 18 9 12 15 6" />}
                     </svg>

@@ -147,6 +147,27 @@
     height: 16px;
 }
 
+/* Section separation */
+.panel-section {
+    padding-bottom: var(--space-lg);
+    margin-bottom: var(--space-lg);
+    border-bottom: 1px solid var(--border);
+}
+
+.panel-section:last-child {
+    border-bottom: none;
+    margin-bottom: 0;
+}
+
+/* Section headers — sentence case, semibold */
+.section-label {
+    font-size: var(--font-sm);
+    font-weight: 600;
+    color: var(--text-muted);
+    margin-bottom: var(--space-sm);
+    letter-spacing: 0.01em;
+}
+
 /* Policy sections */
 .policy-section {
     margin-bottom: var(--space-xl);

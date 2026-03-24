@@ -595,7 +595,7 @@ function FileUploadZone({ onUploadComplete }) {
 }
 
 function formatMetric(value, suffix = '', fallback = 'Unavailable') {
-    if (value === null || value === undefined || value === '') return fallback;
+    if (value === null || value === undefined || value === '') return <span style={{ opacity: 0.4, fontStyle: 'italic' }}>{fallback}</span>;
     return `${value}${suffix}`;
 }
 
@@ -621,14 +621,24 @@ function ReviewNotesCard({ zoning }) {
 
     return (
         <div className="dd-card">
-            <div className="dd-card-label">Review Notes</div>
-            <ul style={{ margin: '10px 0 0 18px', padding: 0 }}>
+            <div className="dd-card-label">Review notes</div>
+            <div style={{ marginTop: '10px' }}>
                 {notes.map((note) => (
-                    <li key={note} style={{ marginBottom: 8 }}>
-                        {note}
-                    </li>
+                    <div key={note} style={{
+                        display: 'flex', gap: '8px', padding: '10px 12px',
+                        background: 'rgba(251, 191, 36, 0.06)',
+                        border: '1px solid rgba(251, 191, 36, 0.15)',
+                        borderRadius: 'var(--radius-sm)',
+                        marginBottom: '8px',
+                        fontSize: 'var(--font-sm)',
+                        color: 'var(--text-secondary)',
+                        lineHeight: '1.5',
+                    }}>
+                        <span style={{ flexShrink: 0, fontSize: '14px' }}>&#9888;&#65039;</span>
+                        <span>{note}</span>
+                    </div>
                 ))}
-            </ul>
+            </div>
         </div>
     );
 }
@@ -647,9 +657,7 @@ function OverviewTab({ parcel, zoning, onUploadComplete, infraData, infraLoading
 
     return (
         <>
-            <FileUploadZone onUploadComplete={onUploadComplete} />
-
-            <div className="dd-address-badge" style={{ marginTop: 16 }}>
+            <div className="dd-address-badge" style={{ marginTop: 0 }}>
                 <span className="dd-zone-chip">{zoning.zoneCategory || parcel.zoning || '—'}</span>
                 <span>{parcel.address}</span>
             </div>
@@ -660,11 +668,11 @@ function OverviewTab({ parcel, zoning, onUploadComplete, infraData, infraLoading
             </div>
 
             <div className="dd-card">
-                <div className="dd-card-label">Zone Classification</div>
+                <div className="dd-card-label">Zone classification</div>
                 <div className="dd-card-value">{zoning.label}</div>
             </div>
             <div className="dd-card">
-                <div className="dd-card-label">By-law Reference</div>
+                <div className="dd-card-label">By-law reference</div>
                 <div className="dd-card-value">{formatMetric(zoning.bylawSection, '', 'Unavailable')}</div>
             </div>
 
@@ -683,7 +691,7 @@ function OverviewTab({ parcel, zoning, onUploadComplete, infraData, infraLoading
             </div>
 
             <div className="dd-card">
-                <div className="dd-card-label">Permitted Uses</div>
+                <div className="dd-card-label">Permitted uses</div>
                 <div className="tag-list">
                     {(zoning.uses || []).length > 0
                         ? zoning.uses.map((use) => <span key={use} className="tag">{use}</span>)
@@ -1967,9 +1975,20 @@ export default function PolicyPanel({ parcel, parcels = [], isComparisonMode = f
 
         if (!parcel) {
             return (
-                <div className="tab-empty">
-                    {activeNav === 'overview' && <FileUploadZone onUploadComplete={onUploadAnalyzed} />}
-                    <p>Search for a property to view due diligence information.</p>
+                <div style={{
+                    display: 'flex', flexDirection: 'column', alignItems: 'center',
+                    justifyContent: 'center', padding: '48px 24px', textAlign: 'center',
+                    opacity: 0.5,
+                }}>
+                    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="1.2">
+                        <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
+                    </svg>
+                    <p style={{ marginTop: '16px', fontSize: 'var(--font-md)', color: 'var(--text-muted)' }}>
+                        Search for a property to begin
+                    </p>
+                    <p style={{ marginTop: '4px', fontSize: 'var(--font-sm)', color: 'var(--text-muted)', opacity: 0.6 }}>
+                        Enter an address above to view zoning analysis
+                    </p>
                 </div>
             );
         }
@@ -2002,13 +2021,17 @@ export default function PolicyPanel({ parcel, parcels = [], isComparisonMode = f
     };
 
     return (
-        <aside id="policy-panel" className={`${isOpen ? '' : 'panel-hidden'} backdrop-blur-xl`} style={{ userSelect: isResizing ? 'none' : undefined }}>
+        <aside id="policy-panel" role="complementary" aria-label="Parcel analysis" className={`${isOpen ? '' : 'panel-hidden'} backdrop-blur-xl`} style={{ userSelect: isResizing ? 'none' : undefined }}>
             <div {...resizeHandleProps} style={{ ...resizeHandleProps.style, left: -2 }} />
             <div id="policy-panel-header">
                 <h2 id="policy-panel-title">
                     {isComparisonMode && activeNav === 'overview'
                         ? `Comparing ${parcels.length} Parcels`
-                        : (TAB_TITLES[activeNav] || 'Project Information')}
+                        : activeNav === 'projects'
+                            ? 'Project Overview'
+                            : parcel
+                                ? (parcel.address?.split(',')[0] || 'Parcel Analysis')
+                                : (TAB_TITLES[activeNav] || 'Parcel Analysis')}
                 </h2>
                 <div className="panel-header-actions">
                     {isResolvedParcel(parcel) && onSaveParcel && (

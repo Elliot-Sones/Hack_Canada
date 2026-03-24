@@ -614,7 +614,8 @@ const MapView = forwardRef(function MapView({ isParcelResolved, onModelOpen, isP
                 <button
                     className="map-model-btn"
                     onClick={onModelOpen}
-                    title="Open 3D Model"
+                    title="View 3D Model"
+                    aria-label="View 3D Model"
                     style={{
                         right: `${(isPanelOpen ? 380 : 0) + 16}px`,
                         bottom: `${chatPanelHeight + 16}px`,

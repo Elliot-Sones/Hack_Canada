@@ -20,10 +20,12 @@ export default function SearchBar({ onLocationSelected }) {
     const [query, setQuery] = useState('');
     const [suggestions, setSuggestions] = useState([]);
     const [showSuggestions, setShowSuggestions] = useState(false);
+    const [isSearching, setIsSearching] = useState(false);
     const debounceRef = useRef(null);
     const barRef = useRef(null);
 
     const geocode = useCallback(async (q) => {
+        setIsSearching(true);
         try {
             const url = `https://nominatim.openstreetmap.org/search?` +
                 `q=${encodeURIComponent(q + ' Toronto Canada')}&` +
@@ -42,6 +44,8 @@ export default function SearchBar({ onLocationSelected }) {
             setShowSuggestions(true);
         } catch (err) {
             console.error('Geocoding error:', err);
+        } finally {
+            setIsSearching(false);
         }
     }, []);
 
@@ -91,7 +95,7 @@ export default function SearchBar({ onLocationSelected }) {
     return (
         <div id="search-container">
             <div id="search-bar" ref={barRef}>
-                <svg id="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <svg id="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={isSearching ? { animation: 'spin 1s linear infinite' } : {}}>
                     <circle cx="11" cy="11" r="8"></circle>
                     <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
                 </svg>
