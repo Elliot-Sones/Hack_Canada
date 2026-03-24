@@ -4,7 +4,7 @@
 
 /* --- Map (full viewport) --- */
 #map {
-    position: fixed;
+    position: absolute;
     inset: 0;
     z-index: 0;
 }
@@ -16,7 +16,7 @@
 }
 
 .maplibregl-ctrl-top-right {
-    top: 70px !important;
+    top: 16px !important;
     right: 12px !important;
 }
 

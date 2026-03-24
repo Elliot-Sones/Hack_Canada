@@ -312,6 +312,14 @@ export default function DashboardView({ initialAddress, parcelId }) {
     return () => { cancelled = true; map.off('moveend', onMoveEnd); };
   }, [infraOverlayLayers]);
 
+  // Trigger map resize after layout mounts
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (mapRef.current?.getMap()) mapRef.current.getMap().resize();
+    }, 100);
+    return () => clearTimeout(timer);
+  }, []);
+
   // Sync body classes for CSS
   useEffect(() => {
     if (typeof document === 'undefined') return undefined;
