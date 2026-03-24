@@ -1976,21 +1976,21 @@ export default function PolicyPanel({ parcel, parcels = [], isComparisonMode = f
 
         if (!parcel) {
             return (
-                <div style={{
-                    display: 'flex', flexDirection: 'column', alignItems: 'center',
-                    justifyContent: 'center', padding: '48px 24px', textAlign: 'center',
-                    opacity: 0.5,
-                }}>
-                    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="1.2">
-                        <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
-                    </svg>
-                    <p style={{ marginTop: '16px', fontSize: 'var(--font-md)', color: 'var(--text-muted)' }}>
-                        Search for a property to begin
-                    </p>
-                    <p style={{ marginTop: '4px', fontSize: 'var(--font-sm)', color: 'var(--text-muted)', opacity: 0.6 }}>
-                        Enter an address above to view zoning analysis
-                    </p>
-                </div>
+                <>
+                    <FileUploadZone onUploadComplete={onUploadAnalyzed} />
+                    <div style={{
+                        display: 'flex', flexDirection: 'column', alignItems: 'center',
+                        padding: '24px 24px', textAlign: 'center',
+                        opacity: 0.5,
+                    }}>
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="1.2">
+                            <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
+                        </svg>
+                        <p style={{ marginTop: '12px', fontSize: 'var(--font-sm)', color: 'var(--text-muted)' }}>
+                            Search for a property to view due diligence information.
+                        </p>
+                    </div>
+                </>
             );
         }
         if (isUnresolvedParcel(parcel)) {
