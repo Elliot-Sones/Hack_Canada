@@ -9,7 +9,7 @@ const DEFAULT_ZOOM = 13;
 
 const EMPTY_FC = { type: 'FeatureCollection', features: [] };
 
-const MapView = forwardRef(function MapView({ isParcelResolved, onModelOpen, isPanelOpen, isSidebarCollapsed, isChatExpanded, chatPanelHeight = 49, isModelOpen, infraOverlayLayers = new Set(), onParcelClick }, ref) {
+const MapView = forwardRef(function MapView({ isParcelResolved, onModelOpen, isPanelOpen, isSidebarCollapsed, isModelOpen, infraOverlayLayers = new Set(), onParcelClick }, ref) {
     const containerRef = useRef(null);
     const mapInstanceRef = useRef(null);
     const markerRef = useRef(null);
@@ -617,7 +617,7 @@ const MapView = forwardRef(function MapView({ isParcelResolved, onModelOpen, isP
                     title="Open 3D Model"
                     style={{
                         right: `${(isPanelOpen ? 380 : 0) + 16}px`,
-                        bottom: `${chatPanelHeight + 16}px`,
+                        bottom: '16px',
                     }}
                 >
                     ⬡ Model
