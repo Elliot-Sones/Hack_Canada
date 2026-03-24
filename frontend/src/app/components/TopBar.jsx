@@ -35,8 +35,8 @@ export default function TopBar({ user, onCommandPalette, onSignOut, onSettings }
         transition: 'border-color 0.15s',
         minWidth: 280,
       }}
-      onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--border-accent)'}
-      onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--border)'}
+      onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--border-accent)'; e.currentTarget.style.boxShadow = 'var(--shadow-sm)'; e.currentTarget.style.background = 'var(--bg-tertiary)'; }}
+      onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.boxShadow = 'none'; e.currentTarget.style.background = 'var(--bg-secondary)'; }}
       >
         <Search size={14} />
         <span style={{ flex: 1, textAlign: 'left' }}>Search or jump to...</span>
@@ -47,7 +47,13 @@ export default function TopBar({ user, onCommandPalette, onSignOut, onSettings }
       <Dropdown
         align="right"
         trigger={
-          <Avatar name={user?.name || user?.email} src={user?.image} size="sm" />
+          <div
+            style={{ transition: 'opacity 0.15s', opacity: 1, cursor: 'pointer' }}
+            onMouseEnter={e => e.currentTarget.style.opacity = '0.8'}
+            onMouseLeave={e => e.currentTarget.style.opacity = '1'}
+          >
+            <Avatar name={user?.name || user?.email} src={user?.image} size="sm" />
+          </div>
         }
         items={[
           { id: 'settings', label: 'Settings', kbd: '⌘,', onSelect: onSettings },

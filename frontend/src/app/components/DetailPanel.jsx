@@ -98,7 +98,7 @@ export default function DetailPanel({
       />
 
       {/* Content area */}
-      <div className="detail-panel-content">
+      <div className="detail-panel-content" style={!parcel ? { display: 'flex', alignItems: 'flex-start', paddingTop: 60 } : undefined}>
         {!parcel ? (
           <EmptyState
             icon={Building2}

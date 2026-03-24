@@ -1170,10 +1170,8 @@
     top: 48px;
     right: 0;
     bottom: 0;
-    z-index: 15;
-    background: var(--bg-glass);
-    backdrop-filter: var(--blur);
-    -webkit-backdrop-filter: var(--blur);
+    z-index: 10;
+    background: var(--bg-primary);
     border-left: 1px solid var(--border);
     display: flex;
     flex-direction: column;

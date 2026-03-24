@@ -149,6 +149,8 @@ body.sidebar-collapsed .sidebar-divider {
 
 .nav-item.active {
     color: var(--accent-light);
+    background: var(--accent-bg);
+    border-radius: var(--radius-sm);
 }
 
 .nav-item.active::before {

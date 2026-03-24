@@ -17,7 +17,8 @@
 
 .maplibregl-ctrl-top-right {
     top: 16px !important;
-    right: 12px !important;
+    right: calc(var(--panel-width) + 16px) !important;
+    z-index: 2 !important;
 }
 
 .maplibregl-ctrl-group {
