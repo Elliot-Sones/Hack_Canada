@@ -2062,7 +2062,7 @@ export default function PolicyPanel({ parcel, parcels = [], isComparisonMode = f
                     </div>
                 )}
 
-                {activeNav !== 'projects' && (
+                {activeNav === 'overview' && (
                     <FileUploadZone onUploadComplete={onUploadAnalyzed} />
                 )}
                 {renderTab()}
