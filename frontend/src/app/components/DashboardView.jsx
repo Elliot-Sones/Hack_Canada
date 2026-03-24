@@ -400,7 +400,7 @@ export default function DashboardView({ initialAddress, parcelId }) {
           </button>
         </div>
       )}
-      <SearchBar onLocationSelected={handleLocationSelected} />
+      <SearchBar onLocationSelected={handleLocationSelected} displayAddress={primaryParcel?.fullAddress || primaryParcel?.address || null} />
       {selectedParcels.length > 0 && (
         <SelectionChips
           parcels={selectedParcels}

@@ -16,13 +16,20 @@ function formatAddress(result) {
     return formatted;
 }
 
-export default function SearchBar({ onLocationSelected }) {
+export default function SearchBar({ onLocationSelected, displayAddress }) {
     const [query, setQuery] = useState('');
     const [suggestions, setSuggestions] = useState([]);
     const [showSuggestions, setShowSuggestions] = useState(false);
     const [isSearching, setIsSearching] = useState(false);
     const debounceRef = useRef(null);
     const barRef = useRef(null);
+
+    // Sync search bar with externally selected parcel address
+    useEffect(() => {
+        if (displayAddress != null) {
+            setQuery(displayAddress);
+        }
+    }, [displayAddress]);
 
     const geocode = useCallback(async (q) => {
         setIsSearching(true);
