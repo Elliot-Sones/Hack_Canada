@@ -1,32 +1,101 @@
-import { useCallback, useState, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { useSession, signOut } from '../lib/auth-client.js';
 import { clearFastApiToken } from '../api.js';
 import useResizable from '../hooks/useResizable.js';
-
-const BUILDING_NAV_ITEMS = [
-    { id: 'overview', label: 'Overview', icon: (<><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><polyline points="9 22 9 12 15 12 15 22" /></>) },
-    { id: 'finances', label: 'Finances', icon: (<><line x1="12" y1="1" x2="12" y2="23" /><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" /></>) },
-    { id: 'policies', label: 'Policies', icon: (<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />) },
-    { id: 'datasets', label: 'Datasets', icon: (<><ellipse cx="12" cy="5" rx="9" ry="3" /><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" /><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" /></>) },
-    { id: 'precedents', label: 'Precedents', icon: (<><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></>) },
-];
-
-const PROJECTS_ITEM = { id: 'projects', label: 'Projects', icon: (<><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" /></>) };
+import { getShortAddress } from '../lib/parcelState.js';
+import Badge from './ui/Badge.jsx';
+import Kbd from './ui/Kbd.jsx';
 
 const COLLAPSED_WIDTH = 52;
-const DEFAULT_WIDTH = 160;
-const MIN_WIDTH = 120;
-const MAX_WIDTH = 280;
+const DEFAULT_WIDTH = 220;
+const MIN_WIDTH = 180;
+const MAX_WIDTH = 320;
 
-function shortAddress(item) {
-    // Use the short address (e.g. "192 Spadina Avenue") if available,
-    // otherwise take just the first segment before the city
-    const raw = item.address || item.fullAddress || '';
-    const parts = raw.split(',');
-    return parts[0].trim();
+const STATUS_COLORS = {
+    pending:        'var(--text-muted)',
+    searching:      '#60a5fa',
+    analyzing:      'var(--warning)',
+    infrastructure: '#a78bfa',
+    complete:       'var(--success)',
+    blocked:        'var(--error)',
+};
+
+const VIEW_ITEMS = [
+    {
+        id: 'map', label: 'Map',
+        icon: <><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" /><circle cx="12" cy="10" r="3" /></>,
+    },
+    {
+        id: 'table', label: 'Table',
+        icon: <><rect x="3" y="3" width="18" height="18" rx="2" ry="2" /><line x1="3" y1="9" x2="21" y2="9" /><line x1="3" y1="15" x2="21" y2="15" /><line x1="9" y1="3" x2="9" y2="21" /></>,
+    },
+    {
+        id: '3d', label: '3D',
+        icon: <><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" /><polyline points="3.27 6.96 12 12.01 20.73 6.96" /><line x1="12" y1="22.08" x2="12" y2="12" /></>,
+    },
+];
+
+function StatusDot({ status }) {
+    const color = STATUS_COLORS[status] || STATUS_COLORS.pending;
+    return <span className="parcel-status-dot" style={{ background: color }} />;
 }
 
-export default function Sidebar({ isCollapsed, onToggleCollapse, activeNav, onNavClick, showHistory, onHistoryClick, onHistoryBack, historyItems, onHistoryItemClick, onDashboardClick, onSettingsClick }) {
+function SidebarGroup({ label, count, defaultOpen = true, isCollapsed: sidebarCollapsed, children }) {
+    const [open, setOpen] = useState(defaultOpen);
+
+    if (sidebarCollapsed) {
+        return <div className="sidebar-group collapsed-group">{children}</div>;
+    }
+
+    return (
+        <div className="sidebar-group">
+            <button className="sidebar-group-header" onClick={() => setOpen(!open)}>
+                <svg className={`group-chevron${open ? ' open' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <polyline points="9 18 15 12 9 6" />
+                </svg>
+                <span className="group-label">{label}</span>
+                {count > 0 && <Badge color="gray" style={{ marginLeft: 'auto', fontSize: '10px', padding: '0 6px' }}>{count}</Badge>}
+            </button>
+            {open && <div className="sidebar-group-items">{children}</div>}
+        </div>
+    );
+}
+
+function ParcelRow({ parcel, isActive, onClick, isCollapsed }) {
+    const addr = getShortAddress(parcel);
+    return (
+        <button
+            className={`parcel-row${isActive ? ' active' : ''}`}
+            onClick={() => onClick(parcel)}
+            title={isCollapsed ? addr : undefined}
+        >
+            <StatusDot status={parcel._pipelineStatus || parcel.status || 'pending'} />
+            {!isCollapsed && <span className="parcel-row-label">{addr}</span>}
+        </button>
+    );
+}
+
+function categorizeParcels(parcels) {
+    const active = [];
+    const analyzed = [];
+    for (const p of parcels) {
+        const s = p._pipelineStatus || p.status || 'pending';
+        if (s === 'complete') analyzed.push(p);
+        else active.push(p);
+    }
+    return { active, analyzed };
+}
+
+export default function Sidebar({
+    isCollapsed,
+    onToggleCollapse,
+    selectedParcels = [],
+    onParcelSelect,
+    activeView = 'map',
+    onViewChange,
+    searchHistory = [],
+    onHistoryClick,
+}) {
     const { data: session } = useSession();
     const user = session?.user;
 
@@ -55,9 +124,7 @@ export default function Sidebar({ isCollapsed, onToggleCollapse, activeNav, onNa
         if (isUserMenuOpen) {
             document.addEventListener('mousedown', handleClickOutside);
         }
-        return () => {
-            document.removeEventListener('mousedown', handleClickOutside);
-        };
+        return () => document.removeEventListener('mousedown', handleClickOutside);
     }, [isUserMenuOpen]);
 
     const logout = useCallback(async () => {
@@ -67,18 +134,15 @@ export default function Sidebar({ isCollapsed, onToggleCollapse, activeNav, onNa
     }, []);
 
     const initials = user
-        ? (user.name || user.email || '?')
-            .split(' ')
-            .map((w) => w[0])
-            .join('')
-            .slice(0, 2)
-            .toUpperCase()
+        ? (user.name || user.email || '?').split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()
         : '?';
 
-    const NAV_ITEMS = BUILDING_NAV_ITEMS;
+    const { active: activeParcels, analyzed: analyzedParcels } = categorizeParcels(selectedParcels);
+    const activePrimary = selectedParcels[0] || null;
 
     return (
-        <nav id="sidebar" style={{ userSelect: isResizing ? 'none' : undefined }} className=' backdrop-blur-xl'>
+        <nav id="sidebar" style={{ userSelect: isResizing ? 'none' : undefined }} className="backdrop-blur-xl">
+            {/* Logo */}
             <div className="sidebar-top">
                 <div className="sidebar-logo">
                     {isCollapsed
@@ -88,67 +152,77 @@ export default function Sidebar({ isCollapsed, onToggleCollapse, activeNav, onNa
                 </div>
                 <div className="sidebar-divider" />
 
-                {showHistory && !isCollapsed ? (
-                    <>
-                        <button className="history-back-btn" onClick={onHistoryBack}>
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" width="16" height="16">
-                                <polyline points="15 18 9 12 15 6" />
-                            </svg>
-                            Back
-                        </button>
-                        <div className="history-list">
-                            {(!historyItems || historyItems.length === 0) ? (
-                                <div className="history-empty">No searches yet</div>
-                            ) : (
-                                historyItems.map((item, idx) => (
-                                    <button key={idx} className="history-item" onClick={() => onHistoryItemClick(item)}>
-                                        <svg className="history-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                                            <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
-                                            <circle cx="12" cy="10" r="3" />
-                                        </svg>
-                                        <span className="history-item-address">{shortAddress(item)}</span>
-                                    </button>
-                                ))
-                            )}
+                {/* PARCELS group */}
+                <SidebarGroup label="PARCELS" count={selectedParcels.length} isCollapsed={isCollapsed}>
+                    {!isCollapsed && activeParcels.length > 0 && (
+                        <div className="sidebar-subgroup">
+                            <span className="subgroup-label">Active</span>
+                            {activeParcels.map((p, i) => (
+                                <ParcelRow key={p.id || i} parcel={p} isActive={activePrimary?.id === p.id} onClick={onParcelSelect} isCollapsed={isCollapsed} />
+                            ))}
                         </div>
-                    </>
-                ) : (
-                    <>
-                        {NAV_ITEMS.map((item) => (
-                            <button
-                                key={item.id}
-                                className={`nav-item${activeNav === item.id ? ' active' : ''}`}
-                                onClick={() => onNavClick(item.id)}
-                                title={isCollapsed ? item.label : undefined}
-                            >
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">{item.icon}</svg>
-                                <span>{item.label}</span>
-                            </button>
-                        ))}
-                        {!isCollapsed && (
-                            <>
-                                <div className="sidebar-divider" />
-                                <button
-                                    className={`nav-item${activeNav === PROJECTS_ITEM.id ? ' active' : ''}`}
-                                    onClick={() => onNavClick(PROJECTS_ITEM.id)}
-                                >
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">{PROJECTS_ITEM.icon}</svg>
-                                    <span>{PROJECTS_ITEM.label}</span>
-                                </button>
-                                <button className="nav-item" onClick={onHistoryClick}>
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                                        <circle cx="12" cy="12" r="10" />
-                                        <polyline points="12 6 12 12 16 14" />
-                                    </svg>
-                                    <span>History</span>
-                                </button>
-                            </>
-                        )}
-                    </>
-                )}
+                    )}
+                    {!isCollapsed && analyzedParcels.length > 0 && (
+                        <div className="sidebar-subgroup">
+                            <span className="subgroup-label">Analyzed</span>
+                            {analyzedParcels.map((p, i) => (
+                                <ParcelRow key={p.id || i} parcel={p} isActive={activePrimary?.id === p.id} onClick={onParcelSelect} isCollapsed={isCollapsed} />
+                            ))}
+                        </div>
+                    )}
+                    {isCollapsed && selectedParcels.map((p, i) => (
+                        <ParcelRow key={p.id || i} parcel={p} isActive={activePrimary?.id === p.id} onClick={onParcelSelect} isCollapsed={isCollapsed} />
+                    ))}
+                    {selectedParcels.length === 0 && !isCollapsed && (
+                        <div className="sidebar-empty">No parcels selected</div>
+                    )}
+                </SidebarGroup>
+
+                {/* PROJECTS group */}
+                <SidebarGroup label="PROJECTS" count={0} defaultOpen={false} isCollapsed={isCollapsed}>
+                    {!isCollapsed && (
+                        <>
+                            <div className="sidebar-subgroup">
+                                <span className="subgroup-label">In Progress</span>
+                                <div className="sidebar-empty">Coming soon</div>
+                            </div>
+                            <div className="sidebar-subgroup">
+                                <span className="subgroup-label">Complete</span>
+                                <div className="sidebar-empty">Coming soon</div>
+                            </div>
+                        </>
+                    )}
+                </SidebarGroup>
+
+                <div className="sidebar-divider" />
+
+                {/* VIEWS */}
+                {!isCollapsed && <span className="sidebar-section-label">VIEWS</span>}
+                {VIEW_ITEMS.map(v => (
+                    <button
+                        key={v.id}
+                        className={`nav-item${activeView === v.id ? ' active' : ''}`}
+                        onClick={() => onViewChange(v.id)}
+                        title={isCollapsed ? v.label : undefined}
+                    >
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">{v.icon}</svg>
+                        <span>{v.label}</span>
+                    </button>
+                ))}
             </div>
 
             <div className="sidebar-bottom">
+                {/* Shortcuts footer */}
+                {!isCollapsed && (
+                    <div className="sidebar-shortcuts">
+                        <div className="sidebar-divider" />
+                        <div className="shortcut-row"><Kbd>&#8984;K</Kbd><span className="shortcut-label">Search</span></div>
+                        <div className="shortcut-row"><Kbd>&#8984;/</Kbd><span className="shortcut-label">Chat</span></div>
+                        <div className="shortcut-row"><Kbd>&#8984;B</Kbd><span className="shortcut-label">Sidebar</span></div>
+                    </div>
+                )}
+
+                {/* User section */}
                 {user && (
                     <div className="sidebar-user-container" ref={userMenuRef}>
                         <div className="sidebar-divider" />
@@ -168,40 +242,7 @@ export default function Sidebar({ isCollapsed, onToggleCollapse, activeNav, onNa
                                         <span className="user-popup-badge">Pro Plan</span>
                                     </div>
                                 </div>
-
-                                <div className="user-popup-stats">
-                                    <div className="user-stat">
-                                        <span className="user-stat-val">12</span>
-                                        <span className="user-stat-label">Projects</span>
-                                    </div>
-                                    <div className="user-stat">
-                                        <span className="user-stat-val">2.4k</span>
-                                        <span className="user-stat-label">Credits</span>
-                                    </div>
-                                    <div className="user-stat">
-                                        <span className="user-stat-val">3</span>
-                                        <span className="user-stat-label">Teams</span>
-                                    </div>
-                                </div>
-
-                                <div className="user-popup-links">
-                                    <button className="user-popup-link" onClick={() => { setIsUserMenuOpen(false); onDashboardClick && onDashboardClick(); }}>
-                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                                            <rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" /><rect x="14" y="14" width="7" height="7" /><rect x="3" y="14" width="7" height="7" />
-                                        </svg>
-                                        Dashboard
-                                    </button>
-                                    <button className="user-popup-link" onClick={() => { setIsUserMenuOpen(false); onSettingsClick && onSettingsClick(); }}>
-                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                                            <circle cx="12" cy="12" r="3" />
-                                            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
-                                        </svg>
-                                        Settings
-                                    </button>
-                                </div>
-
                                 <div className="user-popup-divider" />
-
                                 <button className="user-popup-logout" onClick={logout}>
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
                                         <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
@@ -237,7 +278,6 @@ export default function Sidebar({ isCollapsed, onToggleCollapse, activeNav, onNa
                                 </svg>
                             )}
                         </div>
-
                         <div className="sidebar-divider" />
                     </div>
                 )}
