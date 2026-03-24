@@ -298,6 +298,7 @@
 | `InfrastructureLayerControl.jsx` | Floating layer toggle panel for DB-backed infrastructure overlays (Water Mains, Sewers, Electrical Grid) |
 | `ServicingSummaryCard.jsx` | Municipal servicing summary card with status indicators and capacity check form |
 | `UserBubble.jsx` | User profile menu |
+| `TopBar.jsx` | Top dashboard bar — logo, command palette trigger (⌘K), user avatar dropdown (settings, sign out) |
 
 ### UI Primitives (`src/app/components/ui/`)
 
