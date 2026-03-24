@@ -42,6 +42,7 @@ export default function DashboardView({ initialAddress, parcelId }) {
   const [savedParcels, setSavedParcels] = useState([]);
   const [showHistory, setShowHistory] = useState(false);
   const [isChatExpanded, setIsChatExpanded] = useState(false);
+  const [searchDisplayAddress, setSearchDisplayAddress] = useState(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isDashboardModalOpen, setIsDashboardModalOpen] = useState(false);
   const [modelParams, setModelParams] = useState(null);
@@ -144,6 +145,7 @@ export default function DashboardView({ initialAddress, parcelId }) {
       setSelectedParcels([resolved]);
     }
     setIsPanelOpen(true);
+    setSearchDisplayAddress('');  // Clear search bar — chip shows active parcel
   }, []);
 
   const handleParcelDeselect = useCallback((id) => {
@@ -400,7 +402,7 @@ export default function DashboardView({ initialAddress, parcelId }) {
           </button>
         </div>
       )}
-      <SearchBar onLocationSelected={handleLocationSelected} displayAddress={primaryParcel?.fullAddress || primaryParcel?.address || null} />
+      <SearchBar onLocationSelected={handleLocationSelected} displayAddress={searchDisplayAddress} />
       {selectedParcels.length > 0 && (
         <SelectionChips
           parcels={selectedParcels}
