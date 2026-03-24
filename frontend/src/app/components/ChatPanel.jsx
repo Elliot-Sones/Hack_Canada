@@ -78,7 +78,7 @@ function planStartErrorMessage(error, filename = null) {
         : `Failed to start generation: ${error.message}`;
 }
 
-export default function ChatPanel({ parcelContext, onPlanComplete, onToggleExpand, modelParams, onModelUpdate, analyzedUploads, activePlanId, selectedParcels, isComparisonMode, activeProjectId, activeProjectName }) {
+export default function ChatPanel({ parcelContext, onPlanComplete, onToggleExpand, modelParams, onModelUpdate, analyzedUploads, activePlanId, selectedParcels, isComparisonMode, activeProjectId, activeProjectName, embedded = false }) {
     const { isResizing: isChatResizing, handleProps: chatResizeProps } = useResizable({
         defaultSize: 280,
         minSize: 150,
@@ -812,6 +812,239 @@ export default function ChatPanel({ parcelContext, onPlanComplete, onToggleExpan
         }
     }, [sendMessage]);
 
+    const chatToolbar = (
+        <div className="chat-toolbar" onClick={(e) => e.stopPropagation()} style={embedded ? { padding: '4px 8px', borderBottom: '1px solid var(--border)' } : undefined}>
+            <button className="chat-toolbar-btn" title="New Chat" onClick={handleNewChat}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="15" height="15">
+                    <line x1="12" y1="5" x2="12" y2="19" />
+                    <line x1="5" y1="12" x2="19" y2="12" />
+                </svg>
+            </button>
+            <button className="chat-toolbar-btn" title="Chat History" onClick={() => setShowHistory((v) => !v)}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="15" height="15">
+                    <circle cx="12" cy="12" r="10" />
+                    <polyline points="12 6 12 12 16 14" />
+                </svg>
+            </button>
+        </div>
+    );
+
+    if (embedded) {
+        return (
+            <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+                {chatToolbar}
+                <ChatContextHeader
+                    selectedParcels={selectedParcels}
+                    primaryParcel={parcelContext}
+                    analyzedUploads={analyzedUploads}
+                    activePlanId={activePlanId}
+                    isExpanded={true}
+                    onGenerateReport={handleGenerateReport}
+                />
+                <div id="chat-body" onDrop={handleDrop} onDragOver={handleDragOver} onDragLeave={handleDragLeave} style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+                {isDragOver && (
+                    <div className="chat-drop-overlay">
+                        <div className="chat-drop-content">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" width="32" height="32">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                                <polyline points="17 8 12 3 7 8" />
+                                <line x1="12" y1="3" x2="12" y2="15" />
+                            </svg>
+                            <span>Drop file to upload</span>
+                        </div>
+                    </div>
+                )}
+                {showHistory && (
+                    <div className="chat-history-panel">
+                        <div className="chat-history-header">
+                            <span>Chat History</span>
+                            <button className="chat-history-close" onClick={() => setShowHistory(false)}>
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="14" height="14">
+                                    <line x1="18" y1="6" x2="6" y2="18" />
+                                    <line x1="6" y1="6" x2="18" y2="18" />
+                                </svg>
+                            </button>
+                        </div>
+                        <div className="chat-history-list">
+                            {getConversations().length === 0 ? (
+                                <div className="chat-history-empty">No saved conversations yet</div>
+                            ) : (
+                                getConversations().map((conv) => (
+                                    <div
+                                        key={conv.id}
+                                        className={`chat-history-item ${conv.id === currentConversationId ? 'active' : ''}`}
+                                        onClick={() => handleLoadConversation(conv.id)}
+                                    >
+                                        <div className="chat-history-item-content">
+                                            <div className="chat-history-title">{conv.title}</div>
+                                            <div className="chat-history-date">
+                                                {new Date(conv.updatedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                                            </div>
+                                        </div>
+                                        <button
+                                            className="chat-history-delete"
+                                            title="Delete conversation"
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                handleDeleteConversation(conv.id);
+                                            }}
+                                        >
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="12" height="12">
+                                                <line x1="18" y1="6" x2="6" y2="18" />
+                                                <line x1="6" y1="6" x2="18" y2="18" />
+                                            </svg>
+                                        </button>
+                                    </div>
+                                ))
+                            )}
+                        </div>
+                    </div>
+                )}
+                <div id="chat-messages">
+                    {messages.map((msg, idx) => (
+                        <div key={idx} className={`chat-message ${msg.role}`}>
+                            <div className="message-avatar">{msg.role === 'assistant' ? 'AI' : 'You'}</div>
+                            <div className="message-content">
+                                <div className="extract-markdown" style={{ margin: 0 }}>
+                                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.text || ''}</ReactMarkdown>
+                                </div>
+                                {msg.isGenerating && (
+                                    <div className="upload-status" style={{ marginTop: 8 }}>
+                                        <div className="upload-spinner"></div>
+                                        <span>Generating report&hellip;</span>
+                                    </div>
+                                )}
+                                {msg.documents?.length > 0 && (
+                                    <div className="chat-doc-list">
+                                        {msg.documents.map((doc) => (
+                                            <div key={doc.id} className="chat-doc-item">
+                                                <div className="chat-doc-icon">
+                                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" width="16" height="16">
+                                                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                                                        <polyline points="14 2 14 8 20 8" />
+                                                    </svg>
+                                                </div>
+                                                <span className="chat-doc-title">{doc.title || doc.doc_type}</span>
+                                                <button
+                                                    className="chat-doc-download"
+                                                    title="Download as Markdown"
+                                                    onClick={async () => {
+                                                        try {
+                                                            const res = await downloadPlanDocument(msg.planId, doc.id, 'markdown');
+                                                            const blob = await res.blob();
+                                                            const url = URL.createObjectURL(blob);
+                                                            const a = document.createElement('a');
+                                                            a.href = url;
+                                                            a.download = `${(doc.title || doc.doc_type).replace(/\s+/g, '_')}.md`;
+                                                            a.click();
+                                                            URL.revokeObjectURL(url);
+                                                        } catch (err) {
+                                                            console.error('Download failed:', err);
+                                                        }
+                                                    }}
+                                                >
+                                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="12" height="12">
+                                                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                                                        <polyline points="7 10 12 15 17 10" />
+                                                        <line x1="12" y1="15" x2="12" y2="3" />
+                                                    </svg>
+                                                    .md
+                                                </button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                                {msg.contractors?.length > 0 && (
+                                    <ContractorCards contractors={msg.contractors} />
+                                )}
+                                {msg.role === 'assistant' && msg.action && !msg.actionFired && (
+                                    <button
+                                        className="generate-action-btn"
+                                        onClick={() => handleGenerateAction(msg.action, idx)}
+                                    >
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="13" height="13">
+                                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                                            <polyline points="14 2 14 8 20 8" />
+                                            <line x1="12" y1="18" x2="12" y2="12" />
+                                            <line x1="9" y1="15" x2="15" y2="15" />
+                                        </svg>
+                                        {msg.action.label}
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+                    ))}
+                    {planProgress && (
+                        <div className="chat-message assistant">
+                            <div className="message-avatar">AI</div>
+                            <div className="message-content">
+                                <div className="plan-progress">
+                                    <div className="plan-progress-header">
+                                        <div className="upload-spinner"></div>
+                                        <span>{planProgress.step}... ({planProgress.completedCount}/{planProgress.totalSteps})</span>
+                                    </div>
+                                    <div className="plan-progress-bar">
+                                        <div className="plan-progress-fill" style={{ width: `${planProgress.pct}%` }} />
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                    {uploadProgress && (
+                        <div className="chat-message assistant">
+                            <div className="message-avatar">AI</div>
+                            <div className="message-content">
+                                <div className="upload-status">
+                                    <div className="upload-spinner"></div>
+                                    <span>{uploadProgress.status === 'uploading' ? 'Uploading' : 'Analyzing'} {uploadProgress.filename}...</span>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                    {isTyping && (
+                        <div className="chat-message assistant">
+                            <div className="message-avatar">AI</div>
+                            <div className="message-content">
+                                <div className="typing-indicator">
+                                    <span></span><span></span><span></span>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                    <div ref={messagesEndRef} />
+                </div>
+                <div id="chat-input-container">
+                    <input type="file" ref={fileInputRef} style={{ display: 'none' }}
+                        accept=".pdf,.png,.jpg,.jpeg,.xlsx,.xls,.csv"
+                        onChange={(e) => { handleFileUpload(e.target.files?.[0]); e.target.value = ''; }}
+                    />
+                    <button className="chat-upload-btn" aria-label="Upload file" title="Upload a document for AI analysis"
+                        onClick={() => fileInputRef.current?.click()}>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="18" height="18">
+                            <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+                        </svg>
+                    </button>
+                    <input
+                        type="text"
+                        id="chat-input"
+                        placeholder="Ask about zoning, setbacks, variance requirements..."
+                        autoComplete="off"
+                        value={inputValue}
+                        onChange={(e) => setInputValue(e.target.value)}
+                        onKeyDown={handleKeyDown}
+                    />
+                    <button id="chat-send" aria-label="Send message" onClick={sendMessage}>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <line x1="22" y1="2" x2="11" y2="13" />
+                            <polygon points="22 2 15 22 11 13 2 9 22 2" />
+                        </svg>
+                    </button>
+                </div>
+            </div>
+        </div>
+        );
+    }
+
     return (
         <div id="chat-panel" className={`${isExpanded ? 'expanded' : ''} backdrop-blur-xl`} style={{ userSelect: isChatResizing ? 'none' : undefined }}>
             {isExpanded && <div {...chatResizeProps} style={{ ...chatResizeProps.style, top: -2 }} />}
@@ -822,22 +1055,7 @@ export default function ChatPanel({ parcelContext, onPlanComplete, onToggleExpan
                     </svg>
                     <span>Ask the AI Agent</span>
                 </div>
-                {isExpanded && (
-                    <div className="chat-toolbar" onClick={(e) => e.stopPropagation()}>
-                        <button className="chat-toolbar-btn" title="New Chat" onClick={handleNewChat}>
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="15" height="15">
-                                <line x1="12" y1="5" x2="12" y2="19" />
-                                <line x1="5" y1="12" x2="19" y2="12" />
-                            </svg>
-                        </button>
-                        <button className="chat-toolbar-btn" title="Chat History" onClick={() => setShowHistory((v) => !v)}>
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="15" height="15">
-                                <circle cx="12" cy="12" r="10" />
-                                <polyline points="12 6 12 12 16 14" />
-                            </svg>
-                        </button>
-                    </div>
-                )}
+                {isExpanded && chatToolbar}
                 <svg id="chat-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <polyline points="18 15 12 9 6 15" />
                 </svg>
