@@ -702,6 +702,7 @@ function OverviewTab({ parcel, zoning, onUploadComplete, infraData, infraLoading
             <ReviewNotesCard zoning={zoning} />
             <ServicingSummaryCard infraData={infraData} infraLoading={infraLoading}
                                   parcelCentroid={infraData?.centroid} />
+            <FileUploadZone onUploadComplete={onUploadComplete} />
         </>
     );
 }
