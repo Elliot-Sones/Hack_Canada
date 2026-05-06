@@ -1,6 +1,6 @@
 # Railway config — Next.js frontend service
 [build]
-dockerfilePath = "Dockerfile"
+dockerfilePath = "/frontend/Dockerfile"
 
 [deploy]
 startCommand = "node server.js"
