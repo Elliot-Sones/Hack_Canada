@@ -126,13 +126,14 @@ async def get_current_user(
 
 
 async def get_optional_user(
+    request: Request,
     authorization: str | None = Header(None),
     db: AsyncSession = Depends(get_db_session),
 ) -> dict | None:
     if not authorization:
         return None
     try:
-        return await get_current_user(authorization, db)
+        return await get_current_user(request=request, authorization=authorization, db=db)
     except HTTPException:
         return None
 

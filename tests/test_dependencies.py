@@ -5,7 +5,9 @@ from fastapi import HTTPException
 from jose import jwt
 
 from app.config import settings
-from app.dependencies import get_current_user
+from starlette.requests import Request
+
+from app.dependencies import get_current_user, get_optional_user
 from app.models.tenant import User, WorkspaceMember
 
 
@@ -41,6 +43,10 @@ def _make_token(user_id: uuid.UUID, **claims) -> str:
     return jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
 
 
+def _make_request() -> Request:
+    return Request({"type": "http", "headers": [], "client": ("testclient", 50000)})
+
+
 @pytest.mark.asyncio
 async def test_get_current_user_uses_database_membership_role():
     user_id = uuid.uuid4()
@@ -51,7 +57,7 @@ async def test_get_current_user_uses_database_membership_role():
         ScalarsResult([WorkspaceMember(user_id=user_id, organization_id=organization_id, role="analyst")]),
     )
 
-    current_user = await get_current_user(authorization=f"Bearer {token}", db=db)
+    current_user = await get_current_user(request=_make_request(), authorization=f"Bearer {token}", db=db)
 
     assert current_user == {
         "id": user_id,
@@ -76,7 +82,34 @@ async def test_get_current_user_requires_org_claim_for_multi_org_users():
     )
 
     with pytest.raises(HTTPException) as exc_info:
-        await get_current_user(authorization=f"Bearer {token}", db=db)
+        await get_current_user(request=_make_request(), authorization=f"Bearer {token}", db=db)
 
     assert exc_info.value.status_code == 403
     assert exc_info.value.detail == "Token must include organization_id when user belongs to multiple organizations"
+
+
+@pytest.mark.asyncio
+async def test_get_optional_user_passes_request_authorization_and_db_to_current_user():
+    user_id = uuid.uuid4()
+    organization_id = uuid.uuid4()
+    token = _make_token(user_id)
+    db = DummyAsyncSession(
+        ScalarOneResult(User(id=user_id, email="user@example.com", name="Test User", is_active=True)),
+        ScalarsResult([WorkspaceMember(user_id=user_id, organization_id=organization_id, role="analyst")]),
+    )
+
+    current_user = await get_optional_user(request=_make_request(), authorization=f"Bearer {token}", db=db)
+
+    assert current_user == {
+        "id": user_id,
+        "email": "user@example.com",
+        "organization_id": organization_id,
+        "role": "analyst",
+    }
+
+
+@pytest.mark.asyncio
+async def test_get_optional_user_returns_none_for_invalid_authorization_header():
+    current_user = await get_optional_user(request=_make_request(), authorization="Bearer invalid-token", db=DummyAsyncSession())
+
+    assert current_user is None
